@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BlogHub — Overview</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            surface: '#0f1117',
+            panel:   '#181c27',
+            border:  '#252a38',
+            muted:   '#5a6080',
+            text:    '#c9cfe0',
+            bright:  '#e8eaf2',
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    body { background: #0f1117; color: #c9cfe0; }
+
+    /* Status pill colours */
+    .pill-draft     { background: #1e2a4a; color: #6ea8fe; border: 1px solid #2a3d6a; }
+    .pill-ready     { background: #0e2d22; color: #4ade80; border: 1px solid #1a4d35; }
+    .pill-error     { background: #2d1a1a; color: #f87171; border: 1px solid #4d2a2a; }
+    .pill-pending   { background: #2a2510; color: #fbbf24; border: 1px solid #4a3d1a; }
+    .pill-published { background: #0d2830; color: #38bdf8; border: 1px solid #1a3d4a; }
+    .pill-none      { background: #1a1e2a; color: #5a6080; border: 1px solid #252a38; }
+
+    /* Row hover */
+    .article-row { transition: background 120ms; cursor: pointer; }
+    .article-row:hover { background: #1c2132; }
+    .article-row.selected { background: #1e2540; border-left: 2px solid #6366f1; }
+
+    /* Sidebar panel */
+    #side-panel { transition: opacity 160ms; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #252a38; border-radius: 3px; }
+  </style>
+</head>
+<body class="font-sans h-screen flex flex-col overflow-hidden">
+
+  <!-- Top nav -->
+  <nav class="flex items-center justify-between px-5 h-12 border-b border-border shrink-0" style="background:#13172000; backdrop-filter:blur(8px); border-color:#252a38;">
+    <div class="flex items-center gap-6">
+      <span class="text-bright font-semibold tracking-tight text-sm">BlogHub</span>
+      <div class="flex items-center gap-1 text-xs">
+        <a href="#" class="px-3 py-1.5 rounded text-bright bg-border font-medium">Articles</a>
+        <a href="#" class="px-3 py-1.5 rounded text-muted hover:text-text">Queue</a>
+        <a href="#" class="px-3 py-1.5 rounded text-muted hover:text-text">Platforms</a>
+        <a href="#" class="px-3 py-1.5 rounded text-muted hover:text-text">Settings</a>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <!-- Global status -->
+      <div class="flex items-center gap-1.5 text-xs text-muted">
+        <span class="w-1.5 h-1.5 rounded-full bg-green-400 inline-block"></span>
+        3 platforms connected
+      </div>
+      <!-- New article -->
+      <button class="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md text-white" style="background:#6366f1;">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+        New article
+      </button>
+    </div>
+  </nav>
+
+  <!-- Body: filter bar + table + side panel -->
+  <div class="flex flex-1 overflow-hidden">
+
+    <!-- Main area -->
+    <div class="flex flex-col flex-1 overflow-hidden">
+
+      <!-- Filter bar -->
+      <div class="flex items-center gap-3 px-5 py-3 border-b border-border shrink-0" style="border-color:#252a38;">
+        <!-- Search -->
+        <div class="relative">
+          <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path stroke-linecap="round" d="m21 21-4.35-4.35"/></svg>
+          <input type="text" placeholder="Search articles…" class="pl-8 pr-3 py-1.5 rounded-md text-xs bg-panel border border-border text-text placeholder-muted focus:outline-none focus:border-indigo-500 w-52" style="border-color:#252a38;" />
+        </div>
+
+        <!-- Status filters -->
+        <div class="flex items-center gap-1 text-xs">
+          <button class="px-2.5 py-1 rounded text-bright bg-border font-medium">All</button>
+          <button class="px-2.5 py-1 rounded text-muted hover:text-text">Drafting</button>
+          <button class="px-2.5 py-1 rounded text-muted hover:text-text">Ready</button>
+          <button class="px-2.5 py-1 rounded text-muted hover:text-text">Error</button>
+          <button class="px-2.5 py-1 rounded text-muted hover:text-text">Published</button>
+        </div>
+
+        <div class="w-px h-4 bg-border mx-1" style="background:#252a38;"></div>
+
+        <!-- Platform filters -->
+        <div class="flex items-center gap-1.5 text-xs">
+          <span class="text-muted">Platforms:</span>
+          <button class="px-2.5 py-1 rounded border text-text" style="border-color:#3a3f52; background:#1a1e2a;">Medium</button>
+          <button class="px-2.5 py-1 rounded border text-muted hover:text-text" style="border-color:#252a38;">Hashnode</button>
+          <button class="px-2.5 py-1 rounded border text-muted hover:text-text" style="border-color:#252a38;">Dev.to</button>
+        </div>
+
+        <div class="ml-auto flex items-center gap-2 text-xs text-muted">
+          <span>12 articles</span>
+        </div>
+      </div>
+
+      <!-- Table -->
+      <div class="flex-1 overflow-y-auto">
+        <table class="w-full text-xs border-collapse">
+          <thead>
+            <tr class="border-b" style="border-color:#252a38; background:#13172060;">
+              <th class="text-left px-5 py-2.5 text-muted font-medium w-8">
+                <input type="checkbox" class="rounded" style="accent-color:#6366f1;" />
+              </th>
+              <th class="text-left px-2 py-2.5 text-muted font-medium">Title</th>
+              <th class="text-left px-4 py-2.5 text-muted font-medium w-24">Updated</th>
+              <th class="text-center px-4 py-2.5 text-muted font-medium w-28">Medium</th>
+              <th class="text-center px-4 py-2.5 text-muted font-medium w-28">Hashnode</th>
+              <th class="text-center px-4 py-2.5 text-muted font-medium w-28">Dev.to</th>
+              <th class="text-center px-4 py-2.5 text-muted font-medium w-16">Gate</th>
+            </tr>
+          </thead>
+          <tbody id="article-table">
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Side panel -->
+    <div id="side-panel" class="w-72 shrink-0 border-l flex flex-col opacity-0 pointer-events-none" style="border-color:#252a38; background:#13172080;">
+      <div class="px-4 py-3 border-b flex items-center justify-between" style="border-color:#252a38;">
+        <span class="text-xs font-medium text-bright" id="panel-title">—</span>
+        <button onclick="closePanel()" class="text-muted hover:text-text">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Article meta -->
+      <div class="px-4 py-3 border-b" style="border-color:#252a38;">
+        <div class="text-muted text-xs mb-2 font-medium uppercase tracking-wider">Destinations</div>
+        <div id="panel-destinations" class="flex flex-col gap-2"></div>
+      </div>
+
+      <!-- Timeline -->
+      <div class="px-4 py-3 flex-1 overflow-y-auto">
+        <div class="text-muted text-xs mb-2 font-medium uppercase tracking-wider">Timeline</div>
+        <div id="panel-timeline" class="flex flex-col gap-2"></div>
+      </div>
+
+      <!-- Actions -->
+      <div class="px-4 py-3 border-t flex flex-col gap-2" style="border-color:#252a38;">
+        <button class="text-xs font-medium py-2 rounded-md text-white text-center" style="background:#6366f1;">Push drafts</button>
+        <div class="flex gap-2">
+          <button class="flex-1 text-xs py-1.5 rounded-md text-text border text-center" style="border-color:#252a38;">Edit</button>
+          <button class="flex-1 text-xs py-1.5 rounded-md text-text border text-center" style="border-color:#252a38;">Inspect</button>
+          <button class="flex-1 text-xs py-1.5 rounded-md text-text border text-center" style="border-color:#252a38;">Schedule</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const ARTICLES = [
+  {
+    id: 1,
+    title: 'Building a Vector DB from Scratch with pgvector',
+    updated: '2h ago',
+    medium:   { status: 'draft',     label: 'Draft v2' },
+    hashnode: { status: 'pending',   label: 'Pending' },
+    devto:    { status: 'draft',     label: 'Draft v1' },
+    gate:     'pass',
+    timeline: [
+      { time: '14:02', event: 'Draft pushed to Medium' },
+      { time: '14:05', event: 'Inspection passed (gate: pass)' },
+      { time: '15:30', event: 'Hashnode queued for 09:00 tomorrow' },
+    ]
+  },
+  {
+    id: 2,
+    title: 'RAG Pipeline with Neo4j and LangChain',
+    updated: '1d ago',
+    medium:   { status: 'review',    label: 'Needs review' },
+    hashnode: { status: 'draft',     label: 'Draft v1' },
+    devto:    { status: 'error',     label: 'Error' },
+    gate:     'warn',
+    timeline: [
+      { time: 'Apr 1', event: 'Draft created (Medium, Hashnode)' },
+      { time: 'Apr 1', event: 'Dev.to push failed — code block split' },
+      { time: 'Apr 1', event: 'Inspection flagged: 2 issues' },
+    ]
+  },
+  {
+    id: 3,
+    title: 'Dockerised Postgres: Production Checklist',
+    updated: '3d ago',
+    medium:   { status: 'published', label: 'Published' },
+    hashnode: { status: 'published', label: 'Published' },
+    devto:    { status: 'published', label: 'Published' },
+    gate:     'pass',
+    timeline: [
+      { time: 'Mar 30', event: 'Published to Medium' },
+      { time: 'Mar 30', event: 'Published to Hashnode' },
+      { time: 'Mar 31', event: 'Published to Dev.to' },
+    ]
+  },
+  {
+    id: 4,
+    title: 'Graph Neural Networks: A Practical Intro',
+    updated: '5d ago',
+    medium:   { status: 'draft',     label: 'Draft v1' },
+    hashnode: { status: 'none',      label: '—' },
+    devto:    { status: 'none',      label: '—' },
+    gate:     'pending',
+    timeline: [
+      { time: 'Mar 28', event: 'Article created' },
+      { time: 'Mar 28', event: 'Draft pushed to Medium' },
+    ]
+  },
+  {
+    id: 5,
+    title: 'Zero-downtime Postgres Migrations',
+    updated: '1w ago',
+    medium:   { status: 'ready',     label: 'Ready' },
+    hashnode: { status: 'ready',     label: 'Ready' },
+    devto:    { status: 'ready',     label: 'Ready' },
+    gate:     'pass',
+    timeline: [
+      { time: 'Mar 25', event: 'All drafts validated' },
+      { time: 'Mar 25', event: 'Scheduled: Apr 4 09:00' },
+    ]
+  },
+  {
+    id: 6,
+    title: 'Embedding Models Compared: OpenAI vs Cohere vs BGE',
+    updated: '1w ago',
+    medium:   { status: 'error',     label: 'Error' },
+    hashnode: { status: 'draft',     label: 'Draft v1' },
+    devto:    { status: 'none',      label: '—' },
+    gate:     'fail',
+    timeline: [
+      { time: 'Mar 24', event: 'Medium push failed (auth expired)' },
+      { time: 'Mar 24', event: 'Gate check: FAIL — missing tail section' },
+    ]
+  },
+];
+
+const PILL = {
+  draft:     'pill-draft',
+  review:    'pill-pending',
+  ready:     'pill-ready',
+  error:     'pill-error',
+  published: 'pill-published',
+  pending:   'pill-pending',
+  none:      'pill-none',
+};
+
+const GATE = {
+  pass:    ['text-green-400', '✓ Pass'],
+  warn:    ['text-yellow-400', '⚠ Warn'],
+  fail:    ['text-red-400', '✗ Fail'],
+  pending: ['text-muted', '—'],
+};
+
+let selectedId = null;
+
+function pill(status, label) {
+  return `<span class="pill ${PILL[status] || 'pill-none'} px-2 py-0.5 rounded-full text-xs font-mono whitespace-nowrap">${label}</span>`;
+}
+
+function renderTable() {
+  const tbody = document.getElementById('article-table');
+  tbody.innerHTML = ARTICLES.map(a => {
+    const [gc, gl] = GATE[a.gate] || ['text-muted', '—'];
+    return `
+    <tr class="article-row border-b ${selectedId === a.id ? 'selected' : ''}" style="border-color:#1c2132;" onclick="selectArticle(${a.id})">
+      <td class="px-5 py-3">
+        <input type="checkbox" class="rounded" style="accent-color:#6366f1;" onclick="event.stopPropagation()" />
+      </td>
+      <td class="px-2 py-3">
+        <div class="text-text font-medium leading-tight">${a.title}</div>
+      </td>
+      <td class="px-4 py-3 text-muted font-mono whitespace-nowrap">${a.updated}</td>
+      <td class="px-4 py-3 text-center">${pill(a.medium.status, a.medium.label)}</td>
+      <td class="px-4 py-3 text-center">${pill(a.hashnode.status, a.hashnode.label)}</td>
+      <td class="px-4 py-3 text-center">${pill(a.devto.status, a.devto.label)}</td>
+      <td class="px-4 py-3 text-center font-mono ${gc}">${gl}</td>
+    </tr>`;
+  }).join('');
+}
+
+function selectArticle(id) {
+  selectedId = id;
+  renderTable();
+
+  const a = ARTICLES.find(x => x.id === id);
+  const panel = document.getElementById('side-panel');
+  panel.classList.remove('opacity-0', 'pointer-events-none');
+
+  document.getElementById('panel-title').textContent = a.title;
+
+  // Destinations
+  document.getElementById('panel-destinations').innerHTML = [
+    ['Medium',   a.medium],
+    ['Hashnode', a.hashnode],
+    ['Dev.to',   a.devto],
+  ].map(([name, d]) => `
+    <div class="flex items-center justify-between">
+      <span class="text-text">${name}</span>
+      ${pill(d.status, d.label)}
+    </div>
+  `).join('');
+
+  // Timeline
+  document.getElementById('panel-timeline').innerHTML = a.timeline.map(t => `
+    <div class="flex gap-2">
+      <span class="text-muted font-mono whitespace-nowrap w-14 shrink-0">${t.time}</span>
+      <span class="text-text leading-snug">${t.event}</span>
+    </div>
+  `).join('');
+}
+
+function closePanel() {
+  selectedId = null;
+  renderTable();
+  document.getElementById('side-panel').classList.add('opacity-0', 'pointer-events-none');
+}
+
+renderTable();
+</script>
+</body>
+</html>

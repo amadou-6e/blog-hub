@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>BlogHub — Editor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config={theme:{extend:{colors:{surface:'#0f1117',panel:'#181c27',border:'#252a38','border-hi':'#3a3f52',muted:'#5a6080',text:'#c9cfe0',bright:'#e8eaf2',accent:'#6366f1'},fontFamily:{sans:['Inter','system-ui','sans-serif'],mono:['JetBrains Mono','monospace']}}}}</script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <style>
+    *{box-sizing:border-box}
+    body{margin:0;background:#0f1117;color:#c9cfe0;height:100vh;display:flex;flex-direction:column;overflow:hidden;font-family:'Inter',sans-serif}
+    ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-thumb{background:#252a38;border-radius:3px}::-webkit-scrollbar-track{background:transparent}
+    @keyframes spin{to{transform:rotate(360deg)}}.spin{animation:spin 1s linear infinite;display:inline-block}
+
+    .icon-btn{width:30px;height:28px;border-radius:5px;border:1px solid transparent;background:transparent;color:#c9cfe0;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:background 100ms,border-color 100ms}
+    .icon-btn:hover{background:#1c2132;border-color:#252a38}
+    .icon-btn.on{background:#1a1f38;border-color:#6366f1;color:#a5b4fc}
+
+    .ai-btn{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 9px;border-radius:5px;border:1px solid #252a38;background:transparent;color:#c9cfe0;cursor:pointer;transition:background 100ms,border-color 100ms}
+    .ai-btn:hover{background:#1c2132;border-color:#3a3f52}
+    .ai-btn.hl{border-color:#2a2e50;background:#1a1f38;color:#a5b4fc}
+    .ai-btn.hl:hover{border-color:#6366f1;background:#20264a}
+    .ai-btn.warn{color:#fbbf24;border-color:#4a3d1a;background:transparent}
+
+    .nav-btn{font-size:12px;padding:5px 12px;border-radius:6px;border:1px solid #252a38;background:transparent;color:#c9cfe0;cursor:pointer;transition:background 100ms}
+    .nav-btn:hover{background:#1c2132}
+    .nav-btn.accent{border-color:#4a3f70;color:#a5b4fc;background:#1a1f38}
+    .nav-btn.accent:hover{border-color:#6366f1;background:#20264a}
+
+    .acc-hdr{display:flex;align-items:center;gap:7px;padding:9px 12px;font-size:12px;font-weight:500;color:#c9cfe0;cursor:pointer;user-select:none;border-bottom:1px solid #252a38;transition:background 80ms;flex-shrink:0;}
+    .acc-hdr:hover{background:#1c2132}
+    .acc-chev{flex-shrink:0;color:#5a6080;transition:transform 150ms;}
+    .acc-chev.closed{transform:rotate(-90deg);}
+    .acc-body{border-bottom:1px solid #252a38;padding:12px;}
+
+    .pill{display:inline-flex;align-items:center;font-family:'JetBrains Mono',monospace;font-size:11px;border-radius:9999px;padding:2px 9px;border:1px solid;white-space:nowrap}
+    .s-draft{color:#6ea8fe;background:#1e2a4a;border-color:#2a3d6a}
+    .s-error{color:#f87171;background:#2d1a1a;border-color:#4d2a2a}
+    .s-none{color:#5a6080;background:#1a1e2a;border-color:#252a38}
+
+    #raw-editor{width:100%;flex:1;padding:24px 28px 60px;background:transparent;border:none;outline:none;resize:none;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.85;color:#c9cfe0;overflow-y:auto;tab-size:2}
+
+    .rendered-preview h1{font-size:17px;font-weight:700;color:#e8eaf2;margin:0 0 12px;line-height:1.3}
+    .rendered-preview h2{font-size:14px;font-weight:600;color:#e8eaf2;margin:18px 0 8px;line-height:1.3}
+    .rendered-preview p{margin:0 0 10px;font-size:13px;line-height:1.7;color:#c9cfe0}
+    .rendered-preview blockquote{margin:0 0 10px;padding:7px 12px;border-left:2px solid #fbbf24;background:#1e1b0e;border-radius:0 4px 4px 0;font-size:12px;color:#c9cfe0}
+    .rendered-preview pre{background:#161a24;border-radius:5px;padding:10px 12px;margin:0 0 10px;overflow:hidden}
+    .rendered-preview code{font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.5;color:#c9cfe0}
+    .kw{color:#a5b4fc}.cm-c{color:#5a6080}
+
+    .chat-msg{display:flex;flex-direction:column;gap:2px;margin-bottom:10px}
+    .bubble{font-size:12px;padding:8px 11px;max-width:95%;line-height:1.55;border-radius:7px;white-space:pre-wrap}
+    .chat-msg.user .bubble{background:#1a1f38;border:1px solid #2a2e50;color:#e8eaf2;align-self:flex-end;border-radius:7px 7px 2px 7px}
+    .chat-msg.bot  .bubble{background:#181c27;border:1px solid #252a38;color:#c9cfe0;font-family:'JetBrains Mono',monospace;font-size:11px;align-self:flex-start;border-radius:7px 7px 7px 2px}
+    .chat-label{font-size:10px;color:#5a6080;padding:0 3px}
+
+    input[type=text]{font-family:'JetBrains Mono',monospace}
+    .diff-removed{background:#2d1a1a;color:#f87171;padding:7px 10px}
+    .diff-added{background:#0e2d22;color:#4ade80;padding:7px 10px}
+
+    #left-panel{flex-shrink:0;border-right:1px solid #252a38;background:#181c27;display:flex;flex-direction:row;overflow:hidden}
+    #panel-strip{width:12px;flex-shrink:0;border-left:1px solid #252a38;display:flex;align-items:center;justify-content:center;cursor:pointer;background:#181c27;transition:background 100ms;}
+    #panel-strip:hover{background:#1e2235}
+    #panel-content{width:260px;flex-shrink:0;overflow-y:auto;}
+
+    #preview-pane{display:flex;flex-direction:row;overflow:hidden;background:#0d1019;flex:1;min-width:12px;}
+    #preview-strip{width:12px;flex-shrink:0;border-right:1px solid #252a38;display:flex;align-items:center;justify-content:center;cursor:pointer;background:#0d1019;transition:background 100ms;}
+    #preview-strip:hover{background:#13161f}
+    #preview-content{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+
+    /* Selection popover */
+    #sel-popover{position:fixed;z-index:60;display:none;align-items:center;gap:2px;background:#1c2035;border:1px solid #3a3f52;border-radius:7px;padding:4px 6px;box-shadow:0 6px 28px #00000088;pointer-events:auto;}
+    #sel-popover::after{content:'';position:absolute;left:50%;bottom:-5px;width:8px;height:8px;background:#1c2035;border-right:1px solid #3a3f52;border-bottom:1px solid #3a3f52;transform:translateX(-50%) rotate(45deg);}
+    .sp-btn{font-size:11px;padding:3px 8px;border-radius:4px;border:none;background:transparent;color:#c9cfe0;cursor:pointer;font-family:inherit;line-height:1.4;}
+    .sp-btn:hover{background:#252a38}
+    .sp-btn.sp-accent{color:#a5b4fc;background:#1a1f3a;border:1px solid #2a2e50;}
+    .sp-btn.sp-accent:hover{background:#20264a;border-color:#6366f1;}
+    .sp-sep{width:1px;height:16px;background:#3a3f52;flex-shrink:0;margin:0 2px;}
+  </style>
+</head>
+<body>
+
+<!-- Selection hover popover -->
+<div id="sel-popover">
+  <button class="sp-btn" onclick="selFormat('**')" title="Bold"><b style="font-size:12px;">B</b></button>
+  <button class="sp-btn" onclick="selFormat('*')" title="Italic"><em style="font-size:12px;">I</em></button>
+  <button class="sp-btn" onclick="selFormat('`')" title="Inline code" style="font-family:'JetBrains Mono',monospace;font-size:10px;">code</button>
+  <div class="sp-sep"></div>
+  <button class="sp-btn sp-accent" onclick="addCommentFromSel()">
+    <svg style="display:inline-block;vertical-align:-1px;" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    Add comment
+  </button>
+</div>
+
+<!-- Generation overlay -->
+<div id="gen-overlay" style="display:none;position:fixed;inset:0;z-index:100;background:rgba(15,17,23,.88);backdrop-filter:blur(5px);align-items:center;justify-content:center;">
+  <div style="background:#181c27;border:1px solid #3a3f52;border-radius:12px;padding:26px 28px;min-width:300px;box-shadow:0 16px 48px #00000077;">
+    <div style="display:flex;align-items:center;gap:10px;color:#e8eaf2;font-weight:500;font-size:14px;margin-bottom:18px;">
+      <svg class="spin" width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#6366f144" stroke-width="3"/><path d="M12 2a10 10 0 0 1 10 10" stroke="#6366f1" stroke-width="3" stroke-linecap="round"/></svg>
+      Reviewing and regenerating
+    </div>
+    <div style="display:flex;flex-direction:column;gap:11px;font-size:13px;margin-bottom:20px;">
+      <div style="display:flex;align-items:center;gap:9px;"><span style="width:7px;height:7px;border-radius:50%;background:#4ade80;flex-shrink:0;"></span><span style="color:#4ade80;">Parsing comments</span></div>
+      <div style="display:flex;align-items:center;gap:9px;"><svg class="spin" width="11" height="11" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;"><circle cx="12" cy="12" r="10" stroke="#6366f144" stroke-width="3"/><path d="M12 2a10 10 0 0 1 10 10" stroke="#6366f1" stroke-width="3" stroke-linecap="round"/></svg><span style="color:#e8eaf2;">Generating patches</span></div>
+      <div style="display:flex;align-items:center;gap:9px;"><span style="width:7px;height:7px;border-radius:50%;background:#252a38;flex-shrink:0;"></span><span style="color:#5a6080;">Syncing destinations</span></div>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button onclick="finishReview()" style="font-size:12px;padding:6px 14px;border-radius:6px;background:#6366f1;border:none;color:#fff;cursor:pointer;">Done — view patches</button>
+      <button onclick="document.getElementById('gen-overlay').style.display='none'" style="font-size:12px;padding:6px 12px;border-radius:6px;background:transparent;border:1px solid #252a38;color:#c9cfe0;cursor:pointer;">Dismiss</button>
+    </div>
+  </div>
+</div>
+
+<!-- Zone A: Nav -->
+<div style="height:48px;background:#0f1117;border-bottom:1px solid #252a38;display:flex;align-items:center;padding:0 14px;gap:8px;flex-shrink:0;z-index:30;">
+  <button class="icon-btn" title="Back to overview" style="color:#5a6080;">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+  </button>
+  <div style="display:flex;align-items:center;gap:7px;flex:1;min-width:0;">
+    <span id="article-title" contenteditable="true" oninput="onInput()"
+      style="font-size:14px;font-weight:500;color:#e8eaf2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:420px;outline:none;padding-bottom:1px;border-bottom:1px solid transparent;cursor:text;"
+      onfocus="this.style.borderBottomColor='#252a38'" onblur="this.style.borderBottomColor='transparent'">Zero-downtime Postgres Migration</span>
+    <div id="save-indicator" style="flex-shrink:0;display:flex;align-items:center;"></div>
+  </div>
+  <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+    <button class="nav-btn accent" onclick="showReview()">Review</button>
+    <button class="nav-btn" onclick="alert('→ /inspect/'+ARTICLE.id)">Inspect</button>
+    <button style="font-size:12px;padding:5px 14px;border-radius:6px;border:none;background:#6366f1;color:#fff;cursor:pointer;font-weight:500;">Publish</button>
+  </div>
+</div>
+
+<!-- Zone B: Toolbar -->
+<div style="border-bottom:1px solid #252a38;flex-shrink:0;">
+  <!-- AI strip (always shown once editor has content) -->
+  <div style="background:#16192a;border-bottom:1px solid #2a2e50;padding:4px 12px;display:flex;align-items:center;gap:4px;">
+    <span style="font-size:9px;color:#6366f1;font-weight:600;letter-spacing:.09em;text-transform:uppercase;margin-right:3px;">AI</span>
+    <button class="ai-btn hl" onclick="showReview()">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Regenerate
+    </button>
+    <button class="ai-btn" onclick="openSection('patches')">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>View Diff
+    </button>
+    <button class="ai-btn">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>Revert
+    </button>
+    <button class="ai-btn" onclick="openSection('chat')">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Chat
+    </button>
+    <button class="ai-btn" onclick="openSection('rules')">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>Rules
+    </button>
+  </div>
+  <!-- Format row -->
+  <div style="background:#0f1117;padding:3px 12px;display:flex;align-items:center;gap:2px;">
+    <button class="icon-btn" title="Bold"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 4h8a4 4 0 0 1 0 8H6z"/><path d="M6 12h9a4 4 0 0 1 0 8H6z"/></svg></button>
+    <button class="icon-btn" title="Italic"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg></button>
+    <button class="icon-btn" title="Code"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></button>
+    <button class="icon-btn" title="H2" style="font-size:10px;font-weight:700;width:34px;">H2</button>
+    <button class="icon-btn" title="H3" style="font-size:10px;font-weight:700;width:34px;">H3</button>
+    <button class="icon-btn" title="Blockquote"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/></svg></button>
+    <button class="icon-btn" title="Link"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
+    <button class="icon-btn" title="Image"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button>
+    <div style="width:1px;height:16px;background:#252a38;margin:0 6px;"></div>
+    <button class="ai-btn warn" onclick="insertCommentCmd()">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>+ Comment
+    </button>
+    <span style="font-size:10px;color:#3a3f52;margin-left:5px;">or type <code style="font-family:'JetBrains Mono',monospace;color:#5a6080;">/comment your note</code> on a new line</span>
+  </div>
+</div>
+
+<!-- Zone C/D/E: Main area -->
+<div style="flex:1;display:flex;overflow:hidden;min-height:0;">
+
+  <!-- Left panel -->
+  <div id="left-panel">
+    <!-- Panel content: accordion sections -->
+    <div id="panel-content">
+
+      <div class="acc-section">
+        <div class="acc-hdr" onclick="toggleSection('comments')">
+          <svg class="acc-chev" id="achev-comments" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+          <span style="flex:1;">Comments</span>
+          <span id="acount-comments" style="font-size:10px;color:#5a6080;font-family:'JetBrains Mono',monospace;">3</span>
+        </div>
+        <div class="acc-body" id="abody-comments"></div>
+      </div>
+
+      <div class="acc-section">
+        <div class="acc-hdr" onclick="toggleSection('patches')">
+          <svg class="acc-chev closed" id="achev-patches" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+          <span style="flex:1;">Patches</span>
+          <span id="patch-badge" style="font-size:10px;background:#2a2e50;color:#a5b4fc;border-radius:9999px;padding:1px 6px;font-family:'JetBrains Mono',monospace;">1</span>
+        </div>
+        <div class="acc-body" id="abody-patches" style="display:none;"></div>
+      </div>
+
+      <div class="acc-section">
+        <div class="acc-hdr" onclick="toggleSection('destinations')">
+          <svg class="acc-chev closed" id="achev-destinations" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+          <span>Destinations</span>
+        </div>
+        <div class="acc-body" id="abody-destinations" style="display:none;"></div>
+      </div>
+
+      <div class="acc-section">
+        <div class="acc-hdr" onclick="toggleSection('chat')">
+          <svg class="acc-chev closed" id="achev-chat" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+          <span>Chat</span>
+        </div>
+        <div class="acc-body" id="abody-chat" style="display:none;"></div>
+      </div>
+
+      <div class="acc-section">
+        <div class="acc-hdr" onclick="toggleSection('rules')">
+          <svg class="acc-chev closed" id="achev-rules" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+          <span>Rules</span>
+        </div>
+        <div class="acc-body" id="abody-rules" style="display:none;"></div>
+      </div>
+
+    </div>
+    <!-- Inner collapse strip (right edge, close to editor) -->
+    <div id="panel-strip" onclick="toggleLeft()" title="Toggle panel">
+      <svg id="strip-arrow" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#5a6080" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+    </div>
+  </div>
+
+  <!-- Editor pane -->
+  <div style="flex:1;min-width:320px;display:flex;flex-direction:column;overflow:hidden;border-right:1px solid #252a38;">
+    <div style="padding:4px 12px;background:#0d1019;border-bottom:1px solid #252a38;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+      <span style="font-size:10px;color:#5a6080;font-family:'JetBrains Mono',monospace;">postgres-migration.md</span>
+      <span id="word-count" style="font-size:10px;color:#3a3f52;">1 844 words</span>
+    </div>
+    <textarea id="raw-editor" oninput="onInput()" spellcheck="false"></textarea>
+  </div>
+
+  <!-- Preview pane (flex 1) -->
+  <div id="preview-pane">
+    <!-- Strip on left edge, touching the editor -->
+    <div id="preview-strip" onclick="togglePreview()" title="Toggle preview">
+      <svg id="preview-arrow" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#5a6080" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+    </div>
+    <!-- Preview content -->
+    <div id="preview-content">
+      <div style="padding:5px 10px;border-bottom:1px solid #252a38;background:#13161f;display:flex;align-items:center;gap:8px;flex-shrink:0;">
+        <select id="preview-sel" onchange="renderPreview()" style="font-size:11px;background:#0f1117;border:1px solid #3a3f52;border-radius:4px;color:#a5b4fc;padding:2px 6px;outline:none;cursor:pointer;">
+          <option value="rendered" selected>Rendered MD</option>
+          <option value="medium">Medium</option>
+          <option value="hashnode">Hashnode</option>
+          <option value="devto">Dev.to</option>
+        </select>
+        <a id="ext-link" href="#" onclick="return false" style="display:none;font-size:11px;color:#6366f1;text-decoration:none;white-space:nowrap;" title="Open in browser">visit ↗</a>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:4px;">
+          <button onclick="renderPreview()" title="Reload draft" style="height:24px;padding:0 9px;border-radius:4px;border:1px solid #3a3f52;background:#1c2035;color:#c9cfe0;cursor:pointer;display:inline-flex;align-items:center;gap:5px;font-size:11px;font-family:inherit;">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>Reload draft
+          </button>
+        </div>
+      </div>
+      <div id="preview-body" style="flex:1;overflow-y:auto;padding:14px 14px 40px;"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Data ─────────────────────────────────────────────────────────────────────
+const ARTICLE = { id: 'art_7g2kf' };
+
+const DESTINATIONS = [
+  { id:'medium',   platform:'Medium',   status:'draft', label:'Draft v2', url:'medium.com/p/ab3f9c2', error:null },
+  { id:'hashnode', platform:'Hashnode', status:'error', label:'Error',    url:null, error:'Auth token expired' },
+  { id:'devto',    platform:'Dev.to',   status:'none',  label:'Not linked', url:null, error:null },
+];
+
+let COMMENTS = [
+  { id:'c1', author:'Mina', time:'31m ago', text:'Worth linking to the post-mortem for context.', resolved:true, hasPatch:false },
+  { id:'c2', author:'Dana', time:'14m ago', text:'Why is lock timeout set to 5 s exactly? SLO-based?', resolved:false, hasPatch:false },
+  { id:'c3', author:'You',  time:'2m ago',  text:'Health checks: add Q1 benchmark ref.', resolved:false, hasPatch:true },
+];
+
+const PATCHES = [
+  { id:'p1', label:'Health check detail',
+    removed:'Health checks must run before and after each migration step.',
+    added:'Health checks must run before, during, and after each migration step — verify replica lag under 200 ms and lock count below threshold.' },
+];
+
+const CHAT_HISTORY = [
+  { role:'bot', text:'$ bloghub chat --article art_7g2kf\nConnected. Type a command or question.' },
+  { role:'user', text:'check destinations' },
+  { role:'bot', text:'$ bloghub destinations status\nmedium   → draft (ab3f9c2)\nhashnode → error: auth token expired\ndevto    → not linked' },
+];
+
+const CLI = {
+  'help':                 'Commands:\n  destinations status\n  comment list\n  patch apply <id>\n  regenerate\n  inspect',
+  'destinations status':  'medium   → draft (ab3f9c2)\nhashnode → error: auth token expired\ndevto    → not linked',
+  'comment list':         'c1 [resolved] Mina: Worth linking to post-mortem\nc2 [open]     Dana: Lock timeout — why 5 s?\nc3 [patch]    You:  Health checks Q1 ref',
+  'regenerate':           'Starting job_k9x2m...\nParsing 3 comments...  done\nGenerating patches...  1 created\nRun \"patch apply p1\" to accept.',
+  'inspect':              'Running gate on art_7g2kf...\n  word_count:   1844  PASS\n  readability:  68.2  PASS\n  code_blocks:  2     PASS\n  destinations: 1/3   WARN\nGate: PASS WITH WARNINGS',
+  'patch apply p1':       'Patch p1 applied. Article updated.',
+};
+
+const INITIAL_CONTENT = `# Zero-downtime Postgres Migration
+
+Migrating a production Postgres database without downtime requires careful coordination between schema changes, application deployments, and traffic routing. This guide walks through the three-phase approach used to migrate the primary \`orders\` database at 40k requests per minute.
+
+## Phase 1 — Baseline and snapshot
+
+Before touching any schema, capture a full logical backup and establish your rollback threshold: the maximum time your team can tolerate for a full restore.
+
+> A dry run in staging is mandatory before any production step. Skipping this has caused three incidents in our post-mortem history.
+
+## Phase 2 — Schema expansion
+
+Add columns with defaults before deploying application code that reads them.
+
+\`\`\`sql
+-- Safe: add nullable column first
+ALTER TABLE orders ADD COLUMN retry_count INTEGER;
+
+-- Backfill in batches
+UPDATE orders SET retry_count = 0 WHERE retry_count IS NULL;
+
+-- Enforce NOT NULL
+ALTER TABLE orders ALTER COLUMN retry_count SET NOT NULL;
+\`\`\`
+
+## Phase 3 — Cutover
+
+Use a blue-green deployment. Health checks must run before and after each migration step. Lock timeout should be set to 5 seconds to prevent a hung migration cascading into a queue backup.
+
+\`\`\`sql
+CREATE INDEX CONCURRENTLY idx_orders_retry ON orders(retry_count);
+\`\`\`
+
+Running this during low-traffic hours further reduces load impact.`;
+
+// ── State ─────────────────────────────────────────────────────────────────────
+const accOpen = { comments:true, patches:false, destinations:false, chat:false, rules:false };
+let leftOpen = true;
+let previewOpen = true;
+let patchStates = { p1: 'pending' };
+let commentN = 4;
+let saveTimer = null;
+
+// ── Unsaved indicator ─────────────────────────────────────────────────────────
+function setSave(s) {
+  const el = document.getElementById('save-indicator');
+  if (s === 'unsaved') el.innerHTML = `<span style="width:7px;height:7px;border-radius:50%;background:#fbbf24;display:block;" title="Unsaved"></span>`;
+  else if (s === 'saving') el.innerHTML = `<svg class="spin" width="12" height="12" viewBox="0 0 24 24" fill="none" title="Saving"><circle cx="12" cy="12" r="10" stroke="#fbbf2440" stroke-width="3"/><path d="M12 2a10 10 0 0 1 10 10" stroke="#fbbf24" stroke-width="3" stroke-linecap="round"/></svg>`;
+  else el.innerHTML = `<span style="font-size:10px;color:#5a6080;font-family:'JetBrains Mono',monospace;" title="Saved">saved</span>`;
+}
+
+// ── Editor input ──────────────────────────────────────────────────────────────
+function onInput() {
+  setSave('unsaved');
+  clearTimeout(saveTimer);
+
+  // detect /comment command
+  const ta = document.getElementById('raw-editor');
+  const lines = ta.value.split('\n');
+  let changed = false;
+  const out = lines.map(line => {
+    const m = line.match(/^\/comment\s+(.+)$/);
+    if (m) {
+      COMMENTS.push({ id:'c'+commentN++, author:'You', time:'just now', text:m[1], resolved:false, hasPatch:false });
+      changed = true;
+      return `<!-- [comment] ${m[1]} -->`;
+    }
+    return line;
+  });
+  if (changed) {
+    const pos = ta.selectionStart;
+    ta.value = out.join('\n');
+    ta.setSelectionRange(pos, pos);
+    openSection('comments');
+  }
+
+  // update word count
+  const words = ta.value.trim().split(/\s+/).filter(Boolean).length;
+  document.getElementById('word-count').textContent = words.toLocaleString() + ' words';
+
+  saveTimer = setTimeout(() => {
+    setSave('saving');
+    setTimeout(() => setSave('saved'), 900);
+  }, 2000);
+}
+
+function insertCommentCmd() {
+  const ta = document.getElementById('raw-editor');
+  const s = ta.selectionStart;
+  const v = ta.value;
+  const lineStart = v.lastIndexOf('\n', s - 1) + 1;
+  const insert = '\n/comment ';
+  ta.value = v.slice(0, lineStart) + insert + v.slice(lineStart);
+  ta.setSelectionRange(lineStart + insert.length, lineStart + insert.length);
+  ta.focus();
+}
+
+// ── Review / generation overlay ───────────────────────────────────────────────
+function showReview() {
+  document.getElementById('gen-overlay').style.display = 'flex';
+}
+function finishReview() {
+  document.getElementById('gen-overlay').style.display = 'none';
+  openSection('patches');
+}
+
+// ── Left panel accordion ─────────────────────────────────────────────────────
+function toggleSection(id) {
+  accOpen[id] = !accOpen[id];
+  const body = document.getElementById('abody-' + id);
+  const chev = document.getElementById('achev-' + id);
+  body.style.display = accOpen[id] ? '' : 'none';
+  chev.classList.toggle('closed', !accOpen[id]);
+  if (accOpen[id]) renderSection(id);
+}
+
+function openSection(id) {
+  if (!leftOpen) toggleLeft();
+  if (!accOpen[id]) {
+    accOpen[id] = true;
+    document.getElementById('abody-' + id).style.display = '';
+    document.getElementById('achev-' + id).classList.remove('closed');
+  }
+  renderSection(id);
+  document.getElementById('abody-' + id).parentElement.scrollIntoView({ behavior:'smooth', block:'nearest' });
+}
+
+function renderSection(id) {
+  const el = document.getElementById('abody-' + id);
+  if (!el) return;
+  if (id === 'comments')     { el.innerHTML = buildComments(); document.getElementById('acount-comments').textContent = COMMENTS.filter(c=>!c.resolved).length; }
+  else if (id === 'patches')      { el.innerHTML = buildPatches(); updatePatchBadge(); }
+  else if (id === 'destinations') el.innerHTML = buildDestinations();
+  else if (id === 'chat')         { el.innerHTML = buildChat(); const m=document.getElementById('chat-msgs'); if(m) m.scrollTop=9999; }
+  else if (id === 'rules')        el.innerHTML = buildRules();
+}
+
+function toggleLeft() {
+  leftOpen = !leftOpen;
+  document.getElementById('panel-content').style.display = leftOpen ? '' : 'none';
+  const arr = document.getElementById('strip-arrow');
+  arr.innerHTML = leftOpen
+    ? '<polyline points="15 18 9 12 15 6"/>'
+    : '<polyline points="9 18 15 12 9 6"/>';
+}
+
+// ── Preview ───────────────────────────────────────────────────────────────────
+function togglePreview() {
+  previewOpen = !previewOpen;
+  const pane = document.getElementById('preview-pane');
+  const content = document.getElementById('preview-content');
+  const arr = document.getElementById('preview-arrow');
+  if (previewOpen) {
+    pane.style.cssText = 'flex:1;min-width:12px;display:flex;flex-direction:row;overflow:hidden;background:#0d1019;';
+    content.style.display = 'flex';
+    arr.innerHTML = '<polyline points="9 18 15 12 9 6"/>';
+  } else {
+    pane.style.cssText = 'flex:0 0 12px;width:12px;min-width:0;display:flex;flex-direction:row;overflow:hidden;background:#0d1019;';
+    content.style.display = 'none';
+    arr.innerHTML = '<polyline points="15 18 9 12 15 6"/>';
+  }
+}
+
+function renderPreview() {
+  const platform = document.getElementById('preview-sel').value;
+  // Update ext link
+  const extLink = document.getElementById('ext-link');
+  const platformUrls = { medium:'https://medium.com/p/ab3f9c2', hashnode:null, devto:null };
+  const extUrl = platformUrls[platform];
+  if (extUrl) {
+    extLink.style.display = 'inline';
+    extLink.href = extUrl;
+    extLink.title = 'Open in browser: ' + extUrl;
+  } else {
+    extLink.style.display = 'none';
+  }
+  const core = `<div class="rendered-preview">
+    <h1>Zero-downtime Postgres Migration</h1>
+    <p>Migrating a production Postgres database without downtime requires careful coordination between schema changes, application deployments, and traffic routing.</p>
+    <h2>Phase 1 — Baseline and snapshot</h2>
+    <p>Before touching any schema, capture a full logical backup and establish your rollback threshold.</p>
+    <blockquote><p>A dry run in staging is mandatory. Skipping this has caused three incidents in our post-mortem history.</p></blockquote>
+    <h2>Phase 2 — Schema expansion</h2>
+    <pre><code><span class="cm-c">-- Safe: add nullable column first</span>
+<span class="kw">ALTER TABLE</span> orders <span class="kw">ADD COLUMN</span> retry_count <span class="kw">INTEGER</span>;
+<span class="kw">UPDATE</span> orders <span class="kw">SET</span> retry_count = 0 <span class="kw">WHERE</span> retry_count <span class="kw">IS NULL</span>;</code></pre>
+    <h2>Phase 3 — Cutover</h2>
+    <p>Health checks must run before and after each migration step. Lock timeout: 5 seconds.</p>
+    <pre><code><span class="kw">CREATE INDEX CONCURRENTLY</span> idx_orders_retry <span class="kw">ON</span> orders(retry_count);</code></pre>
+  </div>`;
+  const body = document.getElementById('preview-body');
+  if (platform === 'rendered') { body.innerHTML = core; return; }
+  const name = { medium:'Medium', hashnode:'Hashnode', devto:'Dev.to' }[platform];
+  body.innerHTML = `<div style="font-size:10px;color:#5a6080;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;display:flex;align-items:center;gap:6px;"><span style="width:6px;height:6px;border-radius:50%;background:#6366f1;"></span>${name} preview</div>
+    <div style="background:#13161f;border:1px solid #252a38;border-radius:8px;padding:14px;">${core}</div>
+    <div style="margin-top:10px;font-size:11px;color:#5a6080;">Draft synced · last pushed 3 min ago</div>`;
+}
+
+// ── Content builders ──────────────────────────────────────────────────────────
+function buildComments() {
+  if (!COMMENTS.length) return `<div style="font-size:12px;color:#5a6080;text-align:center;padding:24px 0;">No comments yet.<br><span style="font-size:11px;margin-top:4px;display:block;">Type <code style="font-family:'JetBrains Mono',monospace;">/comment text</code> in the editor.</span></div>`;
+  return COMMENTS.map((c, i) => {
+    const last = i === COMMENTS.length - 1;
+    const dotBg = c.resolved ? '#3a3f52' : c.hasPatch ? '#6366f1' : '#fbbf24';
+    return `<div style="display:flex;gap:10px;${last ? '' : 'margin-bottom:4px;'}">
+      <div style="display:flex;flex-direction:column;align-items:center;">
+        <div style="width:8px;height:8px;border-radius:50%;background:${dotBg};flex-shrink:0;margin-top:3px;"></div>
+        ${!last ? `<div style="width:2px;flex:1;min-height:18px;background:#252a38;margin-top:3px;"></div>` : ''}
+      </div>
+      <div style="flex:1;padding-bottom:${last ? 0 : 16}px;padding-top:1px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:2px;">
+          <span style="font-size:12px;font-weight:500;color:#e8eaf2;">${esc(c.author)}</span>
+          <span style="font-size:10px;color:#5a6080;">${esc(c.time)}</span>
+        </div>
+        <div style="font-size:12px;color:${c.resolved ? '#5a6080' : '#c9cfe0'};line-height:1.5;margin-bottom:${c.resolved ? 2 : 7}px;">${esc(c.text)}</div>
+        ${c.resolved
+          ? `<span style="font-size:10px;color:#3a3f52;">Resolved</span>`
+          : `<div style="display:flex;gap:4px;">
+               ${c.hasPatch
+                 ? `<span style="font-size:10px;color:#4ade80;display:flex;align-items:center;gap:4px;"><span style="width:5px;height:5px;border-radius:50%;background:#4ade80;"></span>Patch ready</span>`
+                 : `<button onclick="" style="font-size:10px;padding:2px 7px;border-radius:4px;background:#1a1f38;border:1px solid #2a2e50;color:#a5b4fc;cursor:pointer;">Fix with AI</button>`}
+               <button onclick="" style="font-size:10px;padding:2px 7px;border-radius:4px;background:transparent;border:1px solid #252a38;color:#5a6080;cursor:pointer;">Resolve</button>
+             </div>`}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function buildPatches() {
+  const all = PATCHES.map(p => {
+    const s = patchStates[p.id];
+    if (s === 'accepted') return `<div style="font-size:12px;color:#4ade80;padding:10px;border:1px solid #1a4d35;border-radius:6px;background:#0e2d22;display:flex;align-items:center;gap:6px;margin-bottom:8px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>Accepted: ${esc(p.label)}</div>`;
+    if (s === 'rejected') return `<div style="font-size:12px;color:#5a6080;padding:10px;border:1px solid #252a38;border-radius:6px;display:flex;align-items:center;gap:6px;margin-bottom:8px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>Rejected: ${esc(p.label)}</div>`;
+    return `<div style="margin-bottom:12px;">
+      <div style="font-size:10px;color:#5a6080;font-family:'JetBrains Mono',monospace;margin-bottom:6px;">${esc(p.label)}</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;border-radius:5px;overflow:hidden;margin-bottom:8px;line-height:1.55;">
+        <div class="diff-removed">&#x2212; ${esc(p.removed)}</div>
+        <div class="diff-added">+ ${esc(p.added)}</div>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button onclick="acceptPatch('${p.id}')" style="font-size:12px;padding:4px 14px;border-radius:5px;background:#6366f1;border:none;color:#fff;cursor:pointer;">Accept</button>
+        <button onclick="rejectPatch('${p.id}')" style="font-size:12px;padding:4px 12px;border-radius:5px;background:#0f1117;border:1px solid #252a38;color:#c9cfe0;cursor:pointer;">Reject</button>
+      </div>
+    </div>`;
+  }).join('');
+  const done = PATCHES.every(p => patchStates[p.id] !== 'pending');
+  return all + (done ? `<div style="font-size:12px;color:#5a6080;padding-top:4px;">All patches resolved.</div>` : '');
+}
+
+function buildDestinations() {
+  const rows = DESTINATIONS.map((d, i) => `
+    <div style="${i ? 'border-top:1px solid #252a38;' : ''}padding:9px 0;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${d.url || d.error ? 4 : 0}px;">
+        <span style="font-size:13px;color:#e8eaf2;">${d.platform}</span>
+        <span class="pill ${d.status === 'draft' ? 's-draft' : d.status === 'error' ? 's-error' : 's-none'}">${d.label}</span>
+      </div>
+      ${d.url ? `<a href="#" onclick="return false" style="font-size:11px;color:#6366f1;text-decoration:none;">${d.url} ↗</a>` : ''}
+      ${d.error ? `<div style="margin-top:5px;background:#2d1a1a;border:1px solid #4d2a2a;border-radius:4px;padding:5px 9px;display:flex;align-items:center;justify-content:space-between;gap:6px;">
+        <span style="font-size:11px;color:#f87171;">${esc(d.error)}</span>
+        <button style="font-size:10px;padding:2px 7px;border-radius:3px;background:#0f1117;border:1px solid #4d2a2a;color:#f87171;cursor:pointer;flex-shrink:0;">Retry</button>
+      </div>` : ''}
+    </div>`).join('');
+  return `<div>${rows}</div>
+    <div style="padding-top:10px;">
+      <button onclick="alert('→ /inspect/'+ARTICLE.id)" style="width:100%;font-size:12px;padding:7px 10px;border-radius:5px;border:1px solid #252a38;background:transparent;color:#c9cfe0;cursor:pointer;text-align:left;display:flex;align-items:center;gap:7px;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>Run inspection
+      </button>
+    </div>`;
+}
+
+function buildChat() {
+  const msgs = CHAT_HISTORY.map(m => `
+    <div class="chat-msg ${m.role}">
+      <div class="chat-label">${m.role === 'user' ? 'You' : 'bloghub'}</div>
+      <div class="bubble">${esc(m.text)}</div>
+    </div>`).join('');
+  return `<div>
+    <div id="chat-msgs" style="max-height:200px;overflow-y:auto;margin-bottom:8px;">${msgs}</div>
+    <div style="border-top:1px solid #252a38;padding-top:8px;display:flex;gap:6px;align-items:center;">
+      <span style="font-size:11px;color:#6366f1;font-family:'JetBrains Mono',monospace;flex-shrink:0;">$</span>
+      <input id="chat-input" type="text" placeholder="type a command…"
+        onkeydown="if(event.key==='Enter')sendChat()"
+        style="flex:1;background:transparent;border:none;outline:none;color:#e8eaf2;font-size:12px;min-width:0;"/>
+      <button onclick="sendChat()" style="font-size:11px;padding:3px 9px;border-radius:4px;border:1px solid #252a38;background:transparent;color:#5a6080;cursor:pointer;flex-shrink:0;">↵</button>
+    </div>
+  </div>`;
+}
+
+function sendChat() {
+  const input = document.getElementById('chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+  CHAT_HISTORY.push({ role:'user', text });
+  const cmd = text.toLowerCase();
+  let resp = null;
+  for (const key of Object.keys(CLI)) {
+    if (cmd === key || cmd.startsWith(key)) { resp = CLI[key]; break; }
+  }
+  CHAT_HISTORY.push({ role:'bot', text: resp || `command not found: ${text}\nType 'help' for available commands.` });
+  input.value = '';
+  renderSection('chat');
+}
+
+// ── Patch actions ─────────────────────────────────────────────────────────────
+function acceptPatch(id) { patchStates[id] = 'accepted'; renderLeft(); }
+function rejectPatch(id) { patchStates[id] = 'rejected'; renderLeft(); }
+
+function updatePatchBadge() {
+  const n = PATCHES.filter(p => patchStates[p.id] === 'pending').length;
+  const b = document.getElementById('patch-badge');
+  b.style.display = n ? 'inline' : 'none';
+  b.textContent = n;
+}
+
+function buildRules() {
+  const rules = [
+    { label:'Word count',    color:'#4ade80', good:true,  detail:'Target 1 200–2 500 words · Current: 1 844' },
+    { label:'Readability',   color:'#4ade80', good:true,  detail:'Flesch score ≥ 60 · Current: 68.2' },
+    { label:'Code blocks',   color:'#4ade80', good:true,  detail:'Min 1 runnable example · Current: 2 blocks' },
+    { label:'Open comments', color:'#fbbf24', good:false, detail:'All comments must be resolved · 2 open' },
+    { label:'Destinations',  color:'#f87171', good:false, detail:'All platforms linked before publish · 1 / 3' },
+  ];
+  return rules.map(r => `
+    <div style="display:flex;align-items:flex-start;gap:9px;margin-bottom:11px;">
+      <span style="width:7px;height:7px;border-radius:50%;background:${r.color};flex-shrink:0;margin-top:3px;"></span>
+      <div>
+        <div style="font-size:12px;font-weight:500;color:#e8eaf2;margin-bottom:2px;">${r.label}</div>
+        <div style="font-size:11px;color:#5a6080;line-height:1.45;">${r.detail}</div>
+      </div>
+    </div>`).join('');
+}
+
+// ── Utils ─────────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+}
+
+// ── Selection hover ──────────────────────────────────────────────────────────
+let _selText = '';
+
+function showSelPopover(x, y, text) {
+  _selText = text;
+  const pop = document.getElementById('sel-popover');
+  pop.style.display = 'flex';
+  const pw = 210;
+  let left = x - pw / 2;
+  let top  = y - 50;
+  if (left < 8) left = 8;
+  if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
+  if (top < 8) top = y + 20;
+  pop.style.left = left + 'px';
+  pop.style.top  = top  + 'px';
+}
+
+function hideSelPopover() {
+  document.getElementById('sel-popover').style.display = 'none';
+  _selText = '';
+}
+
+function selFormat(wrap) {
+  const ta = document.getElementById('raw-editor');
+  const s = ta.selectionStart, e = ta.selectionEnd;
+  if (s === e) { hideSelPopover(); return; }
+  const sel = ta.value.slice(s, e);
+  ta.value = ta.value.slice(0, s) + wrap + sel + wrap + ta.value.slice(e);
+  ta.setSelectionRange(s, e + wrap.length * 2);
+  ta.focus();
+  hideSelPopover();
+  onInput();
+}
+
+function addCommentFromSel() {
+  const text = _selText.trim().slice(0, 160);
+  if (!text) return;
+  COMMENTS.push({ id:'c'+commentN++, author:'You', time:'just now', text, resolved:false, hasPatch:false });
+  hideSelPopover();
+  openSection('comments');
+}
+
+document.getElementById('raw-editor').addEventListener('mouseup', function(e) {
+  if (this.selectionStart !== this.selectionEnd) {
+    const sel = this.value.substring(this.selectionStart, this.selectionEnd);
+    if (sel.trim()) { showSelPopover(e.clientX, e.clientY, sel); return; }
+  }
+  hideSelPopover();
+});
+
+document.addEventListener('mousedown', function(e) {
+  const pop = document.getElementById('sel-popover');
+  if (pop.style.display !== 'none' && !pop.contains(e.target)) hideSelPopover();
+});
+
+// ── Resize drag ──────────────────────────────────────────────────────────────
+(function(){
+  // Generic drag-resize helper
+  // direction: +1 means drag-right grows the target, -1 means drag-right shrinks it
+  function makeResizable(stripId, getWidth, setWidth, direction, minW, maxW) {
+    const strip = document.getElementById(stripId);
+    let active = false, didDrag = false, startX = 0, startW = 0;
+
+    strip.addEventListener('mousedown', function(e) {
+      active = true;
+      didDrag = false;
+      startX = e.clientX;
+      startW = getWidth();
+      document.body.style.cursor = 'ew-resize';
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', function(e) {
+      if (!active) return;
+      const delta = (e.clientX - startX) * direction;
+      if (Math.abs(e.clientX - startX) > 4) didDrag = true;
+      if (didDrag) setWidth(Math.max(minW, Math.min(maxW, startW + delta)));
+    });
+
+    document.addEventListener('mouseup', function() {
+      if (!active) return;
+      active = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    });
+
+    // Suppress the click toggle when the user dragged
+    strip.addEventListener('click', function(e) {
+      if (didDrag) { didDrag = false; e.stopImmediatePropagation(); }
+    }, true);
+  }
+
+  // Left panel — strip on right edge, drag right = grow
+  makeResizable(
+    'panel-strip',
+    () => document.getElementById('panel-content').offsetWidth,
+    (w) => { document.getElementById('panel-content').style.width = w + 'px'; },
+    1, 160, 480
+  );
+
+  // Preview pane — strip on left edge, drag left = grow
+  makeResizable(
+    'preview-strip',
+    () => document.getElementById('preview-pane').offsetWidth,
+    (w) => {
+      const pane = document.getElementById('preview-pane');
+      pane.style.cssText = `flex:0 0 ${w}px;min-width:0;display:flex;flex-direction:row;overflow:hidden;background:#0d1019;`;
+      previewOpen = true;
+      document.getElementById('preview-content').style.display = 'flex';
+      document.getElementById('preview-arrow').innerHTML = '<polyline points="9 18 15 12 9 6"/>';
+    },
+    -1, 200, 700
+  );
+})();
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+document.getElementById('raw-editor').value = INITIAL_CONTENT;
+setSave('unsaved');
+renderPreview();
+renderSection('comments');
+</script>
+</body>
+</html>

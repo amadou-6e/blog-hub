@@ -1,3 +1,6 @@
+# Integration test live dumps (contain real Medium editor HTML, never commit)
+blogs/medium/tests/fixtures/medium_editor_dump/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -205,3 +208,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# BlogHub local working directories
+.spec/
+.planning/
+.design/
+.skills/
+node_modules/
+diagnose_*
+tests/results/
