@@ -1,13 +1,16 @@
 """
 test_import_article.py — Playwright click-through tests for the Import Article screen.
 
-The screen uses hardcoded mock data (not the real API) so most assertions are pure
-UI state checks. The import action itself simulates a 1.5 s delay with 85 % success,
-so we verify the overlay appears rather than asserting the final navigation target.
-
 Run:
-    pytest tests/ui/test_import_article.py -m browser --browser chromium -v
+    pytest tests/ui/screens/test_import_article.py -m browser --browser chromium -v
 """
+import io
+import pathlib
+import struct
+import tempfile
+import zipfile
+import zlib
+
 import pytest
 
 from tests.ui.conftest import BASE_URL
@@ -397,3 +400,195 @@ def test_upload_mode_import_navigates_to_editor(page):
         advance(page)
     assert "editor/" in page.url
     assert "id=art_" in page.url
+
+
+# ── Helpers for multi-format tests ──────────────────────────────────────────
+
+def _minimal_png() -> bytes:
+    """1×1 white PNG."""
+    def chunk(name, data):
+        crc = zlib.crc32(name + data) & 0xFFFFFFFF
+        return struct.pack('>I', len(data)) + name + data + struct.pack('>I', crc)
+    ihdr = struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0)
+    idat = zlib.compress(b'\x00\xff\xff\xff')
+    return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', ihdr) + chunk(b'IDAT', idat) + chunk(b'IEND', b'')
+
+
+def _minimal_docx() -> bytes:
+    """Minimal valid .docx with a Heading1 and a paragraph."""
+    content_types = (
+        b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        b'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        b'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        b'<Default Extension="xml" ContentType="application/xml"/>'
+        b'<Override PartName="/word/document.xml"'
+        b' ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+        b'</Types>'
+    )
+    rels = (
+        b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        b'<Relationship Id="rId1"'
+        b' Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"'
+        b' Target="word/document.xml"/>'
+        b'</Relationships>'
+    )
+    doc_xml = (
+        b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        b'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        b'<w:body>'
+        b'<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>DOCX Article</w:t></w:r></w:p>'
+        b'<w:p><w:r><w:t>Paragraph content here.</w:t></w:r></w:p>'
+        b'</w:body></w:document>'
+    )
+    word_rels = (
+        b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>'
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('[Content_Types].xml', content_types)
+        zf.writestr('_rels/.rels', rels)
+        zf.writestr('word/document.xml', doc_xml)
+        zf.writestr('word/_rels/document.xml.rels', word_rels)
+    return buf.getvalue()
+
+
+@pytest.fixture
+def tmp_files(tmp_path):
+    """Fixture files for all upload format tests."""
+    png = _minimal_png()
+
+    # plain .md, no image refs
+    (tmp_path / "article.md").write_text(
+        "# Plain Article\n\nJust text, no images.\n", encoding="utf-8"
+    )
+    # .md with relative image refs
+    (tmp_path / "article_with_refs.md").write_text(
+        "# Image Article\n\nSome text.\n\n![chart](chart.png)\n\n![logo](logo.png)\n",
+        encoding="utf-8",
+    )
+    # companion images
+    (tmp_path / "chart.png").write_bytes(png)
+    (tmp_path / "logo.png").write_bytes(png)
+
+    # unsupported file
+    (tmp_path / "bad.txt").write_text("not a supported format", encoding="utf-8")
+
+    # .html
+    (tmp_path / "article.html").write_text(
+        "<html><body><h1>HTML Article</h1><p>First paragraph.</p></body></html>",
+        encoding="utf-8",
+    )
+
+    # .docx
+    (tmp_path / "article.docx").write_bytes(_minimal_docx())
+
+    # zip with md + image
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w') as zf:
+        zf.writestr("article.md", "# Zipped Article\n\nText.\n\n![chart](images/chart.png)\n")
+        zf.writestr("images/chart.png", png)
+    (tmp_path / "with_image.zip").write_bytes(buf.getvalue())
+
+    # zip with md only
+    buf2 = io.BytesIO()
+    with zipfile.ZipFile(buf2, 'w') as zf:
+        zf.writestr("article.md", "# Plain ZIP\n\nNo images here.\n")
+    (tmp_path / "no_image.zip").write_bytes(buf2.getvalue())
+
+    # zip with no md
+    buf3 = io.BytesIO()
+    with zipfile.ZipFile(buf3, 'w') as zf:
+        zf.writestr("readme.txt", "not markdown")
+    (tmp_path / "no_md.zip").write_bytes(buf3.getvalue())
+
+    return tmp_path
+
+
+# ── 9. Unsupported file type ─────────────────────────────────────────────────
+
+def test_unsupported_file_shows_error(page, tmp_files):
+    goto_upload(page)
+    page.locator("#file-input").set_input_files(str(tmp_files / "bad.txt"))
+    page.wait_for_selector("#drop-zone.error", timeout=3000)
+    assert "error" in page.locator("#drop-zone").get_attribute("class")
+
+
+# ── 10. ZIP upload ────────────────────────────────────────────────────────────
+
+def test_zip_with_image_advances_to_review(page, tmp_files):
+    goto_upload(page)
+    page.locator("#file-input").set_input_files(str(tmp_files / "with_image.zip"))
+    page.wait_for_selector("#view-review", timeout=8000)
+    assert page.locator("#view-review").is_visible()
+
+
+def test_zip_with_image_resolves_title(page, tmp_files):
+    goto_upload(page)
+    page.locator("#file-input").set_input_files(str(tmp_files / "with_image.zip"))
+    page.wait_for_selector("#title-input", timeout=8000)
+    assert page.locator("#title-input").input_value() == "Zipped Article"
+
+
+def test_zip_no_image_advances_to_review(page, tmp_files):
+    goto_upload(page)
+    page.locator("#file-input").set_input_files(str(tmp_files / "no_image.zip"))
+    page.wait_for_selector("#view-review", timeout=8000)
+    assert page.locator("#view-review").is_visible()
+
+
+def test_zip_no_md_shows_error(page, tmp_files):
+    goto_upload(page)
+    page.locator("#file-input").set_input_files(str(tmp_files / "no_md.zip"))
+    page.wait_for_selector("#drop-zone.error", timeout=8000)
+    assert "error" in page.locator("#drop-zone").get_attribute("class")
+
+
+# ── 11. HTML upload ───────────────────────────────────────────────────────────
+
+def test_html_advances_to_review(page, tmp_files):
+    goto_upload(page)
+    page.locator("#file-input").set_input_files(str(tmp_files / "article.html"))
+    page.wait_for_selector("#view-review", timeout=8000)
+    assert page.locator("#view-review").is_visible()
+
+
+def test_html_extracts_title(page, tmp_files):
+    goto_upload(page)
+    page.locator("#file-input").set_input_files(str(tmp_files / "article.html"))
+    page.wait_for_selector("#title-input", timeout=8000)
+    assert page.locator("#title-input").input_value() == "HTML Article"
+
+
+# ── 12. DOCX upload ───────────────────────────────────────────────────────────
+
+def test_docx_advances_to_review(page, tmp_files):
+    goto_upload(page)
+    page.locator("#file-input").set_input_files(str(tmp_files / "article.docx"))
+    page.wait_for_selector("#view-review", timeout=10000)
+    assert page.locator("#view-review").is_visible()
+
+
+# ── 13. .md + separate images multi-drop ─────────────────────────────────────
+
+def test_md_with_companion_images_resolves_refs(page, tmp_files):
+    goto_upload(page)
+    page.locator("#file-input").set_input_files([
+        str(tmp_files / "article_with_refs.md"),
+        str(tmp_files / "chart.png"),
+        str(tmp_files / "logo.png"),
+    ])
+    page.wait_for_selector("#view-review", timeout=8000)
+    assert page.locator("#view-review").is_visible()
+    # No warnings expected — all refs resolved
+    warnings_el = page.locator("#review-warnings")
+    if warnings_el.count() > 0:
+        assert warnings_el.inner_text() == ""
+
+
+def test_md_without_companion_images_advances(page, tmp_files):
+    goto_upload(page)
+    page.locator("#file-input").set_input_files(str(tmp_files / "article.md"))
+    page.wait_for_selector("#view-review", timeout=5000)
+    assert page.locator("#view-review").is_visible()

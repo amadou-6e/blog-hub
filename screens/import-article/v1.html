@@ -23,6 +23,9 @@
     }
   </script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/turndown/7.1.2/turndown.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
@@ -298,8 +301,8 @@
     <!-- UPLOAD MODE ─────────────────────────────────────────────── -->
     <div id="view-upload" style="display:none;">
       <div style="margin-bottom:20px;">
-        <div style="font-size:18px;font-weight:600;color:#e8eaf2;margin-bottom:4px;">Upload a Markdown file</div>
-        <div style="font-size:13px;color:#5a6080;">Drop a .md file or click to browse. The title and content will be extracted automatically.</div>
+        <div style="font-size:18px;font-weight:600;color:#e8eaf2;margin-bottom:4px;">Upload an article</div>
+        <div style="font-size:13px;color:#5a6080;">Drop a file or click to browse. Accepts .md, .zip (with images), .html, or .docx.</div>
       </div>
 
       <div id="drop-zone"
@@ -313,10 +316,10 @@
             <path d="M16 4v16M10 14l6-6 6 6"/><path d="M6 22v4h20v-4"/>
           </svg>
           <div style="text-align:center;">
-            <div style="font-size:14px;font-weight:500;color:#e8eaf2;">Drop your .md file here</div>
+            <div style="font-size:14px;font-weight:500;color:#e8eaf2;">Drop your file here</div>
             <div style="font-size:12px;color:#5a6080;margin-top:3px;">or <span style="color:#6366f1;">click to browse</span></div>
           </div>
-          <div style="font-size:11px;color:#3a3f52;">Accepts .md files only</div>
+          <div style="font-size:11px;color:#3a3f52;">.md · .zip · .html · .docx</div>
         </div>
         <!-- drag-over state (hidden by default) -->
         <div id="dz-hover" style="display:none;flex-direction:column;align-items:center;gap:10px;">
@@ -333,12 +336,14 @@
           <svg viewBox="0 0 32 32" width="32" height="32" fill="none" stroke="#f87171" stroke-width="1.5"><circle cx="16" cy="16" r="12"/><path d="M16 10v7M16 21v1"/></svg>
           <div style="text-align:center;">
             <div id="dz-error-msg" style="font-size:13px;font-weight:500;color:#f87171;"></div>
-            <div style="font-size:12px;color:#5a6080;margin-top:3px;">Only .md files are accepted</div>
+            <div style="font-size:12px;color:#5a6080;margin-top:3px;">Accepted: .md, .zip, .html, .docx</div>
           </div>
           <button onclick="resetDropZone(event)" style="font-size:12px;color:#5a6080;background:none;border:none;cursor:pointer;font-family:inherit;text-decoration:underline;text-underline-offset:3px;">Try again</button>
         </div>
       </div>
-      <input id="file-input" type="file" accept=".md,text/markdown" style="display:none;" onchange="onFileInput(event)" />
+      <input id="file-input" type="file"
+        accept=".md,.zip,.html,.htm,.docx,text/markdown,text/html,application/zip,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        multiple style="display:none;" onchange="onFileInput(event)" />
     </div>
 
   </div>
@@ -654,6 +659,24 @@ function renderReview() {
   document.getElementById('title-input').value = title;
   document.getElementById('review-meta').textContent = meta;
   renderMarkdown(body);
+
+  // Warnings (unresolved images etc.)
+  let warningsEl = document.getElementById('review-warnings');
+  const warnings = (MODE === 'upload' && uploadedFile?.warnings?.length) ? uploadedFile.warnings : [];
+  if (warnings.length > 0) {
+    if (!warningsEl) {
+      warningsEl = document.createElement('div');
+      warningsEl.id = 'review-warnings';
+      document.getElementById('view-review').appendChild(warningsEl);
+    }
+    warningsEl.innerHTML = `
+      <div style="margin-top:16px;padding:10px 14px;background:#2a2000;border:1px solid #4a3800;border-radius:6px;">
+        <div style="font-size:12px;font-weight:600;color:#fbbf24;margin-bottom:6px;">Import warnings</div>
+        ${warnings.map(w => `<div style="font-size:12px;color:#d97706;margin-bottom:3px;">· ${w}</div>`).join('')}
+      </div>`;
+  } else if (warningsEl) {
+    warningsEl.innerHTML = '';
+  }
 }
 
 function syncTitle(val) {
@@ -670,6 +693,7 @@ function renderMarkdown(md) {
     .replace(/^# (.+)$/gm,   '<h1 style="font-size:18px;font-weight:600;color:#e8eaf2;margin-bottom:10px;">$1</h1>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2" style="max-width:100%;border-radius:4px;margin:6px 0;" />')
     .replace(/^- (.+)$/gm, '<li style="margin-bottom:3px;">$1</li>')
     .replace(/\n\n/g, '</p><p style="margin-bottom:10px;">')
     .replace(/^(?!<[h|l|p|u|pre])(.+)$/gm, '<p style="margin-bottom:10px;">$1</p>');
@@ -696,9 +720,9 @@ function onDragLeave(e) { setDzState('idle'); }
 
 function onDrop(e) {
   e.preventDefault();
-  setDzState('idle');
-  const file = e.dataTransfer.files[0];
-  if (file) processFile(file);
+  onDragLeave();
+  const files = e.dataTransfer.files;
+  if (files.length) processFiles(files);
 }
 
 function triggerFilePicker() {
@@ -706,33 +730,180 @@ function triggerFilePicker() {
 }
 
 function onFileInput(e) {
-  const file = e.target.files[0];
-  if (file) processFile(file);
+  const files = e.target.files;
+  if (files.length) processFiles(files);
+  e.target.value = '';
 }
 
-function processFile(file) {
-  if (!file.name.endsWith('.md') && file.type !== 'text/markdown') {
-    const ext = file.name.split('.').pop().toLowerCase();
-    document.getElementById('dz-error-msg').textContent = `You dropped a .${ext} file`;
-    setDzState('error');
+// ─── Format helpers ───────────────────────────────────────────────
+function detectFileType(file) {
+  const n = file.name.toLowerCase();
+  if (n.endsWith('.zip'))  return 'zip';
+  if (n.endsWith('.docx')) return 'docx';
+  if (n.endsWith('.html') || n.endsWith('.htm')) return 'html';
+  if (n.endsWith('.md'))   return 'md';
+  return null;
+}
+
+function isImageFile(file) {
+  return /\.(png|jpe?g|gif|webp|svg)$/i.test(file.name);
+}
+
+function extractTitle(content, fallbackName) {
+  const h1 = content.split('\n').find(l => l.startsWith('# '));
+  return h1 ? h1.replace(/^#\s*/, '').trim() : fallbackName.replace(/\.[^.]+$/, '');
+}
+
+function countWords(text) {
+  return text.replace(/[^a-zA-Z\s]/g, ' ').split(/\s+/).filter(Boolean).length;
+}
+
+function findRelativeImageRefs(mdContent) {
+  const refs = [];
+  mdContent.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, _alt, src) => {
+    if (!src.startsWith('data:') && !/^https?:\/\//.test(src)) refs.push(src);
+  });
+  return [...new Set(refs)];
+}
+
+function resolveImages(mdContent, imageMap) {
+  const unresolved = [];
+  const content = mdContent.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, src) => {
+    if (src.startsWith('data:') || /^https?:\/\//.test(src)) return match;
+    const basename = src.split('/').pop().toLowerCase();
+    if (imageMap[basename]) return `![${alt}](${imageMap[basename]})`;
+    unresolved.push(src);
+    return match;
+  });
+  return { content, unresolved };
+}
+
+async function fileToDataUri(file) {
+  return new Promise(resolve => {
+    const r = new FileReader();
+    r.onload = e => resolve(e.target.result);
+    r.readAsDataURL(file);
+  });
+}
+
+function finishUpload(name, content, warnings = []) {
+  const title = extractTitle(content, name);
+  uploadedFile = { name, content, title, wordCount: countWords(content), warnings };
+  editedTitle  = title;
+  step         = totalSteps;
+  renderStepBar();
+  renderReview();
+  showView('review');
+  renderActionBar();
+}
+
+// ─── Format handlers ──────────────────────────────────────────────
+async function handleMd(file) {
+  const content = await file.text();
+  finishUpload(file.name, content);
+}
+
+async function handleZip(file) {
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const mdEntry = Object.values(zip.files).find(f => !f.dir && f.name.toLowerCase().endsWith('.md'));
+  if (!mdEntry) throw new Error('No .md file found inside the zip');
+
+  const mdContent = await mdEntry.async('string');
+  const refs = findRelativeImageRefs(mdContent);
+
+  if (refs.length === 0) {
+    finishUpload(file.name, mdContent);
     return;
   }
-  const reader = new FileReader();
-  reader.onload = (ev) => {
-    const content = ev.target.result;
-    const lines   = content.split('\n');
-    const h1      = lines.find(l => l.startsWith('# '));
-    const title   = h1 ? h1.replace(/^#\s*/, '').trim() : file.name.replace(/\.md$/, '');
-    const words   = content.replace(/[^a-zA-Z\s]/g, ' ').split(/\s+/).filter(Boolean).length;
-    uploadedFile  = { name: file.name, content, title, wordCount: words };
-    editedTitle   = title;
-    step = 2;
-    renderStepBar();
-    renderReview();
-    showView('review');
-    renderActionBar();
-  };
-  reader.readAsText(file);
+
+  const imageMap = {};
+  for (const entry of Object.values(zip.files)) {
+    if (entry.dir) continue;
+    const basename = entry.name.split('/').pop().toLowerCase();
+    const bytes = await entry.async('uint8array');
+    const blob = new Blob([bytes]);
+    const dataUri = await new Promise(res => {
+      const r = new FileReader();
+      r.onload = e => res(e.target.result);
+      r.readAsDataURL(blob);
+    });
+    imageMap[basename] = dataUri;
+  }
+
+  const { content, unresolved } = resolveImages(mdContent, imageMap);
+  const warnings = unresolved.map(r => `Image not found in zip: ${r}`);
+  finishUpload(file.name, content, warnings);
+}
+
+async function handleHtml(file) {
+  const html = await file.text();
+  const td = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' });
+  const md = td.turndown(html);
+  finishUpload(file.name, md);
+}
+
+async function handleDocx(file) {
+  const arrayBuf = await file.arrayBuffer();
+  const result = await mammoth.convertToHtml({ arrayBuffer: arrayBuf });
+  const td = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' });
+  const md = td.turndown(result.value);
+  const warnings = result.messages.map(m => m.message);
+  finishUpload(file.name, md, warnings);
+}
+
+async function processMarkdownWithImages(mdFile, imgFiles) {
+  const mdContent = await mdFile.text();
+  const refs = findRelativeImageRefs(mdContent);
+
+  const imageMap = {};
+  for (const imgFile of imgFiles) {
+    const basename = imgFile.name.toLowerCase();
+    imageMap[basename] = await fileToDataUri(imgFile);
+  }
+
+  const { content, unresolved } = resolveImages(mdContent, imageMap);
+  const warnings = unresolved.map(r => `Image not resolved: ${r}`);
+  finishUpload(mdFile.name, content, warnings);
+}
+
+// ─── Entry point ─────────────────────────────────────────────────
+async function processFiles(files) {
+  files = Array.from(files);
+  const mdFiles  = files.filter(f => f.name.toLowerCase().endsWith('.md'));
+  const imgFiles = files.filter(isImageFile);
+
+  if (files.length === 1) {
+    const type = detectFileType(files[0]);
+    if (!type) {
+      const ext = files[0].name.split('.').pop();
+      document.getElementById('dz-error-msg').textContent = `.${ext} files are not supported`;
+      setDzState('error');
+      return;
+    }
+    try {
+      if (type === 'zip')       await handleZip(files[0]);
+      else if (type === 'docx') await handleDocx(files[0]);
+      else if (type === 'html') await handleHtml(files[0]);
+      else                      await handleMd(files[0]);
+    } catch (err) {
+      document.getElementById('dz-error-msg').textContent = err.message;
+      setDzState('error');
+    }
+    return;
+  }
+
+  if (mdFiles.length === 1 && imgFiles.length > 0 && mdFiles.length + imgFiles.length === files.length) {
+    try {
+      await processMarkdownWithImages(mdFiles[0], imgFiles);
+    } catch (err) {
+      document.getElementById('dz-error-msg').textContent = err.message;
+      setDzState('error');
+    }
+    return;
+  }
+
+  document.getElementById('dz-error-msg').textContent = 'Drop one file, or a .md with its images';
+  setDzState('error');
 }
 
 function resetDropZone(e) {
