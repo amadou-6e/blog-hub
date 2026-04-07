@@ -114,7 +114,7 @@
 
 <!-- Zone A: Nav -->
 <div style="height:48px;background:#0f1117;border-bottom:1px solid #252a38;display:flex;align-items:center;padding:0 14px;gap:8px;flex-shrink:0;z-index:30;">
-  <button class="icon-btn" title="Back to overview" style="color:#5a6080;">
+  <button class="icon-btn" title="Back to overview" style="color:#5a6080;" onclick="location.href='../overview/v3.html'">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
   </button>
   <div style="display:flex;align-items:center;gap:7px;flex:1;min-width:0;">
@@ -125,7 +125,7 @@
   </div>
   <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
     <button class="nav-btn accent" onclick="showReview()">Review</button>
-    <button class="nav-btn" onclick="alert('→ /inspect/'+ARTICLE.id)">Inspect</button>
+    <button class="nav-btn" onclick="triggerInspect()">Inspect</button>
     <button style="font-size:12px;padding:5px 14px;border-radius:6px;border:none;background:#6366f1;color:#fff;cursor:pointer;font-weight:500;">Publish</button>
   </div>
 </div>
@@ -229,7 +229,7 @@
   <!-- Editor pane -->
   <div style="flex:1;min-width:320px;display:flex;flex-direction:column;overflow:hidden;border-right:1px solid #252a38;">
     <div style="padding:4px 12px;background:#0d1019;border-bottom:1px solid #252a38;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
-      <span style="font-size:10px;color:#5a6080;font-family:'JetBrains Mono',monospace;">postgres-migration.md</span>
+      <span id="file-label" style="font-size:10px;color:#5a6080;font-family:'JetBrains Mono',monospace;">loading…</span>
       <span id="word-count" style="font-size:10px;color:#3a3f52;">1 844 words</span>
     </div>
     <textarea id="raw-editor" oninput="onInput()" spellcheck="false"></textarea>
@@ -265,82 +265,27 @@
 
 <script>
 // ── Data ─────────────────────────────────────────────────────────────────────
-const ARTICLE = { id: 'art_7g2kf' };
+const ARTICLE_ID = new URLSearchParams(location.search).get('id');
+if (!ARTICLE_ID) { location.replace('../overview/v3.html'); }
 
-const DESTINATIONS = [
-  { id:'medium',   platform:'Medium',   status:'draft', label:'Draft v2', url:'medium.com/p/ab3f9c2', error:null },
-  { id:'hashnode', platform:'Hashnode', status:'error', label:'Error',    url:null, error:'Auth token expired' },
-  { id:'devto',    platform:'Dev.to',   status:'none',  label:'Not linked', url:null, error:null },
+let DESTINATIONS = [
 ];
 
-let COMMENTS = [
-  { id:'c1', author:'Mina', time:'31m ago', text:'Worth linking to the post-mortem for context.', resolved:true, hasPatch:false },
-  { id:'c2', author:'Dana', time:'14m ago', text:'Why is lock timeout set to 5 s exactly? SLO-based?', resolved:false, hasPatch:false },
-  { id:'c3', author:'You',  time:'2m ago',  text:'Health checks: add Q1 benchmark ref.', resolved:false, hasPatch:true },
-];
+let COMMENTS = [];
 
-const PATCHES = [
-  { id:'p1', label:'Health check detail',
-    removed:'Health checks must run before and after each migration step.',
-    added:'Health checks must run before, during, and after each migration step — verify replica lag under 200 ms and lock count below threshold.' },
-];
+let PATCHES  = [];
 
-const CHAT_HISTORY = [
-  { role:'bot', text:'$ bloghub chat --article art_7g2kf\nConnected. Type a command or question.' },
-  { role:'user', text:'check destinations' },
-  { role:'bot', text:'$ bloghub destinations status\nmedium   → draft (ab3f9c2)\nhashnode → error: auth token expired\ndevto    → not linked' },
-];
+let CHAT_HISTORY = [];
 
-const CLI = {
-  'help':                 'Commands:\n  destinations status\n  comment list\n  patch apply <id>\n  regenerate\n  inspect',
-  'destinations status':  'medium   → draft (ab3f9c2)\nhashnode → error: auth token expired\ndevto    → not linked',
-  'comment list':         'c1 [resolved] Mina: Worth linking to post-mortem\nc2 [open]     Dana: Lock timeout — why 5 s?\nc3 [patch]    You:  Health checks Q1 ref',
-  'regenerate':           'Starting job_k9x2m...\nParsing 3 comments...  done\nGenerating patches...  1 created\nRun \"patch apply p1\" to accept.',
-  'inspect':              'Running gate on art_7g2kf...\n  word_count:   1844  PASS\n  readability:  68.2  PASS\n  code_blocks:  2     PASS\n  destinations: 1/3   WARN\nGate: PASS WITH WARNINGS',
-  'patch apply p1':       'Patch p1 applied. Article updated.',
-};
 
-const INITIAL_CONTENT = `# Zero-downtime Postgres Migration
 
-Migrating a production Postgres database without downtime requires careful coordination between schema changes, application deployments, and traffic routing. This guide walks through the three-phase approach used to migrate the primary \`orders\` database at 40k requests per minute.
-
-## Phase 1 — Baseline and snapshot
-
-Before touching any schema, capture a full logical backup and establish your rollback threshold: the maximum time your team can tolerate for a full restore.
-
-> A dry run in staging is mandatory before any production step. Skipping this has caused three incidents in our post-mortem history.
-
-## Phase 2 — Schema expansion
-
-Add columns with defaults before deploying application code that reads them.
-
-\`\`\`sql
--- Safe: add nullable column first
-ALTER TABLE orders ADD COLUMN retry_count INTEGER;
-
--- Backfill in batches
-UPDATE orders SET retry_count = 0 WHERE retry_count IS NULL;
-
--- Enforce NOT NULL
-ALTER TABLE orders ALTER COLUMN retry_count SET NOT NULL;
-\`\`\`
-
-## Phase 3 — Cutover
-
-Use a blue-green deployment. Health checks must run before and after each migration step. Lock timeout should be set to 5 seconds to prevent a hung migration cascading into a queue backup.
-
-\`\`\`sql
-CREATE INDEX CONCURRENTLY idx_orders_retry ON orders(retry_count);
-\`\`\`
-
-Running this during low-traffic hours further reduces load impact.`;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const accOpen = { comments:true, patches:false, destinations:false, chat:false, rules:false };
 let leftOpen = true;
 let previewOpen = true;
-let patchStates = { p1: 'pending' };
-let commentN = 4;
+let patchStates = {};
+let commentN = 1;
 let saveTimer = null;
 
 // ── Unsaved indicator ─────────────────────────────────────────────────────────
@@ -363,7 +308,10 @@ function onInput() {
   const out = lines.map(line => {
     const m = line.match(/^\/comment\s+(.+)$/);
     if (m) {
-      COMMENTS.push({ id:'c'+commentN++, author:'You', time:'just now', text:m[1], resolved:false, hasPatch:false });
+      fetch(`/api/articles/${ARTICLE_ID}/comments`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ author: 'You', text: m[1] })
+      }).then(() => loadComments());
       changed = true;
       return `<!-- [comment] ${m[1]} -->`;
     }
@@ -380,9 +328,26 @@ function onInput() {
   const words = ta.value.trim().split(/\s+/).filter(Boolean).length;
   document.getElementById('word-count').textContent = words.toLocaleString() + ' words';
 
-  saveTimer = setTimeout(() => {
+  saveTimer = setTimeout(async () => {
     setSave('saving');
-    setTimeout(() => setSave('saved'), 900);
+    try {
+      const ta = document.getElementById('raw-editor');
+      const title = document.getElementById('article-title').textContent.trim();
+      const r = await fetch(`/api/articles/${ARTICLE_ID}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: ta.value, title }),
+      });
+      if (r.ok) {
+        const data = await r.json();
+        document.getElementById('word-count').textContent = data.word_count.toLocaleString() + ' words';
+        setSave('saved');
+      } else {
+        setSave('unsaved');
+      }
+    } catch (_e) {
+      setSave('unsaved');
+    }
   }, 2000);
 }
 
@@ -398,12 +363,32 @@ function insertCommentCmd() {
 }
 
 // ── Review / generation overlay ───────────────────────────────────────────────
-function showReview() {
+async function showReview() {
   document.getElementById('gen-overlay').style.display = 'flex';
+  try {
+    const r = await fetch(`/api/articles/${ARTICLE_ID}/regenerate`, { method: 'POST' });
+    if (r.ok) {
+      const data = await r.json();
+      await _pollJob(data.jobId);
+      await loadPatches();
+    }
+  } finally {
+    document.getElementById('gen-overlay').style.display = 'none';
+    openSection('patches');
+  }
 }
 function finishReview() {
   document.getElementById('gen-overlay').style.display = 'none';
   openSection('patches');
+}
+async function _pollJob(jobId) {
+  for (let i = 0; i < 30; i++) {
+    await new Promise(res => setTimeout(res, 1000));
+    const r = await fetch(`/api/jobs/${jobId}`);
+    if (!r.ok) break;
+    const job = await r.json();
+    if (job.status === 'done' || job.status === 'error') break;
+  }
 }
 
 // ── Left panel accordion ─────────────────────────────────────────────────────
@@ -467,8 +452,9 @@ function renderPreview() {
   const platform = document.getElementById('preview-sel').value;
   // Update ext link
   const extLink = document.getElementById('ext-link');
-  const platformUrls = { medium:'https://medium.com/p/ab3f9c2', hashnode:null, devto:null };
-  const extUrl = platformUrls[platform];
+  const dest = DESTINATIONS.find(d => d.id === platform);
+  const rawUrl = dest?.url || null;
+  const extUrl = rawUrl ? (rawUrl.startsWith('http') ? rawUrl : 'https://' + rawUrl) : null;
   if (extUrl) {
     extLink.style.display = 'inline';
     extLink.href = extUrl;
@@ -521,7 +507,7 @@ function buildComments() {
                ${c.hasPatch
                  ? `<span style="font-size:10px;color:#4ade80;display:flex;align-items:center;gap:4px;"><span style="width:5px;height:5px;border-radius:50%;background:#4ade80;"></span>Patch ready</span>`
                  : `<button onclick="" style="font-size:10px;padding:2px 7px;border-radius:4px;background:#1a1f38;border:1px solid #2a2e50;color:#a5b4fc;cursor:pointer;">Fix with AI</button>`}
-               <button onclick="" style="font-size:10px;padding:2px 7px;border-radius:4px;background:transparent;border:1px solid #252a38;color:#5a6080;cursor:pointer;">Resolve</button>
+               <button onclick="resolveComment('${c.id}')" style="font-size:10px;padding:2px 7px;border-radius:4px;background:transparent;border:1px solid #252a38;color:#5a6080;cursor:pointer;">Resolve</button>
              </div>`}
       </div>
     </div>`;
@@ -556,7 +542,7 @@ function buildDestinations() {
         <span style="font-size:13px;color:#e8eaf2;">${d.platform}</span>
         <span class="pill ${d.status === 'draft' ? 's-draft' : d.status === 'error' ? 's-error' : 's-none'}">${d.label}</span>
       </div>
-      ${d.url ? `<a href="#" onclick="return false" style="font-size:11px;color:#6366f1;text-decoration:none;">${d.url} ↗</a>` : ''}
+      ${d.url ? `<a href="${esc(d.url.startsWith('http') ? d.url : 'https://' + d.url)}" target="_blank" rel="noopener" style="font-size:11px;color:#6366f1;text-decoration:none;">${esc(d.url)} ↗</a>` : ''}
       ${d.error ? `<div style="margin-top:5px;background:#2d1a1a;border:1px solid #4d2a2a;border-radius:4px;padding:5px 9px;display:flex;align-items:center;justify-content:space-between;gap:6px;">
         <span style="font-size:11px;color:#f87171;">${esc(d.error)}</span>
         <button style="font-size:10px;padding:2px 7px;border-radius:3px;background:#0f1117;border:1px solid #4d2a2a;color:#f87171;cursor:pointer;flex-shrink:0;">Retry</button>
@@ -564,7 +550,7 @@ function buildDestinations() {
     </div>`).join('');
   return `<div>${rows}</div>
     <div style="padding-top:10px;">
-      <button onclick="alert('→ /inspect/'+ARTICLE.id)" style="width:100%;font-size:12px;padding:7px 10px;border-radius:5px;border:1px solid #252a38;background:transparent;color:#c9cfe0;cursor:pointer;text-align:left;display:flex;align-items:center;gap:7px;">
+      <button onclick="triggerInspect()" style="width:100%;font-size:12px;padding:7px 10px;border-radius:5px;border:1px solid #252a38;background:transparent;color:#c9cfe0;cursor:pointer;text-align:left;display:flex;align-items:center;gap:7px;">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>Run inspection
       </button>
     </div>`;
@@ -588,24 +574,45 @@ function buildChat() {
   </div>`;
 }
 
-function sendChat() {
+async function sendChat() {
   const input = document.getElementById('chat-input');
   const text = input.value.trim();
   if (!text) return;
-  CHAT_HISTORY.push({ role:'user', text });
-  const cmd = text.toLowerCase();
-  let resp = null;
-  for (const key of Object.keys(CLI)) {
-    if (cmd === key || cmd.startsWith(key)) { resp = CLI[key]; break; }
-  }
-  CHAT_HISTORY.push({ role:'bot', text: resp || `command not found: ${text}\nType 'help' for available commands.` });
   input.value = '';
+  CHAT_HISTORY.push({ role:'user', text });
+  renderSection('chat');
+  try {
+    const r = await fetch(`/api/articles/${ARTICLE_ID}/chat`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ command: text })
+    });
+    if (r.ok) {
+      const data = await r.json();
+      CHAT_HISTORY.push({ role:'bot', text: data.reply });
+    } else {
+      CHAT_HISTORY.push({ role:'bot', text: 'Error: server returned ' + r.status });
+    }
+  } catch (e) {
+    CHAT_HISTORY.push({ role:'bot', text: 'Error: ' + e.message });
+  }
   renderSection('chat');
 }
 
 // ── Patch actions ─────────────────────────────────────────────────────────────
-function acceptPatch(id) { patchStates[id] = 'accepted'; renderLeft(); }
-function rejectPatch(id) { patchStates[id] = 'rejected'; renderLeft(); }
+async function acceptPatch(id) {
+  await fetch(`/api/articles/${ARTICLE_ID}/patches/${id}/accept`, { method: 'POST' });
+  await loadPatches();
+}
+async function rejectPatch(id) {
+  await fetch(`/api/articles/${ARTICLE_ID}/patches/${id}/reject`, { method: 'POST' });
+  await loadPatches();
+}
+function resolveComment(id) {
+  fetch(`/api/articles/${ARTICLE_ID}/comments/${id}`, {
+    method: 'PATCH', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ resolved: true })
+  }).then(() => loadComments());
+}
 
 function updatePatchBadge() {
   const n = PATCHES.filter(p => patchStates[p.id] === 'pending').length;
@@ -674,9 +681,11 @@ function selFormat(wrap) {
 function addCommentFromSel() {
   const text = _selText.trim().slice(0, 160);
   if (!text) return;
-  COMMENTS.push({ id:'c'+commentN++, author:'You', time:'just now', text, resolved:false, hasPatch:false });
   hideSelPopover();
-  openSection('comments');
+  fetch(`/api/articles/${ARTICLE_ID}/comments`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ author: 'You', text, anchor: text })
+  }).then(() => { loadComments(); openSection('comments'); });
 }
 
 document.getElementById('raw-editor').addEventListener('mouseup', function(e) {
@@ -753,11 +762,84 @@ document.addEventListener('mousedown', function(e) {
   );
 })();
 
+// ── Load ─────────────────────────────────────────────────────────────────────
+async function loadArticle() {
+  try {
+    const r = await fetch(`/api/articles/${ARTICLE_ID}`);
+    if (!r.ok) { location.replace('../overview/v3.html'); return; }
+    const a = await r.json();
+    document.getElementById('raw-editor').value = a.content;
+    document.getElementById('article-title').textContent = a.title;
+    document.getElementById('word-count').textContent = a.word_count.toLocaleString() + ' words';
+    document.getElementById('file-label').textContent = a.id + '.md';
+    const platformNames = { medium: 'Medium', hashnode: 'Hashnode', devto: 'Dev.to' };
+    DESTINATIONS = Object.entries(a.destinations).map(([id, d]) => ({
+      id,
+      platform: platformNames[id] || id,
+      status: d.status,
+      label: d.label,
+      url: d.url || null,
+      error: d.error || null,
+    }));
+    setSave('saved');
+    renderPreview();
+    await loadComments();
+    await loadPatches();
+    await loadChat();
+  } catch (_e) {
+    console.error('Failed to load article', _e);
+  }
+}
+
+async function loadComments() {
+  try {
+    const r = await fetch(`/api/articles/${ARTICLE_ID}/comments`);
+    if (!r.ok) return;
+    const data = await r.json();
+    const list = data.comments ?? data;
+    COMMENTS = list.map(c => {
+      const dt = c.createdAt ? new Date(c.createdAt) : null;
+      const time = dt ? dt.toLocaleTimeString('en', { hour:'2-digit', minute:'2-digit' }) : '';
+      return { ...c, time };
+    });
+    renderSection('comments');
+  } catch (_e) { /* silently ignore */ }
+}
+
+async function loadPatches() {
+  try {
+    const r = await fetch(`/api/articles/${ARTICLE_ID}/patches`);
+    if (!r.ok) return;
+    const data = await r.json();
+    PATCHES = data.patches ?? data;
+    patchStates = Object.fromEntries(PATCHES.map(p => [p.id, p.state]));
+    renderSection('patches');
+    updatePatchBadge();
+  } catch (_e) { /* silently ignore */ }
+}
+
+async function loadChat() {
+  try {
+    const r = await fetch(`/api/articles/${ARTICLE_ID}/chat`);
+    if (!r.ok) return;
+    const data = await r.json();
+    CHAT_HISTORY = data.messages.map(m => ({ role: m.role, text: m.text }));
+    renderSection('chat');
+  } catch (_e) { /* silently ignore */ }
+}
+
+async function triggerInspect() {
+  try {
+    const r = await fetch(`/api/articles/${ARTICLE_ID}/inspect`);
+    const data = await r.json();
+    alert(JSON.stringify(data, null, 2));
+  } catch (e) {
+    alert('Inspect failed: ' + e.message);
+  }
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
-document.getElementById('raw-editor').value = INITIAL_CONTENT;
-setSave('unsaved');
-renderPreview();
-renderSection('comments');
+loadArticle();
 </script>
 </body>
 </html>
