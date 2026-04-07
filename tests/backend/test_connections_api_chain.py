@@ -15,7 +15,7 @@ if str(_blog_hub_root) not in sys.path:
     sys.path.insert(0, str(_blog_hub_root))
 
 from backend.main import app
-import backend.store.memory as store
+import backend.store as store
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]

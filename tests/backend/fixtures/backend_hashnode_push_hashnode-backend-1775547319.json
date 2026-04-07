@@ -1,0 +1,62 @@
+{
+  "push_response": {
+    "jobId": "job_f6ef1bd1",
+    "status": "done"
+  },
+  "job": {
+    "jobId": "job_f6ef1bd1",
+    "type": "push",
+    "status": "done",
+    "articleId": "art_4fafa1f2",
+    "result": {
+      "hashnode": {
+        "status": "draft",
+        "label": "Draft",
+        "url": "https://tensorworks.hashnode.dev/preview/69d4b3b83a53a88d11d1784b",
+        "error": null,
+        "draft_id": "69d4b3b83a53a88d11d1784b"
+      }
+    },
+    "error": null
+  },
+  "article": {
+    "id": "art_4fafa1f2",
+    "title": "Backend Hashnode live chain",
+    "updatedAt": "2026-04-07T07:35:21.411438Z",
+    "wordCount": 15,
+    "gate": "pending",
+    "previewImageUrl": null,
+    "source": "native",
+    "sourcePlatform": null,
+    "destinations": {
+      "medium": {
+        "status": "none",
+        "label": "\u2014",
+        "url": null,
+        "error": null
+      },
+      "hashnode": {
+        "status": "draft",
+        "label": "Draft",
+        "url": "https://tensorworks.hashnode.dev/preview/69d4b3b83a53a88d11d1784b",
+        "error": null
+      },
+      "devto": {
+        "status": "none",
+        "label": "\u2014",
+        "url": null,
+        "error": null
+      }
+    },
+    "recentTimeline": [
+      {
+        "timestamp": "2026-04-07T07:35:21.411346Z",
+        "event": "Draft pushed to Hashnode"
+      },
+      {
+        "timestamp": "2026-04-07T07:35:19.301772Z",
+        "event": "Article created"
+      }
+    ]
+  }
+}

@@ -182,10 +182,10 @@ const CONN_META = {
   medium:    { label: 'Medium',    tokenLabel: 'Integration token',     helpUrl: 'https://medium.com/me/settings/security',     oauth: true  },
   hashnode:  { label: 'Hashnode',  tokenLabel: 'Personal Access Token', helpUrl: 'https://hashnode.com/settings/developer',     oauth: false },
   devto:     { label: 'Dev.to',    tokenLabel: 'API Key',               helpUrl: 'https://dev.to/settings/extensions',          oauth: false },
-  // Anthropic & OpenAI CLIs use browser-based login (claude login / openai login)
-  //   → backend invokes the CLI auth flow via /api/connections/{id}/oauth-start
-  anthropic: { label: 'Anthropic', tokenLabel: 'API Key',               helpUrl: 'https://console.anthropic.com/settings/keys', oauth: true  },
-  openai:    { label: 'OpenAI',    tokenLabel: 'API Key',               helpUrl: 'https://platform.openai.com/api-keys',        oauth: true  },
+  // Anthropic uses loopback OAuth via claude CLI.
+  // OpenAI uses device-code OAuth via codex CLI (user visits URL + enters code).
+  anthropic: { label: 'Anthropic', tokenLabel: 'API Key', helpUrl: 'https://console.anthropic.com/settings/keys', oauth: true },
+  openai:    { label: 'OpenAI',    tokenLabel: 'API Key', helpUrl: 'https://platform.openai.com/api-keys',        oauth: true },
 };
 
 const ICON_STYLE = {
@@ -556,14 +556,20 @@ async function testConn(id) {
   }
 }
 
-// ─── OAuth popup (Authorization Code flow) ────────────────────────────────────
-// Security design:
-//   1. Server generates a one-use `state` nonce and stores it in memory.
-//   2. Browser opens a popup to the provider's auth URL (never sees client_secret).
-//   3. Provider redirects to /api/connections/{id}/oauth-callback with code + state.
-//   4. Server validates state, exchanges code for tokens server-side, stores token.
-//   5. Callback page does postMessage({type:'oauth-complete', platform:id}) then closes.
-//   6. Parent window reloads connections — token never travels through the browser.
+// ─── Browser login dispatcher ──────────────────────────────────────────────────
+// Three flows depending on what the server returns:
+//
+//   flow === "cli_browser"  (Anthropic)
+//     Loopback OAuth. Browser opens auth URL, redirect fails, user copies the
+//     full address-bar URL and pastes it back. We forward it to the CLI server.
+//
+//   flow === "device_code"  (OpenAI Codex)
+//     RFC 8628 device auth. Browser opens the URL, user logs in and enters the
+//     one-time code shown in the UI. CLI polls internally — no submit needed.
+//
+//   flow === undefined / "oauth_popup"  (Medium)
+//     Standard Authorization Code popup. Backend handles the code exchange.
+
 async function doOAuth(id) {
   const meta = CONN_META[id];
   if (!meta?.oauth) return;
@@ -571,26 +577,183 @@ async function doOAuth(id) {
     const res  = await fetch(`/api/connections/${id}/oauth-start`);
     const data = await res.json();
     if (!data.available || !data.url) {
-      // Server returns {available:false} when client credentials aren't configured
-      alert('OAuth not configured for this platform — paste an API token instead.');
+      alert('Browser login not available — paste an API token instead.');
+      expandKey(id);
       return;
     }
-    const popup = window.open(data.url, `${id}_oauth`, 'width=620,height=720,scrollbars=yes');
-    if (!popup) { alert('Popup blocked — allow popups for this page and try again.'); return; }
-    collapseKey(id);
-    // Validate origin in the message handler (defence-in-depth against rogue frames)
-    const allowedOrigin = window.location.origin;
-    const handler = async (e) => {
-      if (e.origin !== allowedOrigin) return;
-      if (e.data?.type !== 'oauth-complete' || e.data?.platform !== id) return;
-      window.removeEventListener('message', handler);
-      await loadConnections();
-    };
-    window.addEventListener('message', handler);
+    if (data.flow === 'device_code') {
+      _doDeviceCodeLogin(id, data.url, data.device_code);
+    } else if (data.flow === 'cli_browser') {
+      _doCliBrowserLogin(id, data.url);
+    } else {
+      _doOAuthPopup(id, data.url);
+    }
   } catch (e) {
-    alert('OAuth error: ' + e.message);
+    alert('Login error: ' + e.message);
   }
 }
+
+// Device code login — open URL, show code, poll until CLI completes internally
+function _doDeviceCodeLogin(id, url, deviceCode) {
+  window.open(url, '_blank');
+  collapseKey(id);
+  closeAllExpand();
+  _showDeviceCodeThrobber(id, deviceCode);
+
+  const MAX_POLLS = 150;
+  let polls = 0;
+  const timer = setInterval(async () => {
+    polls++;
+    try {
+      const res  = await fetch(`/api/connections/${id}/cli-login-status`);
+      const data = await res.json();
+      if (data.status === 'connected') {
+        clearInterval(timer);
+        _hideLoginThrobber(id);
+        await loadConnections();
+      } else if (polls >= MAX_POLLS) {
+        // Device code flow: codex polls OpenAI internally regardless of our session,
+        // so keep polling on 'error' until MAX_POLLS — only give up after time is up.
+        clearInterval(timer);
+        _hideLoginThrobber(id);
+        alert('Login timed out — please try again.');
+      }
+    } catch { /* network blip */ }
+  }, 2000);
+}
+
+// CLI browser login — open tab, show throbber, poll until connected
+function _doCliBrowserLogin(id, url) {
+  window.open(url, '_blank');
+  collapseKey(id);        // close API key expand row if open
+  closeAllExpand();
+  _showLoginThrobber(id);
+
+  const MAX_POLLS = 150; // 5 min at 2 s each
+  let polls = 0;
+  const timer = setInterval(async () => {
+    polls++;
+    try {
+      const res  = await fetch(`/api/connections/${id}/cli-login-status`);
+      const data = await res.json();
+      if (data.status === 'connected') {
+        clearInterval(timer);
+        _hideLoginThrobber(id);
+        await loadConnections();
+      } else if (data.status === 'error' || polls >= MAX_POLLS) {
+        clearInterval(timer);
+        _hideLoginThrobber(id);
+        if (data.errorMessage) alert('Login failed: ' + data.errorMessage);
+        else if (polls >= MAX_POLLS) alert('Login timed out — please try again.');
+      }
+    } catch { /* network blip — keep polling */ }
+  }, 2000);
+}
+
+const _SPINNER_SVG = `<svg class="spin" width="13" height="13" viewBox="0 0 24 24" fill="none">
+  <circle cx="12" cy="12" r="10" stroke="#5a6080" stroke-width="2.5" stroke-dasharray="16 48"/>
+</svg>`;
+
+function _showLoginThrobber(id) {
+  const wrap = document.getElementById('ai-wrap-' + id) || document.getElementById('plat-card-' + id);
+  if (!wrap || document.getElementById('throbber-row-' + id)) return;
+  const row = document.createElement('div');
+  row.id = 'throbber-row-' + id;
+  row.style.cssText = 'border-top:1px solid #252a38;padding:10px 16px;';
+  row.innerHTML = `
+    <div id="throbber-status-${id}" style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      ${_SPINNER_SVG}
+      <span id="throbber-msg-${id}" style="font-size:11px;color:#5a6080;">Authorize in the tab that opened. The browser will show a connection error — that is expected. Copy the full URL from the address bar (<code style="font-size:10px;">http://localhost:…/callback?code=…</code>) and paste it below:</span>
+    </div>
+    <div id="code-area-${id}" style="display:flex;gap:6px;">
+      <input id="code-input-${id}" type="text" autocomplete="off" placeholder="http://localhost:…/callback?code=…&state=…"
+        style="flex:1;background:#0f1117;border:1px solid #6366f1;border-radius:5px;
+               padding:6px 10px;font-size:12px;color:#e8eaf2;font-family:'JetBrains Mono',monospace;"
+        onkeydown="if(event.key==='Enter') submitCode('${id}')" />
+      <button onclick="submitCode('${id}')"
+        style="font-size:12px;font-weight:500;padding:6px 14px;border-radius:5px;
+               background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;">Submit</button>
+    </div>`;
+  wrap.appendChild(row);
+  setTimeout(() => document.getElementById('code-input-' + id)?.focus(), 50);
+}
+
+function _hideLoginThrobber(id) {
+  document.getElementById('throbber-row-' + id)?.remove();
+}
+
+function _showDeviceCodeThrobber(id, deviceCode) {
+  const wrap = document.getElementById('ai-wrap-' + id) || document.getElementById('plat-card-' + id);
+  if (!wrap || document.getElementById('throbber-row-' + id)) return;
+  const row = document.createElement('div');
+  row.id = 'throbber-row-' + id;
+  row.style.cssText = 'border-top:1px solid #252a38;padding:10px 16px;';
+  const codeHtml = deviceCode
+    ? `<div style="margin-top:8px;font-size:11px;color:#5a6080;">
+         Enter this code on the page that just opened:
+         <code style="font-size:13px;font-weight:700;color:#e8eaf2;letter-spacing:2px;margin-left:6px;">${deviceCode}</code>
+       </div>`
+    : '';
+  row.innerHTML = `
+    <div id="throbber-status-${id}" style="display:flex;flex-direction:column;gap:4px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        ${_SPINNER_SVG}
+        <span id="throbber-msg-${id}" style="font-size:11px;color:#5a6080;">Sign in on the tab that just opened, then enter the code below.</span>
+      </div>
+      ${codeHtml}
+    </div>`;
+  wrap.appendChild(row);
+}
+
+async function submitCode(id) {
+  const inp  = document.getElementById('code-input-' + id);
+  const code = inp?.value.trim();
+  if (!code) { inp?.focus(); return; }
+
+  inp.disabled = true;
+  const btn = inp.nextElementSibling;
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await fetch(`/api/connections/${id}/submit-code`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ code }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert('Submit failed: ' + (err.detail || res.statusText || res.status));
+      inp.disabled = false;
+      if (btn) btn.disabled = false;
+      return;
+    }
+    // Code accepted: hide code area, update message, keep polling
+    const area = document.getElementById('code-area-' + id);
+    if (area) area.remove();
+    const msg = document.getElementById('throbber-msg-' + id);
+    if (msg) msg.textContent = 'Completing sign-in…';
+  } catch (e) {
+    alert('Submit error: ' + e.message);
+    inp.disabled = false;
+    if (btn) btn.disabled = false;
+  }
+}
+
+// Medium OAuth popup — wait for postMessage from callback page
+function _doOAuthPopup(id, url) {
+  const popup = window.open(url, `${id}_oauth`, 'width=620,height=720,scrollbars=yes');
+  if (!popup) { alert('Popup blocked — allow popups for this page and try again.'); return; }
+  collapseKey(id);
+  const allowedOrigin = window.location.origin;
+  const handler = async (e) => {
+    if (e.origin !== allowedOrigin) return;
+    if (e.data?.type !== 'oauth-complete' || e.data?.platform !== id) return;
+    window.removeEventListener('message', handler);
+    await loadConnections();
+  };
+  window.addEventListener('message', handler);
+}
+
 
 // ─── Close popovers on outside click ──────────────────────────────────────────
 document.addEventListener('click', (e) => {

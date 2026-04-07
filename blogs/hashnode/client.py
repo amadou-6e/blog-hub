@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -37,12 +39,30 @@ class HashnodeDraftResult:
     raw: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class HashnodeRemoteArticle:
+    """Normalized Hashnode article payload returned by draft/post queries."""
+
+    article_id: str
+    title: str
+    url: str | None
+    canonical_url: str | None
+    subtitle: str | None
+    body_markdown: str
+    published: bool
+    updated_at: datetime | None
+    cover_image_url: str | None
+    raw: dict[str, Any]
+
+
 class HashnodeClient:
     """Thin wrapper around the Hashnode draft API."""
 
     def __init__(self, personal_access_token: str, session: requests.Session | None = None) -> None:
         self._token = personal_access_token
         self._session = session or requests.Session()
+        if session is None:
+            self._session.trust_env = False
 
     @property
     def headers(self) -> dict[str, str]:
@@ -88,6 +108,118 @@ class HashnodeClient:
             raw=data,
         )
 
+    def list_drafts(self, *, first: int = 20) -> list[HashnodeRemoteArticle]:
+        query = """
+        query MeDrafts($first: Int!) {
+          me {
+            drafts(first: $first) {
+              edges {
+                node {
+                  id
+                  title
+                  subtitle
+                  canonicalUrl
+                  dateUpdated
+                  coverImage {
+                    url
+                  }
+                  publication {
+                    url
+                  }
+                  content {
+                    markdown
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+        payload = self._graphql(query, {"first": first})
+        return [
+            self._remote_article_payload(edge["node"], published=False)
+            for edge in payload["data"]["me"]["drafts"]["edges"]
+        ]
+
+    def list_published_articles(
+        self,
+        *,
+        publication_first: int = 10,
+        post_first: int = 20,
+    ) -> list[HashnodeRemoteArticle]:
+        articles: list[HashnodeRemoteArticle] = []
+        for publication in self.list_publications(first=publication_first):
+            host = _publication_host(publication["url"])
+            if not host:
+                continue
+            query = """
+            query PublicationPosts($host: String!, $first: Int!) {
+              publication(host: $host) {
+                posts(first: $first) {
+                  edges {
+                    node {
+                      id
+                      title
+                      subtitle
+                      canonicalUrl
+                      url
+                      publishedAt
+                      coverImage {
+                        url
+                      }
+                      content {
+                        markdown
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """
+            payload = self._graphql(query, {"host": host, "first": post_first})
+            edges = (((payload.get("data") or {}).get("publication") or {}).get("posts") or {}).get(
+                "edges",
+                [],
+            )
+            articles.extend(
+                self._remote_article_payload(edge["node"], published=True)
+                for edge in edges
+            )
+        return articles
+
+    def list_publications(self, *, first: int = 10) -> list[dict[str, str]]:
+        query = """
+        query MePublications($first: Int!) {
+          me {
+            publications(first: $first) {
+              edges {
+                node {
+                  id
+                  title
+                  url
+                }
+              }
+            }
+          }
+        }
+        """
+        payload = self._graphql(query, {"first": first})
+        return [edge["node"] for edge in payload["data"]["me"]["publications"]["edges"]]
+
+    def _graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+        response = self._session.post(
+            "https://gql.hashnode.com",
+            headers=self.headers,
+            json={"query": query, "variables": variables},
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+        errors = data.get("errors")
+        if errors:
+            raise HashnodeError(str(errors))
+        return data
+
     @staticmethod
     def strip_leading_h1(markdown_text: str) -> str:
         """Remove the leading H1 to avoid a duplicate title in Hashnode."""
@@ -126,3 +258,58 @@ class HashnodeClient:
         if draft.cover_image_url:
             payload["coverImageOptions"] = {"coverImageURL": draft.cover_image_url}
         return payload
+
+    @staticmethod
+    def _remote_article_payload(payload: dict[str, Any], *, published: bool) -> HashnodeRemoteArticle:
+        cover_image = payload.get("coverImage") or {}
+        publication = payload.get("publication") or {}
+        article_url = _optional_string(payload.get("url"))
+        if not article_url and not published:
+            publication_url = _optional_string(publication.get("url"))
+            draft_id = _optional_string(payload.get("id"))
+            if publication_url and draft_id:
+                article_url = publication_url.rstrip("/") + "/preview/" + draft_id
+        content = payload.get("content") or {}
+        updated_at = (
+            _parse_datetime(payload.get("dateUpdated"))
+            or _parse_datetime(payload.get("publishedAt"))
+            or _parse_datetime(payload.get("updatedAt"))
+        )
+        return HashnodeRemoteArticle(
+            article_id=str(payload["id"]),
+            title=str(payload.get("title") or ""),
+            url=article_url,
+            canonical_url=_optional_string(payload.get("canonicalUrl")),
+            subtitle=_optional_string(payload.get("subtitle")),
+            body_markdown=str(content.get("markdown") or ""),
+            published=published,
+            updated_at=updated_at,
+            cover_image_url=_optional_string(cover_image.get("url")),
+            raw=payload,
+        )
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _parse_datetime(raw_value: object) -> datetime | None:
+    value = _optional_string(raw_value)
+    if not value:
+        return None
+    normalized = value.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+
+def _publication_host(publication_url: str | None) -> str | None:
+    if not publication_url:
+        return None
+    parsed = urlparse(publication_url)
+    host = (parsed.netloc or "").strip()
+    return host or None

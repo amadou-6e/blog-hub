@@ -10,7 +10,7 @@ sys.path.insert(0, _blog_hub_root)
 import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
-import backend.store.memory as store
+import backend.store as store
 
 
 @pytest.fixture(autouse=True)

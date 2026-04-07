@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 import requests
@@ -36,6 +37,22 @@ class DevToPublishResult:
     raw: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class DevToRemoteArticle:
+    """Normalized DEV.to article payload returned by list endpoints."""
+
+    article_id: int
+    title: str
+    url: str | None
+    canonical_url: str | None
+    description: str | None
+    body_markdown: str
+    published: bool
+    updated_at: datetime | None
+    cover_image: str | None
+    raw: dict[str, Any]
+
+
 class DevToClient:
     """Thin wrapper around the DEV.to article endpoints."""
 
@@ -49,6 +66,8 @@ class DevToClient:
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
         self._session = session or requests.Session()
+        if session is None:
+            self._session.trust_env = False
 
     @property
     def headers(self) -> dict[str, str]:
@@ -82,6 +101,27 @@ class DevToClient:
     def build_request_body(self, article: DevToArticle) -> dict[str, Any]:
         """Return the JSON body without sending it."""
         return {"article": self._article_payload(article)}
+
+    def list_my_articles(self, *, per_page: int = 100, page: int = 1) -> list[DevToRemoteArticle]:
+        """Return the authenticated user's published and draft DEV.to articles."""
+        response = self._session.get(
+            f"{self._base_url}/articles/me/all",
+            headers=self.headers,
+            params={"per_page": per_page, "page": page},
+            timeout=30,
+        )
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise DevToError(f"DEV.to API returned non-JSON ({response.status_code})") from exc
+
+        if not response.ok:
+            error_message: object = data
+            if isinstance(data, dict):
+                error_message = data.get("error") or data.get("message") or data
+            raise DevToError(f"DEV.to API error {response.status_code}: {error_message}")
+
+        return [self._remote_article_payload(item) for item in data]
 
     @staticmethod
     def _article_payload(article: DevToArticle) -> dict[str, Any]:
@@ -121,3 +161,51 @@ class DevToClient:
         if isinstance(data, dict):
             error_message = data.get("error") or data.get("message") or data
         raise DevToError(f"DEV.to API error {response.status_code}: {error_message}")
+
+    @staticmethod
+    def _remote_article_payload(payload: dict[str, Any]) -> DevToRemoteArticle:
+        updated_at = (
+            _parse_datetime(payload.get("edited_at"))
+            or _parse_datetime(payload.get("published_at"))
+            or _parse_datetime(payload.get("created_at"))
+        )
+        return DevToRemoteArticle(
+            article_id=int(payload["id"]),
+            title=str(payload.get("title") or ""),
+            url=_article_url(payload),
+            canonical_url=_optional_string(payload.get("canonical_url")),
+            description=_optional_string(payload.get("description")),
+            body_markdown=str(payload.get("body_markdown") or ""),
+            published=bool(payload.get("published")),
+            updated_at=updated_at,
+            cover_image=_optional_string(payload.get("cover_image")),
+            raw=payload,
+        )
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _article_url(payload: dict[str, Any]) -> str | None:
+    url = _optional_string(payload.get("url"))
+    if url:
+        return url
+    path = _optional_string(payload.get("path"))
+    if path:
+        return path
+    return None
+
+
+def _parse_datetime(raw_value: object) -> datetime | None:
+    value = _optional_string(raw_value)
+    if not value:
+        return None
+    normalized = value.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None

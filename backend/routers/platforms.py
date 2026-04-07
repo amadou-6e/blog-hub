@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from backend.schemas.overview import PlatformListResponse, PlatformConnection, Platform
-import backend.store.memory as store
+import backend.store as store
 
 router = APIRouter(prefix="/api/platforms", tags=["platforms"])
 

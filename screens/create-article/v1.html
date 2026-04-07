@@ -267,9 +267,9 @@
 
           <div style="background:#181c27;border:1px solid #252a38;border-radius:8px;padding:20px;">
             <label style="display:block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#5a6080;margin-bottom:12px;">Push to</label>
-            <div style="display:flex;flex-direction:column;gap:8px;">
-
-              <!-- Medium — connected, selected -->
+            <div class="dest-list" style="display:flex;flex-direction:column;gap:8px;">
+              <!-- Populated by renderDestinations() → initView() → GET /api/agent/platforms -->
+              <!-- Fallback: Medium connected by default while API loads -->
               <div class="dest-card on" id="dest-medium">
                 <div style="display:flex;align-items:center;gap:10px;">
                   <span style="width:7px;height:7px;border-radius:50%;background:#4ade80;flex-shrink:0;"></span>
@@ -282,41 +282,6 @@
                   <div class="toggle-thumb" style="left:16px;"></div>
                 </div>
               </div>
-
-              <!-- Hashnode — auth expired -->
-              <div class="dest-card warn">
-                <div style="display:flex;align-items:center;gap:10px;">
-                  <span style="width:7px;height:7px;border-radius:50%;background:#fbbf24;flex-shrink:0;"></span>
-                  <div>
-                    <div style="font-size:13px;font-weight:500;color:#e8eaf2;">Hashnode</div>
-                    <div style="display:flex;align-items:center;gap:6px;margin-top:1px;">
-                      <span style="font-size:11px;color:#fbbf24;">Session expired</span>
-                      <a href="#" onclick="event.stopPropagation();alert('→ reconnect Hashnode')" style="font-size:11px;color:#6366f1;text-decoration:none;">Reconnect</a>
-                    </div>
-                  </div>
-                </div>
-                <div class="toggle-track" style="background:#252a38;">
-                  <div class="toggle-thumb" style="left:2px;background:#3a3f52;"></div>
-                </div>
-              </div>
-
-              <!-- Dev.to — not configured -->
-              <div class="dest-card off">
-                <div style="display:flex;align-items:center;gap:10px;">
-                  <span style="width:7px;height:7px;border-radius:50%;background:#252a38;flex-shrink:0;"></span>
-                  <div>
-                    <div style="font-size:13px;font-weight:500;color:#e8eaf2;">Dev.to</div>
-                    <div style="display:flex;align-items:center;gap:6px;margin-top:1px;">
-                      <span style="font-size:11px;color:#5a6080;">Not configured</span>
-                      <a href="#" onclick="event.stopPropagation();alert('→ Settings')" style="font-size:11px;color:#5a6080;text-decoration:none;">Add in Settings</a>
-                    </div>
-                  </div>
-                </div>
-                <div class="toggle-track" style="background:#1a1e2a;">
-                  <div class="toggle-thumb" style="left:2px;background:#252a38;"></div>
-                </div>
-              </div>
-
             </div>
           </div>
         </div>
@@ -361,13 +326,14 @@
 
 <script>
 // ─── State ──────────────────────────────────────────────────────
-let currentStep  = 2;  // start at step 2 (came from overview)
-let selectedSkill = 'deep-dive';
+let currentStep      = 1;               // start at step 1
+let selectedSkill    = 'deep-dive';
 let selectedProvider = 'claude';
-let wordCount    = 1500;
-let destMedium   = true;
-let promptText   = '';
-let uploadedFile = null;
+let wordCount        = 1500;
+let destinations     = { medium: true };  // fallback until initView() resolves
+let promptText       = '';
+let uploadedFile     = null;
+let _providersData   = [];             // [{id, label, configured}]
 
 const SKILLS = [
   { id: 'deep-dive',  label: 'Technical deep-dive', desc: 'In-depth exploration with code examples' },
@@ -385,6 +351,23 @@ const TEMPLATES = {
 renderSkills();
 renderSummary();
 renderStep();
+initView();
+
+// ─── initView — load live data from API ─────────────────────────
+async function initView() {
+  try {
+    const [provRes, platRes] = await Promise.all([
+      fetch('/api/agent/providers').then(r => r.json()),
+      fetch('/api/agent/platforms').then(r => r.json()),
+    ]);
+    _providersData = provRes.providers || [];
+    renderProviders(_providersData);
+    renderDestinations(platRes.platforms || []);
+    renderSummary();
+  } catch (e) {
+    // Server not reachable (static file mode) — keep hardcoded fallback state
+  }
+}
 
 // ─── Skills ─────────────────────────────────────────────────────
 function renderSkills() {
@@ -412,6 +395,21 @@ function selectSkill(id) {
 }
 
 // ─── Provider ───────────────────────────────────────────────────
+function renderProviders(providers) {
+  // Update warning state for each provider button based on live API data
+  providers.forEach(p => {
+    if (p.id === 'codex') {
+      const warn = document.getElementById('codex-warning');
+      if (warn) warn.style.display = (!p.configured && selectedProvider === 'codex') ? 'flex' : 'none';
+    }
+    if (p.id === 'claude') {
+      // If Claude not configured and currently selected, show a warning (re-use codex-warning pattern)
+      // For now just reflect in summary — Claude warning handled by disabled Generate state
+    }
+  });
+  updateGenerateEnabled();
+}
+
 function setProvider(p) {
   selectedProvider = p;
   const isCodex = p === 'codex';
@@ -419,8 +417,24 @@ function setProvider(p) {
   document.getElementById('provider-claude').style.color      = isCodex ? '#5a6080' : '#fff';
   document.getElementById('provider-codex').style.background  = isCodex ? '#6366f1' : 'transparent';
   document.getElementById('provider-codex').style.color       = isCodex ? '#fff' : '#5a6080';
-  document.getElementById('codex-warning').style.display      = isCodex ? 'flex' : 'none';
+  // Codex-specific warning
+  const codexProvider = _providersData.find(pr => pr.id === 'codex');
+  const codexWarning = document.getElementById('codex-warning');
+  if (codexWarning) codexWarning.style.display = (isCodex && codexProvider && !codexProvider.configured) ? 'flex' : 'none';
+  updateGenerateEnabled();
   renderSummary();
+}
+
+function updateGenerateEnabled() {
+  // Disable Generate on step 3 if no destinations selected or provider not configured
+  if (currentStep !== 3) return;
+  const nextBtn = document.getElementById('next-btn');
+  if (!nextBtn) return;
+  const hasDestination = Object.values(destinations).some(Boolean);
+  const providerOk = _providersData.length === 0 ||
+    (_providersData.find(p => p.id === selectedProvider) || {configured: true}).configured;
+  nextBtn.disabled = !(hasDestination && providerOk);
+  nextBtn.style.opacity = nextBtn.disabled ? '0.45' : '1';
 }
 
 // ─── Word count ─────────────────────────────────────────────────
@@ -492,18 +506,66 @@ function clearFile() {
     <span style="font-size:12px;color:#5a6080;">Drop a <span style="font-family:'JetBrains Mono',monospace;color:#3a3f52;">.md</span> file or <span style="color:#6366f1;cursor:pointer;">browse</span></span>`;
 }
 
-// ─── Destination toggle ─────────────────────────────────────────
+// ─── Destination toggle & render ────────────────────────────────
 function toggleDest(platform) {
-  if (platform === 'medium') {
-    destMedium = !destMedium;
-    const card   = document.getElementById('dest-medium');
-    const track  = document.getElementById('toggle-medium');
-    const thumb  = track.querySelector('.toggle-thumb');
-    card.className  = 'dest-card ' + (destMedium ? 'on' : '');
-    track.style.background = destMedium ? '#6366f1' : '#252a38';
-    thumb.style.left = destMedium ? '16px' : '2px';
+  if (destinations[platform] !== undefined) {
+    destinations[platform] = !destinations[platform];
+    const card  = document.getElementById('dest-' + platform);
+    const track = document.getElementById('toggle-' + platform);
+    const thumb = track && track.querySelector('.toggle-thumb');
+    const on = destinations[platform];
+    if (card)  card.className  = 'dest-card ' + (on ? 'on' : '');
+    if (track) track.style.background = on ? '#6366f1' : '#252a38';
+    if (thumb) thumb.style.left       = on ? '16px' : '2px';
+    updateGenerateEnabled();
     renderSummary();
   }
+}
+
+function renderDestinations(platforms) {
+  // Build destinations state map (new connected platforms start toggled on)
+  platforms.forEach(p => {
+    if (destinations[p.id] === undefined) {
+      destinations[p.id] = p.status === 'connected';
+    }
+  });
+
+  const container = document.querySelector('#step-3 .dest-list');
+  if (!container) return;
+
+  container.innerHTML = platforms.map(p => {
+    const isOn       = p.status === 'connected' && destinations[p.id];
+    const isExpired  = p.status === 'expired';
+    const isOff      = p.status === 'not_configured';
+    const dot        = isOn ? '#4ade80' : isExpired ? '#fbbf24' : '#252a38';
+    const cardClass  = isOn ? 'on' : isExpired ? 'warn' : 'off';
+    const statusText = isOn      ? 'Connected'
+                     : isExpired ? `<span style="color:#fbbf24;">Session expired</span>
+                                    <a href="../settings/v2.html" style="font-size:11px;color:#6366f1;text-decoration:none;">Reconnect</a>`
+                     :            `<span style="color:#5a6080;">Not configured</span>
+                                    <a href="../settings/v2.html" style="font-size:11px;color:#5a6080;text-decoration:none;">Add in Settings</a>`;
+    const trackBg   = isOn ? '#6366f1' : '#252a38';
+    const thumbLeft = isOn ? '16px' : '2px';
+    const thumbBg   = isOn ? '#fff' : isExpired ? '#3a3f52' : '#252a38';
+    const onclick   = (p.status === 'connected') ? `toggleDest('${p.id}')` : '';
+    return `
+      <div class="dest-card ${cardClass}" id="dest-${p.id}">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="width:7px;height:7px;border-radius:50%;background:${dot};flex-shrink:0;"></span>
+          <div>
+            <div style="font-size:13px;font-weight:500;color:#e8eaf2;">${p.label}</div>
+            <div style="display:flex;align-items:center;gap:6px;margin-top:1px;font-size:11px;">${statusText}</div>
+          </div>
+        </div>
+        <div class="toggle-track" id="toggle-${p.id}" style="background:${trackBg};${onclick ? 'cursor:pointer;' : ''}"
+             ${onclick ? `onclick="${onclick}"` : ''}>
+          <div class="toggle-thumb" style="left:${thumbLeft};background:${thumbBg};"></div>
+        </div>
+      </div>`;
+  }).join('');
+
+  updateGenerateEnabled();
+  renderSummary();
 }
 
 // ─── Step navigation ────────────────────────────────────────────
@@ -577,6 +639,7 @@ function renderStep() {
     nextBtn.textContent     = 'Generate ✦';
     nextBtn.style.padding   = '9px 28px';
     nextBtn.style.fontSize  = '14px';
+    updateGenerateEnabled();
   } else {
     dotsEl.style.display    = 'flex';
     nextBtn.style.position  = 'static';
@@ -606,9 +669,14 @@ function prevStep() {
   }
 }
 
-function startGeneration() {
+async function startGeneration() {
   const nextBtn = document.getElementById('next-btn');
   const backBtn = document.getElementById('back-btn');
+
+  // Remove any previous error
+  const prev = document.getElementById('gen-error');
+  if (prev) prev.remove();
+
   nextBtn.innerHTML = `
     <svg class="spin" width="11" height="11" viewBox="0 0 24 24" fill="none" style="display:inline;vertical-align:middle;margin-right:6px;">
       <circle cx="12" cy="12" r="10" stroke="#fff4" stroke-width="3"/>
@@ -619,15 +687,73 @@ function startGeneration() {
   backBtn.style.opacity = '0.3';
   backBtn.disabled = true;
 
-  // Simulate generation complete after 3s
-  setTimeout(() => {
-    alert('Article generated. Opening editor…');
+  try {
+    // Read context file content if one was uploaded
+    let contextText = null;
+    if (uploadedFile) {
+      contextText = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = e => resolve(e.target.result);
+        reader.onerror = () => reject(new Error('Failed to read context file'));
+        reader.readAsText(uploadedFile);
+      });
+    }
+
+    // Collect selected destinations from the dynamic toggle state
+    const selectedDestinations = Object.entries(destinations)
+      .filter(([, on]) => on)
+      .map(([id]) => id);
+
+    const resp = await fetch('/api/agent/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        brief:       promptText,
+        skill:       selectedSkill,
+        provider:    selectedProvider,
+        wordCount:   wordCount,
+        contextText: contextText,
+        destinations: selectedDestinations,
+      }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      const msg = err.detail || `Server error ${resp.status}`;
+      throw new Error(
+        resp.status === 400
+          ? `Provider not configured — ${msg}`
+          : msg
+      );
+    }
+
+    // 202 — navigate immediately to editor; editor polls the job
+    const { articleId } = await resp.json();
+    window.location.href = `../editor/v2.html?id=${articleId}`;
+
+  } catch (err) {
     nextBtn.disabled = false;
     backBtn.disabled = false;
     nextBtn.style.opacity = '1';
     backBtn.style.opacity = '1';
     nextBtn.textContent = 'Generate ✦';
-  }, 3000);
+    updateGenerateEnabled();
+
+    const errorEl = document.createElement('div');
+    errorEl.id = 'gen-error';
+    errorEl.style.cssText = (
+      'position:fixed;bottom:72px;left:50%;transform:translateX(-50%);' +
+      'background:#2a1515;border:1px solid #7f1d1d;border-radius:6px;' +
+      'padding:10px 18px;font-size:12px;color:#f87171;max-width:540px;' +
+      'text-align:center;z-index:50;white-space:pre-wrap;display:flex;align-items:center;gap:10px;'
+    );
+    errorEl.innerHTML = `
+      <span>${err.message || 'Generation failed. Try again.'}</span>
+      <button onclick="startGeneration()" style="font-size:11px;padding:3px 10px;border-radius:4px;background:#3f1515;border:1px solid #7f1d1d;color:#f87171;cursor:pointer;font-family:inherit;white-space:nowrap;">Retry</button>
+    `;
+    document.body.appendChild(errorEl);
+    setTimeout(() => errorEl.remove(), 15000);
+  }
 }
 
 // ─── Summary panel ──────────────────────────────────────────────
@@ -659,8 +785,12 @@ function renderSummary() {
     },
     {
       label: 'Destinations',
-      done: destMedium,
-      value: destMedium ? 'Medium' : 'None selected',
+      done: Object.values(destinations).some(Boolean),
+      value: (() => {
+        const active = Object.entries(destinations).filter(([,on]) => on).map(([id]) =>
+          id.charAt(0).toUpperCase() + id.slice(1));
+        return active.length ? active.join(', ') : 'None selected';
+      })(),
     },
   ];
 

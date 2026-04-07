@@ -242,8 +242,8 @@ function renderCard(conn) {
   // Subtitle line under platform name
   const subtitle = isConnected && conn.username
     ? `<div class="text-xs font-mono text-muted mt-0.5">${conn.username}</div>`
-    : isError && conn.error_message
-    ? `<div class="text-xs text-red-400 mt-0.5">${conn.error_message}</div>`
+    : isError && conn.errorMessage
+    ? `<div class="text-xs text-red-400 mt-0.5">${conn.errorMessage}</div>`
     : '';
 
   // Action buttons

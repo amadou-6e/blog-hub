@@ -1,0 +1,92 @@
+<h1>Indentation Variants</h1>
+<p>These sections capture the long-block source shape we used when focusing on indentation preservation.</p>
+
+<h2>Variant: raw_spaces</h2>
+<pre><code class="python">def pattern_seven():
+    rows = []
+    for index in range(20):
+        rows.append({
+            "marker": "PATTERN-07-CODE",
+            "index": index,
+            "value": index * 3,
+        })
+    return rows
+
+result = pattern_seven()
+for row in result:
+    print(row["marker"], row["index"], row["value"])</code></pre>
+
+<h2>Variant: tabs</h2>
+<pre><code class="python">def pattern_seven():
+	rows = []
+	for index in range(20):
+		rows.append({
+			"marker": "PATTERN-07-CODE",
+			"index": index,
+			"value": index * 3,
+		})
+	return rows
+
+result = pattern_seven()
+for row in result:
+	print(row["marker"], row["index"], row["value"])</code></pre>
+
+<h2>Variant: figure_space</h2>
+<pre><code class="python">def pattern_seven():
+    rows = []
+    for index in range(20):
+     rows.append({
+     "marker": "PATTERN-07-CODE",
+     "index": index,
+     "value": index * 3,
+     })
+    return rows
+
+result = pattern_seven()
+for row in result:
+    print(row["marker"], row["index"], row["value"])</code></pre>
+
+<h2>Variant: ideographic_space</h2>
+<pre><code class="python">def pattern_seven():
+　　　　rows = []
+　　　　for index in range(20):
+　　　　　rows.append({
+　　　　　"marker": "PATTERN-07-CODE",
+　　　　　"index": index,
+　　　　　"value": index * 3,
+　　　　　})
+　　　　return rows
+
+result = pattern_seven()
+for row in result:
+　　　　print(row["marker"], row["index"], row["value"])</code></pre>
+
+<h2>Variant: narrow_no_break_space</h2>
+<pre><code class="python">def pattern_seven():
+    rows = []
+    for index in range(20):
+     rows.append({
+     "marker": "PATTERN-07-CODE",
+     "index": index,
+     "value": index * 3,
+     })
+    return rows
+
+result = pattern_seven()
+for row in result:
+    print(row["marker"], row["index"], row["value"])</code></pre>
+
+<h2>Variant: mixed_nbsp_thin_space</h2>
+<pre><code class="python">def pattern_seven():
+    rows = []
+    for index in range(20):
+     rows.append({
+     "marker": "PATTERN-07-CODE",
+     "index": index,
+     "value": index * 3,
+     })
+    return rows
+
+result = pattern_seven()
+for row in result:
+    print(row["marker"], row["index"], row["value"])</code></pre>

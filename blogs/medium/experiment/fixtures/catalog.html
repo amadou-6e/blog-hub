@@ -1,0 +1,17 @@
+<h1>Medium Telegraph Experiment Fixture Catalog</h1>
+<p>These HTML fixtures capture the source shapes we tested directly, so the next experiments can start from explicit pre-upload HTML instead of inferred Markdown conversion.</p>
+
+<h2>Available fixtures</h2>
+<ul>
+  <li><code>line_break_variants.html</code> — plain <code>pre</code> variants with <code>br</code> versus literal newlines and different blank-line handling</li>
+  <li><code>tag_variants.html</code> — <code>pre</code>, <code>pre+code</code>, <code>code</code>, and plain paragraph source shapes</li>
+  <li><code>code_class_variants.html</code> — raw and <code>language-*</code> classes on <code>code</code> nodes</li>
+  <li><code>indentation_variants.html</code> — the long-block source shape with raw spaces, tabs, and Unicode-space indentation</li>
+</ul>
+
+<h2>Current takeaways</h2>
+<ul>
+  <li>Plain <code>pre</code> stayed the strongest general source shape for broad pattern survival.</li>
+  <li><code>pre+code</code> with a raw language class became important for preserving the full multiline body of the long block.</li>
+  <li>Visible indentation differences only started to survive when we tried wider Unicode spaces such as figure space, ideographic space, and narrow no-break space.</li>
+</ul>

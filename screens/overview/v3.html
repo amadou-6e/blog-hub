@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -54,6 +54,8 @@
       display: flex;
       overflow: hidden;
       min-height: 148px;
+      width: 100%;
+      max-width: 1080px;
     }
     .article-card:hover  { border-color: #3a3f52; background: #1b2030; }
     .article-card.selected { border-color: #6366f1; background: #1a1f30; }
@@ -82,13 +84,40 @@
 
     /* Side panel */
     #side-panel {
-      width: 288px; flex-shrink: 0;
-      border-left: 1px solid #252a38;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: row;
+      overflow: hidden;
       background: #13172a;
-      display: flex; flex-direction: column;
-      transition: opacity 160ms, transform 160ms;
+      transition: width 140ms ease, flex-basis 140ms ease, opacity 140ms ease;
     }
-    #side-panel.hidden { opacity: 0; pointer-events: none; transform: translateX(16px); }
+    #side-panel.hidden {
+      width: 0;
+      flex-basis: 0;
+      opacity: 0;
+      pointer-events: none;
+    }
+    #side-strip {
+      width: 12px;
+      flex-shrink: 0;
+      border-left: 1px solid #252a38;
+      border-right: 1px solid #252a38;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      background: #13172a;
+      transition: background 100ms;
+    }
+    #side-strip:hover { background: #181d31; }
+    #panel-content {
+      width: 288px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: #13172a;
+    }
 
     ::-webkit-scrollbar { width: 5px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -125,39 +154,87 @@
     }
     .plat-tab:hover { color: #c9cfe0; }
     .plat-tab.active { color: #e8eaf2; background: #1e2438; }
+
+    .act {
+      flex-shrink: 0; width: 76px; text-align: center;
+      font-size: 11px; font-weight: 500; padding: 4px 0;
+      border-radius: 5px; border: 1px solid transparent;
+      cursor: pointer; font-family: inherit; white-space: nowrap;
+    }
+    .act:disabled { cursor: default; opacity: 0.6; }
+
+    .preview-frame {
+      position: relative;
+      height: 100%;
+      aspect-ratio: 1200 / 630;
+      max-width: 100%;
+      margin-left: auto;
+      border: 1px solid #252a38;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #10131c;
+    }
   </style>
 </head>
 <body class="font-sans" style="height:100vh;display:flex;flex-direction:column;overflow:hidden;">
 
-<!-- ═══════════════════════════════════════════
+<!-- -------------------------------------------
      ZONE A: Top nav
-════════════════════════════════════════════════ -->
-<nav style="height:48px;background:#0f1117;border-bottom:1px solid #252a38;flex-shrink:0;display:flex;align-items:center;padding:0 32px;z-index:40;position:relative;">
-  <div style="display:flex;align-items:center;gap:24px;">
-    <div style="display:flex;align-items:center;gap:8px;">
-      <div style="width:22px;height:22px;border-radius:5px;background:#6366f1;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-          <path d="M2 2h8M2 6h5M2 10h7" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
-        </svg>
-      </div>
-      <span style="color:#e8eaf2;font-weight:600;font-size:14px;letter-spacing:-0.02em;">BlogHub</span>
+------------------------------------------------ -->
+<nav style="height:48px;background:#0f1117;border-bottom:1px solid #252a38;flex-shrink:0;display:flex;align-items:center;padding:0 32px;z-index:40;">
+  <!-- Logo — left, flex:1 so it doesn't shrink into tabs -->
+  <div style="flex:1;display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden;">
+    <div style="width:22px;height:22px;border-radius:5px;background:#6366f1;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+        <path d="M2 2h8M2 6h5M2 10h7" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
     </div>
-    <div style="display:flex;align-items:stretch;height:48px;">
-      <button onclick="setView('articles')"  id="nav-articles"  class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid #6366f1;color:#e8eaf2;font-weight:500;">Articles</button>
-      <button onclick="setView('queue')"     id="nav-queue"     class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid transparent;color:#5a6080;">Queue</button>
-      <button onclick="setView('platforms')" id="nav-platforms" class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid transparent;color:#5a6080;">Platforms</button>
-      <button onclick="setView('settings')"  id="nav-settings"  class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid transparent;color:#5a6080;">Settings</button>
-    </div>
+    <span style="color:#e8eaf2;font-weight:600;font-size:14px;letter-spacing:-0.02em;white-space:nowrap;">BlogHub</span>
   </div>
-  <div style="margin-left:auto;display:flex;align-items:center;gap:14px;">
-    <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#5a6080;">
+  <!-- Nav tabs — center, no grow so logo and actions stay in their own lanes -->
+  <div style="display:flex;align-items:stretch;height:48px;flex-shrink:0;">
+    <button onclick="setView('articles')"  id="nav-articles"  class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid #6366f1;color:#e8eaf2;font-weight:500;">Articles</button>
+    <button onclick="setView('queue')"     id="nav-queue"     class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid transparent;color:#5a6080;">Queue</button>
+    <button onclick="setView('platforms')" id="nav-platforms" class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid transparent;color:#5a6080;">Platforms</button>
+    <button onclick="setView('settings')"  id="nav-settings"  class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid transparent;color:#5a6080;">Settings</button>
+  </div>
+  <!-- Right actions — flex:1 justify-end keeps it in its own lane -->
+  <div style="flex:1;display:flex;align-items:center;gap:14px;justify-content:flex-end;min-width:0;">
+    <div id="connected-count" style="display:flex;align-items:center;gap:6px;font-size:12px;color:#5a6080;">
       <span style="width:6px;height:6px;border-radius:50%;background:#4ade80;display:inline-block;"></span>
       3 platforms connected
     </div>
-    <button onclick="alert('→ /create')" style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;padding:6px 12px;border-radius:6px;background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;">
-      <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>
-      New article
-    </button>
+    <!-- Split button (variant A): left = New article, right chevron = dropdown -->
+    <div style="position:relative;display:flex;border-radius:6px;overflow:visible;border:1px solid #4f52d9;" id="split-btn-wrap">
+      <button onclick="window.location.href='../create-article/v1.html'"
+        style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;padding:6px 12px;background:#6366f1;color:#fff;border:none;border-right:1px solid #4f52d9;cursor:pointer;font-family:inherit;border-radius:5px 0 0 5px;">
+        <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>
+        New article
+      </button>
+      <button onclick="toggleImportMenu(event)" id="create-menu-btn"
+        style="display:flex;align-items:center;padding:6px 8px;background:#6366f1;color:#ffffffcc;border:none;cursor:pointer;border-radius:0 5px 5px 0;">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <!-- Dropdown styled like variant C: icon box + title + subtitle -->
+      <div id="import-menu" style="display:none;position:absolute;top:calc(100% + 6px);right:0;background:#181c27;border:1px solid #252a38;border-radius:8px;padding:4px;z-index:50;width:240px;box-shadow:0 8px 24px #00000066;">
+        <button onclick="window.location.href='../import-article/v1.html?mode=platform&returnTo=overview'"
+          style="display:flex;align-items:center;gap:9px;width:100%;padding:8px 12px;font-size:13px;color:#c9cfe0;background:transparent;border:none;cursor:pointer;font-family:inherit;border-radius:5px;text-align:left;transition:background 80ms;"
+          onmouseover="this.style.background='#252a38'" onmouseout="this.style.background='transparent'">
+          <div style="width:26px;height:26px;border-radius:5px;background:#1e2a1e;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </div>
+          <div><div>Import from platform</div><div style="font-size:11px;color:#5a6080;margin-top:1px;">Fetch a draft from a connected platform</div></div>
+        </button>
+        <button onclick="window.location.href='../import-article/v1.html?mode=upload&returnTo=overview'"
+          style="display:flex;align-items:center;gap:9px;width:100%;padding:8px 12px;font-size:13px;color:#c9cfe0;background:transparent;border:none;cursor:pointer;font-family:inherit;border-radius:5px;text-align:left;transition:background 80ms;"
+          onmouseover="this.style.background='#252a38'" onmouseout="this.style.background='transparent'">
+          <div style="width:26px;height:26px;border-radius:5px;background:#1e2028;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#c9cfe0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          </div>
+          <div><div>Upload .md file</div><div style="font-size:11px;color:#5a6080;margin-top:1px;">Use an existing markdown document</div></div>
+        </button>
+      </div>
+    </div>
   </div>
 </nav>
 
@@ -167,20 +244,21 @@
   <!-- Left: filter bar + grid -->
   <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;">
 
-    <!-- ═══════════════════════════════════════════
+    <!-- -------------------------------------------
          ZONE B: Filter bar (two-row)
-    ════════════════════════════════════════════════ -->
-    <div id="filterbar" style="flex-shrink:0;border-bottom:1px solid #252a38;background:#0f1117;">
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 32px 0;">
-        <div style="position:relative;">
+    ------------------------------------------------ -->
+    <div id="filterbar" style="flex-shrink:0;border-bottom:1px solid #252a38;background:#0f1117;padding:18px 32px 8px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <!-- Search -->
+        <div style="position:relative;flex-shrink:0;">
           <svg style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:#5a6080;" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path stroke-linecap="round" d="m21 21-4.35-4.35"/></svg>
           <input id="search-input" type="text" placeholder="Search articles…" oninput="applyFilters()"
-            style="padding:6px 10px 6px 30px;font-size:12px;border-radius:6px;border:1px solid #252a38;background:#181c27;color:#c9cfe0;width:220px;font-family:inherit;outline:none;"
+            style="padding:6px 10px 6px 30px;font-size:12px;border-radius:6px;border:1px solid #252a38;background:#181c27;color:#c9cfe0;width:260px;font-family:inherit;outline:none;"
             onfocus="this.style.borderColor='#6366f1'" onblur="this.style.borderColor='#252a38'" />
         </div>
-        <span id="article-count" style="font-size:12px;color:#5a6080;font-family:'JetBrains Mono',monospace;">— articles</span>
-      </div>
-      <div style="display:flex;align-items:center;padding:6px 32px 8px;gap:0;">
+        <!-- Vertical line after search -->
+        <div style="width:1px;height:14px;background:#252a38;flex-shrink:0;"></div>
+        <!-- Status pills -->
         <div style="display:flex;align-items:center;gap:2px;">
           <button class="pill-filter active" id="sf-all"       onclick="setStatusFilter('all',this)">All</button>
           <button class="pill-filter"        id="sf-drafting"  onclick="setStatusFilter('drafting',this)">Drafting</button>
@@ -188,192 +266,79 @@
           <button class="pill-filter"        id="sf-error"     onclick="setStatusFilter('error',this)">Error</button>
           <button class="pill-filter"        id="sf-published" onclick="setStatusFilter('published',this)">Published</button>
         </div>
-        <div style="width:1px;height:14px;background:#252a38;margin:0 12px;"></div>
+        <!-- Divider -->
+        <div style="width:1px;height:14px;background:#252a38;flex-shrink:0;"></div>
+        <!-- Platform pills -->
         <div style="display:flex;align-items:center;gap:4px;">
           <button class="pill-platform" id="pf-medium"   onclick="togglePlatform('medium',this)">Medium</button>
           <button class="pill-platform" id="pf-hashnode" onclick="togglePlatform('hashnode',this)">Hashnode</button>
           <button class="pill-platform" id="pf-devto"    onclick="togglePlatform('devto',this)">Dev.to</button>
         </div>
-        <div style="margin-left:auto;display:flex;gap:6px;">
-          <button onclick="toggleSkeleton()" style="font-size:11px;padding:3px 8px;border-radius:4px;border:1px solid #252a38;background:transparent;color:#5a6080;cursor:pointer;font-family:inherit;">Toggle skeleton</button>
-          <button onclick="toggleEmpty()"    style="font-size:11px;padding:3px 8px;border-radius:4px;border:1px solid #252a38;background:transparent;color:#5a6080;cursor:pointer;font-family:inherit;">Toggle empty</button>
-        </div>
+        <!-- Article count pushed to the right -->
+        <span id="article-count" style="margin-left:auto;font-size:12px;color:#5a6080;font-family:'JetBrains Mono',monospace;white-space:nowrap;">— articles</span>
       </div>
     </div>
 
-    <!-- ═══════════════════════════════════════════
+    <!-- -------------------------------------------
          ZONE C: Card list (single column)
-    ════════════════════════════════════════════════ -->
+    ------------------------------------------------ -->
     <div id="grid-area" style="flex:1;overflow-y:auto;padding:24px 32px;">
-      <div id="card-grid" style="display:grid;grid-template-columns:1fr;gap:12px;"></div>
+      <div id="card-grid" style="display:grid;grid-template-columns:minmax(0, 1080px);justify-content:center;gap:12px;width:100%;margin:0 auto;"></div>
 
       <div id="empty-state" style="display:none;flex-direction:column;align-items:center;justify-content:center;min-height:360px;text-align:center;">
-        <div style="font-size:40px;color:#252a38;margin-bottom:16px;line-height:1;">✦</div>
+        <div style="font-size:40px;color:#252a38;margin-bottom:16px;line-height:1;">?</div>
         <div style="color:#e8eaf2;font-weight:600;font-size:15px;margin-bottom:6px;">Nothing here yet</div>
         <div style="color:#5a6080;font-size:13px;margin-bottom:20px;max-width:280px;line-height:1.6;">Draft an article once, push to Medium, Hashnode, and Dev.to from one screen.</div>
-        <button onclick="alert('→ /create')" style="font-size:12px;font-weight:500;padding:8px 16px;border-radius:6px;background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;">+ New article</button>
+        <button onclick="window.location.href='../create-article/v1.html'" style="font-size:12px;font-weight:500;padding:8px 16px;border-radius:6px;background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;">+ New article</button>
       </div>
 
       <div id="no-results" style="display:none;flex-direction:column;align-items:center;justify-content:center;min-height:360px;text-align:center;">
-        <div style="font-size:40px;color:#252a38;margin-bottom:16px;line-height:1;">✦</div>
+        <div style="font-size:40px;color:#252a38;margin-bottom:16px;line-height:1;">?</div>
         <div style="color:#e8eaf2;font-weight:600;font-size:15px;margin-bottom:6px;">No articles match</div>
         <div style="color:#5a6080;font-size:13px;margin-bottom:16px;">Try different filters or search terms.</div>
-        <button onclick="clearFilters()" style="font-size:12px;font-weight:500;color:#6366f1;background:transparent;border:none;cursor:pointer;font-family:inherit;">Clear filters →</button>
+        <button onclick="clearFilters()" style="font-size:12px;font-weight:500;color:#6366f1;background:transparent;border:none;cursor:pointer;font-family:inherit;">Clear filters ?</button>
       </div>
     </div>
   </div>
 
-  <!-- ═══════════════════════════════════════════
+  <!-- -------------------------------------------
        Side panel
-  ════════════════════════════════════════════════ -->
+  ------------------------------------------------ -->
   <div id="side-panel" class="hidden">
-    <div style="padding:14px 16px;border-bottom:1px solid #252a38;display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
-      <span id="panel-title" style="color:#e8eaf2;font-size:13px;font-weight:500;line-height:1.4;"></span>
-      <button onclick="closePanel()" style="color:#5a6080;background:none;border:none;cursor:pointer;padding:2px;flex-shrink:0;margin-top:1px;">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M18 6 6 18M6 6l12 12"/></svg>
-      </button>
+    <div id="side-strip" onclick="toggleDetailsPanel()" title="Toggle details panel">
+      <svg id="side-strip-arrow" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#5a6080" stroke-width="2.5">
+        <polyline points="9 18 15 12 9 6"/>
+      </svg>
     </div>
-    <div style="padding:12px 16px;border-bottom:1px solid #252a38;">
-      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#5a6080;margin-bottom:10px;">Destinations</div>
-      <div id="panel-destinations" style="display:flex;flex-direction:column;gap:8px;"></div>
-    </div>
-    <div style="padding:12px 16px;flex:1;overflow-y:auto;">
-      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#5a6080;margin-bottom:10px;">Timeline</div>
-      <div id="panel-timeline" style="display:flex;flex-direction:column;gap:8px;"></div>
-    </div>
-    <div style="padding:12px 16px;border-top:1px solid #252a38;display:flex;flex-direction:column;gap:6px;">
-      <button id="panel-primary-btn" style="font-size:12px;font-weight:500;padding:8px;border-radius:6px;background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;width:100%;">—</button>
-      <div style="display:flex;gap:6px;">
-        <button style="flex:1;font-size:12px;padding:6px;border-radius:6px;background:transparent;color:#c9cfe0;border:1px solid #252a38;cursor:pointer;font-family:inherit;">Edit</button>
-        <button style="flex:1;font-size:12px;padding:6px;border-radius:6px;background:transparent;color:#c9cfe0;border:1px solid #252a38;cursor:pointer;font-family:inherit;">Inspect</button>
-        <button style="flex:1;font-size:12px;padding:6px;border-radius:6px;background:transparent;color:#c9cfe0;border:1px solid #252a38;cursor:pointer;font-family:inherit;">Schedule</button>
+    <div id="panel-content">
+      <div style="padding:14px 16px;border-bottom:1px solid #252a38;display:flex;align-items:flex-start;justify-content:flex-start;gap:8px;">
+        <span id="panel-title" style="color:#e8eaf2;font-size:13px;font-weight:500;line-height:1.4;"></span>
+      </div>
+      <div style="padding:12px 16px;border-bottom:1px solid #252a38;">
+        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#5a6080;margin-bottom:10px;">Destinations</div>
+        <div id="panel-destinations" style="display:flex;flex-direction:column;gap:8px;"></div>
+      </div>
+      <div style="padding:12px 16px;flex:1;overflow-y:auto;">
+        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#5a6080;margin-bottom:10px;">Timeline</div>
+        <div id="panel-timeline" style="display:flex;flex-direction:column;gap:8px;"></div>
+      </div>
+      <div style="padding:12px 16px;border-top:1px solid #252a38;display:flex;flex-direction:column;gap:6px;">
+        <button id="panel-primary-btn" style="font-size:12px;font-weight:500;padding:8px;border-radius:6px;background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;width:100%;">—</button>
+        <div style="display:flex;gap:6px;">
+          <button style="flex:1;font-size:12px;padding:6px;border-radius:6px;background:transparent;color:#c9cfe0;border:1px solid #252a38;cursor:pointer;font-family:inherit;">Edit</button>
+          <button id="panel-inspect-btn" style="flex:1;font-size:12px;padding:6px;border-radius:6px;background:transparent;color:#c9cfe0;border:1px solid #252a38;cursor:pointer;font-family:inherit;">Inspect</button>
+          <button style="flex:1;font-size:12px;padding:6px;border-radius:6px;background:transparent;color:#c9cfe0;border:1px solid #252a38;cursor:pointer;font-family:inherit;">Schedule</button>
+        </div>
       </div>
     </div>
   </div>
 </div>
 
 <script>
-// ─── Data ──────────────────────────────────────────────────────────
-const ARTICLES = [
-  {
-    id: 1, urgency: 1,
-    title: 'Embedding Models Compared: OpenAI vs Cohere vs BGE',
-    updated: '3h ago', words: 2100,
-    destinations: {
-      medium:   { status: 'error',   label: 'Error' },
-      hashnode: { status: 'draft',   label: 'Draft v1' },
-      devto:    { status: 'none',    label: 'No draft' },
-    },
-    gate: 'fail',
-    action: { label: 'Inspect →', color: '#f87171', bg: '#2d1a1a', border: '#4d2a2a' },
-    timeline: [
-      { time: '10:14', event: 'Medium push failed — auth expired' },
-      { time: '10:14', event: 'Gate check: FAIL — missing tail section' },
-      { time: '09:55', event: 'Draft created on Hashnode' },
-    ]
-  },
-  {
-    id: 2, urgency: 2,
-    title: 'RAG Pipeline with Neo4j and LangChain',
-    updated: '1d ago', words: 1950,
-    destinations: {
-      medium:   { status: 'review', label: 'Needs review' },
-      hashnode: { status: 'draft',  label: 'Draft v1' },
-      devto:    { status: 'error',  label: 'Error' },
-    },
-    gate: 'warn',
-    action: { label: 'Inspect →', color: '#fbbf24', bg: '#2a2510', border: '#4a3d1a' },
-    timeline: [
-      { time: 'Apr 1', event: 'Drafts pushed to Medium and Hashnode' },
-      { time: 'Apr 1', event: 'Dev.to push failed — code block split' },
-      { time: 'Apr 1', event: 'Gate: WARN — 1 image missing on Hashnode' },
-    ]
-  },
-  {
-    id: 3, urgency: 3,
-    title: 'Building a Vector DB from Scratch with pgvector',
-    updated: '2h ago', words: 1800,
-    destinations: {
-      medium:   { status: 'draft',   label: 'Draft v2' },
-      hashnode: { status: 'pending', label: 'Pending' },
-      devto:    { status: 'draft',   label: 'Draft v1' },
-    },
-    gate: 'pass',
-    action: { label: 'Schedule →', color: '#fff', bg: '#6366f1', border: '#6366f1' },
-    timeline: [
-      { time: '14:02', event: 'Draft v2 pushed to Medium' },
-      { time: '14:05', event: 'Gate: PASS — all checks clear' },
-      { time: '15:30', event: 'Hashnode queued for 09:00 tomorrow' },
-    ]
-  },
-  {
-    id: 4, urgency: 3,
-    title: 'Graph Neural Networks: A Practical Introduction',
-    updated: '5d ago', words: 3200,
-    destinations: {
-      medium:   { status: 'draft', label: 'Draft v1' },
-      hashnode: { status: 'none',  label: 'No draft' },
-      devto:    { status: 'none',  label: 'No draft' },
-    },
-    gate: 'pass',
-    action: { label: 'Push drafts →', color: '#fff', bg: '#6366f1', border: '#6366f1' },
-    timeline: [
-      { time: 'Mar 28', event: 'Article created' },
-      { time: 'Mar 28', event: 'Draft pushed to Medium' },
-      { time: 'Mar 29', event: 'Gate: PASS' },
-    ]
-  },
-  {
-    id: 5, urgency: 4,
-    title: 'Zero-downtime Postgres Migrations',
-    updated: '1w ago', words: 2400,
-    destinations: {
-      medium:   { status: 'ready', label: 'Ready' },
-      hashnode: { status: 'ready', label: 'Ready' },
-      devto:    { status: 'ready', label: 'Ready' },
-    },
-    gate: 'pass',
-    action: { label: 'Schedule →', color: '#fff', bg: '#6366f1', border: '#6366f1' },
-    timeline: [
-      { time: 'Mar 25', event: 'All drafts validated' },
-      { time: 'Mar 25', event: 'Scheduled: Apr 6, 09:00' },
-    ]
-  },
-  {
-    id: 6, urgency: 5,
-    title: 'Dockerised Postgres: Production Checklist',
-    updated: '3d ago', words: 1600,
-    destinations: {
-      medium:   { status: 'published', label: 'Published' },
-      hashnode: { status: 'published', label: 'Published' },
-      devto:    { status: 'published', label: 'Published' },
-    },
-    gate: 'pass',
-    action: { label: 'View live ↗', color: '#38bdf8', bg: '#0d2830', border: '#1a3d4a' },
-    timeline: [
-      { time: 'Mar 30', event: 'Published to Medium' },
-      { time: 'Mar 30', event: 'Published to Hashnode' },
-      { time: 'Mar 31', event: 'Published to Dev.to' },
-    ]
-  },
-  {
-    id: 7, urgency: 5,
-    title: 'Async Python Patterns for Data Engineers',
-    updated: '2w ago', words: 2050,
-    destinations: {
-      medium:   { status: 'published', label: 'Published' },
-      hashnode: { status: 'published', label: 'Published' },
-      devto:    { status: 'published', label: 'Published' },
-    },
-    gate: 'pass',
-    action: { label: 'View live ↗', color: '#38bdf8', bg: '#0d2830', border: '#1a3d4a' },
-    timeline: [
-      { time: 'Mar 18', event: 'Published to all platforms' },
-    ]
-  },
-];
+// --- Data ----------------------------------------------------------
+let ARTICLES = [];
 
-// ─── Per-platform thumbnail palette ────────────────────────────────
+// --- Per-platform thumbnail palette --------------------------------
 // Each entry: { heading, para, codeBlock, codeLine1, codeLine2, codeLine3, codeLine4, imagePlaceholder, fade }
 const PLATFORM_PALETTE = {
   medium: {
@@ -416,23 +381,175 @@ const PLATFORM_PALETTE = {
 
 const PLATFORM_LABEL = { medium: 'Medium', hashnode: 'Hashnode', devto: 'Dev.to' };
 
-// ─── State ─────────────────────────────────────────────────────────
+// --- State ---------------------------------------------------------
 let selectedId     = null;
 let statusFilter   = 'all';
 let platformFilter = new Set();
 let showSkeleton   = false;
 let showEmpty      = false;
 let openMenuId     = null;
+let detailsPanelOpen = true;
 // Per-card active preview platform: Map<articleId, 'medium'|'hashnode'|'devto'>
 const activePreview = new Map();
 
-// ─── Helpers ───────────────────────────────────────────────────────
+// --- Helpers -------------------------------------------------------
 const DOT_COLOR = {
   draft: '#6ea8fe', ready: '#4ade80', published: '#38bdf8',
   pending: '#fbbf24', error: '#f87171', none: '#252a38', review: '#fbbf24',
 };
 const GATE_COLOR = { pass: '#4ade80', warn: '#fbbf24', fail: '#f87171', pending: '#5a6080' };
 const GATE_LABEL = { pass: '✓ Pass', warn: '⚠ Warn', fail: '✗ Fail', pending: '—' };
+const activeJobs = new Map();
+
+function formatRelative(isoValue) {
+  const date = new Date(isoValue);
+  if (Number.isNaN(date.getTime())) return String(isoValue || '');
+  const diffMs = Date.now() - date.getTime();
+  const diffHours = Math.floor(diffMs / 3600000);
+  if (diffHours < 1) return `${Math.max(1, Math.floor(diffMs / 60000))}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return `${Math.floor(diffDays / 7)}w ago`;
+}
+
+function formatTimelineTime(isoValue) {
+  const date = new Date(isoValue);
+  if (Number.isNaN(date.getTime())) return String(isoValue || '');
+  return date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function chooseAction(article) {
+  const destinations = Object.values(article.destinations);
+  const links = destinations.map(d => d.url).filter(Boolean);
+  if (article.gate === 'fail' || destinations.some(d => d.status === 'error')) {
+    return { kind: 'inspect', label: 'Inspect →', color: '#f87171', bg: '#2d1a1a', border: '#4d2a2a' };
+  }
+  if (destinations.every(d => d.status === 'published' || d.status === 'none') && links.length > 0) {
+    return { kind: 'open', label: 'View live ↗', color: '#38bdf8', bg: '#0d2830', border: '#1a3d4a', url: links[0] };
+  }
+  if (destinations.some(d => d.status === 'ready')) {
+    return { kind: 'schedule', label: 'Schedule →', color: '#fff', bg: '#6366f1', border: '#6366f1' };
+  }
+  return { kind: 'push', label: 'Push drafts →', color: '#fff', bg: '#6366f1', border: '#6366f1' };
+}
+
+function preferredLiveUrl(article, platform) {
+  const preferredDestination = article.destinations[platform];
+  if (preferredDestination && preferredDestination.url) return preferredDestination.url;
+  for (const status of ['published', 'draft', 'ready', 'review', 'pending']) {
+    for (const name of ['medium', 'hashnode', 'devto']) {
+      const destination = article.destinations[name];
+      if (destination && destination.status === status && destination.url) {
+        return destination.url;
+      }
+    }
+  }
+  return null;
+}
+
+function buildLiveArticle(raw, index) {
+  return {
+    id: raw.id,
+    urgency: index + 1,
+    title: raw.title,
+    updated: formatRelative(raw.updatedAt),
+    words: raw.wordCount,
+    previewImageUrl: raw.previewImageUrl || null,
+    source: raw.source || 'native',
+    sourcePlatform: raw.sourcePlatform || null,
+    destinations: {
+      medium: raw.destinations.medium,
+      hashnode: raw.destinations.hashnode,
+      devto: raw.destinations.devto,
+    },
+    gate: raw.gate,
+    action: chooseAction(raw),
+    timeline: (raw.recentTimeline || []).map(item => ({
+      time: formatTimelineTime(item.timestamp),
+      event: item.event,
+    })),
+  };
+}
+
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    throw new Error(await response.text() || `Request failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+async function loadOverview() {
+  const [articlesPayload, connectionsPayload] = await Promise.all([
+    fetchJson('/api/articles?sortBy=updatedAt&sortDir=desc&page=1&pageSize=100'),
+    fetchJson('/api/connections'),
+  ]);
+  ARTICLES = articlesPayload.items.map(buildLiveArticle);
+  const connected = connectionsPayload.connections.filter(
+    item => ['medium', 'hashnode', 'devto'].includes(item.id) && item.status === 'connected'
+  );
+  document.getElementById('connected-count').innerHTML = `
+    <span style="width:6px;height:6px;border-radius:50%;background:#4ade80;display:inline-block;"></span>
+    ${connected.length} platforms connected
+  `;
+}
+
+async function runArticleAction(article, overrideKind = null) {
+  const action = overrideKind ? { ...article.action, kind: overrideKind } : article.action;
+  if (action.kind === 'open' && action.url) {
+    window.open(action.url, '_blank', 'noopener,noreferrer');
+    return;
+  }
+  if (action.kind === 'schedule') {
+    alert('Schedule is not wired yet.');
+    return;
+  }
+  const endpoint = action.kind === 'inspect' ? 'inspect' : 'push';
+  activeJobs.set(article.id, endpoint);
+  render();
+  try {
+    const accepted = await fetchJson(`/api/articles/${article.id}/${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    await pollJob(accepted.jobId);
+    await loadOverview();
+  } catch (error) {
+    alert(`Action failed: ${error.message}`);
+  } finally {
+    activeJobs.delete(article.id);
+    render();
+  }
+}
+
+async function pollJob(jobId) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const job = await fetchJson(`/api/jobs/${jobId}`);
+    if (job.status === 'done') return job;
+    if (job.status === 'error') throw new Error(job.error || 'Job failed');
+    await new Promise(resolve => window.setTimeout(resolve, 500));
+  }
+  throw new Error('Timed out waiting for job completion');
+}
+
+function platformActionProps(status) {
+  switch (status) {
+    case 'draft': case 'review':
+      return { label: 'Publish',    bg: '#0e2d22',    border: '#1a4d35', color: '#4ade80', disabled: false };
+    case 'ready':
+      return { label: 'Schedule',   bg: 'transparent', border: '#4a5068', color: '#8a93b0', disabled: false };
+    case 'published':
+      return { label: 'View ↗',     bg: 'transparent', border: '#4a5068', color: '#8a93b0', disabled: false };
+    case 'pending':
+      return { label: 'Pending',    bg: '#1a1600',    border: '#3a3010', color: '#5a6080', disabled: true };
+    case 'error':
+      return { label: 'Retry',      bg: '#1e1818',    border: '#3a2828', color: '#c07070', disabled: false };
+    default:
+      return { label: 'Push draft', bg: 'transparent', border: '#4a5068', color: '#8a93b0', disabled: false };
+  }
+}
 
 function accentForArticle(a) {
   if (a.gate === 'fail') return '#f87171';
@@ -466,7 +583,7 @@ function matchesFilters(a) {
   return true;
 }
 
-// ─── Thumbnail builder ─────────────────────────────────────────────
+// --- Thumbnail builder ---------------------------------------------
 function buildThumbnail(pal) {
   return `
     <div style="display:flex;flex-direction:column;gap:5px;transform:scale(0.88);transform-origin:left center;">
@@ -516,17 +633,36 @@ function buildThumbnail(pal) {
   `;
 }
 
-// ─── Card renderer ─────────────────────────────────────────────────
+function buildPreviewMedia(article, platform) {
+  if (article.previewImageUrl) {
+    const alt = `${article.title} preview on ${PLATFORM_LABEL[platform]}`;
+    return `
+      <div class="preview-frame">
+        <div style="position:absolute;inset:0;background:#0f1117;">
+          <img
+            src="${article.previewImageUrl}"
+            alt="${alt.replace(/"/g, '&quot;')}"
+            style="width:100%;height:100%;object-fit:cover;object-position:top center;display:block;"
+          />
+          <div style="position:absolute;inset:0;background:linear-gradient(to bottom, rgba(15,17,23,0.08) 0%, rgba(15,17,23,0.12) 48%, rgba(15,17,23,0.82) 100%);pointer-events:none;"></div>
+        </div>
+      </div>
+    `;
+  }
+  return `<div class="preview-frame">${buildThumbnail(PLATFORM_PALETTE[platform])}</div>`;
+}
+
+// --- Card renderer -------------------------------------------------
 function renderCard(a) {
   const accent = accentForArticle(a);
   const isSelected = selectedId === a.id;
-  if (!activePreview.has(a.id)) activePreview.set(a.id, defaultPreviewPlatform(a));
-  const activePlat = activePreview.get(a.id);
+  const hasError = Object.values(a.destinations).some(d => d.status === 'error');
+  const PLAT_ASPECT = { medium: '16/9', hashnode: '40/21', devto: '50/21' };
 
   const card = document.createElement('div');
   card.className = 'article-card' + (isSelected ? ' selected' : '');
   card.dataset.id = a.id;
-  card.onclick = (e) => { if (!e.target.closest('.ctx-trigger') && !e.target.closest('.plat-tab')) selectCard(a.id); };
+  card.onclick = (e) => { if (!e.target.closest('.ctx-trigger') && !e.target.closest('.plat-tab') && !e.target.closest('.act')) selectCard(a.id); };
 
   // Accent bar
   const bar = document.createElement('div');
@@ -534,13 +670,13 @@ function renderCard(a) {
   bar.style.background = accent;
   card.appendChild(bar);
 
-  // ── Left metadata pane (fixed 320px) ──
+  // ── Left pane (332 px) ──────────────────────────────────────────
   const left = document.createElement('div');
-  left.style.cssText = 'width:320px;flex-shrink:0;padding:14px 16px 12px;display:flex;flex-direction:column;';
+  left.style.cssText = 'width:332px;flex-shrink:0;padding:12px 16px;display:flex;flex-direction:column;border-right:1px solid #252a38;';
 
   // Title + context menu
   const titleRow = document.createElement('div');
-  titleRow.style.cssText = 'display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:3px;';
+  titleRow.style.cssText = 'display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:2px;';
   const title = document.createElement('span');
   title.style.cssText = 'color:#e8eaf2;font-weight:500;font-size:13px;line-height:1.4;';
   title.textContent = a.title;
@@ -559,120 +695,155 @@ function renderCard(a) {
 
   // Meta
   const meta = document.createElement('div');
-  meta.style.cssText = 'color:#5a6080;font-family:"JetBrains Mono",monospace;font-size:11px;margin-bottom:10px;';
+  meta.style.cssText = 'color:#5a6080;font-family:"JetBrains Mono",monospace;font-size:11px;margin-bottom:6px;';
   meta.textContent = `${a.updated} · ${a.words.toLocaleString()} words`;
   left.appendChild(meta);
+
+  // Source badge (only for non-native articles)
+  if (a.source && a.source !== 'native') {
+    const badge = document.createElement('div');
+    badge.style.cssText = 'display:inline-flex;align-items:center;gap:4px;margin-bottom:8px;';
+    const PLATFORM_LABEL_SHORT = { medium: 'Medium', hashnode: 'Hashnode', devto: 'Dev.to' };
+    const sourceLabel = a.source === 'platform'
+      ? `Imported · ${PLATFORM_LABEL_SHORT[a.sourcePlatform] || a.sourcePlatform}`
+      : 'Uploaded';
+    badge.innerHTML = `<span style="font-size:10px;font-weight:500;padding:2px 6px;border-radius:4px;background:#1e2230;border:1px solid #3a3f52;color:#8a93b0;letter-spacing:0.02em;">${sourceLabel}</span>`;
+    left.appendChild(badge);
+  }
 
   // Divider 1
   const d1 = document.createElement('div');
   d1.style.cssText = 'height:1px;background:#252a38;margin-bottom:10px;';
   left.appendChild(d1);
 
-  // Destination rows
+  // Platform rows with action buttons
   const dests = document.createElement('div');
-  dests.style.cssText = 'display:flex;flex-direction:column;gap:5px;margin-bottom:10px;';
+  dests.style.cssText = 'display:flex;flex-direction:column;gap:6px;margin-bottom:10px;';
   ['medium', 'hashnode', 'devto'].forEach(p => {
     const d = a.destinations[p];
+    const ap = platformActionProps(d.status);
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;align-items:center;gap:7px;';
     const dot = document.createElement('span');
-    dot.className = 'dot';
-    dot.style.background = DOT_COLOR[d.status] || '#252a38';
+    dot.style.cssText = `width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${DOT_COLOR[d.status] || '#252a38'};`;
     row.appendChild(dot);
     const pname = document.createElement('span');
-    pname.style.cssText = 'color:#5a6080;font-size:12px;width:62px;flex-shrink:0;';
+    pname.style.cssText = 'color:#5a6080;font-size:12px;width:60px;flex-shrink:0;';
     pname.textContent = PLATFORM_LABEL[p];
     row.appendChild(pname);
     const lbl = document.createElement('span');
-    lbl.style.cssText = `color:${DOT_COLOR[d.status] || '#5a6080'};font-family:"JetBrains Mono",monospace;font-size:11px;`;
-    lbl.textContent = d.label;
+    lbl.style.cssText = `color:${DOT_COLOR[d.status] || '#5a6080'};font-family:"JetBrains Mono",monospace;font-size:11px;flex:1;min-width:0;`;
+    lbl.textContent = (d.status === 'none' || d.label === 'None') ? '—' : d.label;
     row.appendChild(lbl);
+    const btn = document.createElement('button');
+    btn.className = 'act';
+    btn.disabled = ap.disabled;
+    btn.style.cssText = `background:${ap.bg};border-color:${ap.border};color:${ap.color};`;
+    btn.textContent = ap.label;
+    if (d.status === 'published' && d.url) {
+      btn.onclick = (e) => { e.stopPropagation(); window.open(d.url, '_blank', 'noopener,noreferrer'); };
+    }
+    row.appendChild(btn);
     dests.appendChild(row);
   });
   left.appendChild(dests);
 
-  // Divider 2
+  // Divider + footer
   const d2 = document.createElement('div');
-  d2.style.cssText = 'height:1px;background:#252a38;margin-bottom:10px;';
+  d2.style.cssText = 'height:1px;background:#252a38;margin-top:auto;margin-bottom:10px;';
   left.appendChild(d2);
 
-  // Gate + action (push to bottom)
-  left.style.cssText += 'justify-content:flex-start;';
   const footer = document.createElement('div');
-  footer.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-top:auto;';
-  const gate = document.createElement('span');
-  gate.style.cssText = `color:${GATE_COLOR[a.gate]};font-family:"JetBrains Mono",monospace;font-size:11px;`;
-  gate.textContent = GATE_LABEL[a.gate];
-  footer.appendChild(gate);
-  const btn = document.createElement('button');
-  btn.style.cssText = `font-size:11px;font-weight:500;padding:5px 10px;border-radius:5px;background:${a.action.bg};color:${a.action.color};border:1px solid ${a.action.border};cursor:pointer;font-family:inherit;white-space:nowrap;`;
-  btn.textContent = a.action.label;
-  btn.onclick = (e) => { e.stopPropagation(); alert(`→ action: ${a.action.label} for "${a.title}"`); };
-  footer.appendChild(btn);
+  footer.style.cssText = 'display:flex;align-items:center;justify-content:flex-end;';
+  const footBtn = document.createElement('button');
+  if (hasError) {
+    footBtn.style.cssText = 'font-size:12px;font-weight:500;padding:5px 12px;border-radius:5px;background:transparent;color:#c07070;border:1px solid #3a2828;cursor:pointer;font-family:inherit;';
+    footBtn.textContent = 'Inspect';
+    footBtn.onclick = async (e) => { e.stopPropagation(); await runArticleAction(a, 'inspect'); };
+  } else {
+    footBtn.style.cssText = 'font-size:12px;font-weight:500;padding:5px 12px;border-radius:5px;background:transparent;color:#c9cfe0;border:1px solid #252a38;cursor:pointer;font-family:inherit;';
+    footBtn.textContent = 'Edit';
+    footBtn.onclick = (e) => { e.stopPropagation(); };
+  }
+  footer.appendChild(footBtn);
   left.appendChild(footer);
-
   card.appendChild(left);
 
-  // ── Vertical divider ──
-  const vdiv = document.createElement('div');
-  vdiv.style.cssText = 'width:1px;background:#252a38;flex-shrink:0;';
-  card.appendChild(vdiv);
-
-  // ── Right preview pane ──
+  // ── Right preview pane ───────────────────────────────────────────
   const right = document.createElement('div');
-  right.style.cssText = 'flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden;';
+  right.style.cssText = 'flex:1;display:flex;flex-direction:column;overflow:hidden;';
 
-  // Platform tabs row
+  // Platform tabs
   const tabRow = document.createElement('div');
   tabRow.style.cssText = 'display:flex;align-items:center;gap:2px;padding:8px 12px 6px;border-bottom:1px solid #252a38;flex-shrink:0;';
 
-  ['medium', 'hashnode', 'devto'].forEach(p => {
+  const panels = [];
+  ['medium', 'hashnode', 'devto'].forEach((p, idx) => {
     const d = a.destinations[p];
-    const isActive = p === activePlat;
+    const isActive = idx === 0;
     const dotColor = DOT_COLOR[d.status] || '#252a38';
-
     const tab = document.createElement('button');
     tab.className = 'plat-tab' + (isActive ? ' active' : '');
-    tab.onclick = (e) => {
-      e.stopPropagation();
-      activePreview.set(a.id, p);
-      // Update just this card's preview without full re-render
-      const previewEl = card.querySelector('.preview-content');
-      const pal = PLATFORM_PALETTE[p];
-      previewEl.innerHTML = buildThumbnail(pal);
-      // Update tabs
-      card.querySelectorAll('.plat-tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      // Update indicator bars
-      card.querySelectorAll('.tab-indicator').forEach((bar, i) => {
-        const platforms = ['medium','hashnode','devto'];
-        bar.style.opacity = platforms[i] === p ? '1' : '0';
-      });
-    };
-
-    // Inner layout: dot + blue bar (selection indicator) + label
+    tab.style.color = isActive ? '#e8eaf2' : '#5a6080';
+    tab.style.background = isActive ? '#1e2438' : 'transparent';
     tab.innerHTML = `
-      <span style="width:6px;height:6px;border-radius:50%;background:${dotColor};flex-shrink:0;"></span>
-      <span class="tab-indicator" style="width:2px;height:10px;border-radius:1px;background:#6366f1;flex-shrink:0;margin:0 1px;opacity:${isActive ? 1 : 0};transition:opacity 120ms;"></span>
+      <span style="width:6px;height:6px;border-radius:50%;background:${dotColor};flex-shrink:0;display:inline-block;"></span>
+      <span class="tab-indicator" style="width:2px;height:10px;border-radius:1px;background:#6366f1;flex-shrink:0;margin:0 1px;display:inline-block;opacity:${isActive ? 1 : 0};transition:opacity 120ms;"></span>
       <span>${PLATFORM_LABEL[p]}</span>
     `;
+    tab.onclick = (e) => {
+      e.stopPropagation();
+      tabRow.querySelectorAll('.plat-tab').forEach((t, j) => {
+        t.style.color = j === idx ? '#e8eaf2' : '#5a6080';
+        t.style.background = j === idx ? '#1e2438' : 'transparent';
+        const bar = t.querySelector('.tab-indicator');
+        if (bar) bar.style.opacity = j === idx ? '1' : '0';
+      });
+      panels.forEach((panel, j) => { panel.style.display = j === idx ? 'flex' : 'none'; });
+    };
     tabRow.appendChild(tab);
+
+    // Panel: thumbnail + text
+    const panel = document.createElement('div');
+    panel.style.cssText = `flex:1;padding:10px 14px;display:${isActive ? 'flex' : 'none'};gap:12px;align-items:center;overflow:hidden;`;
+
+    const thumbDiv = document.createElement('div');
+    thumbDiv.style.cssText = `flex-shrink:0;width:190px;aspect-ratio:${PLAT_ASPECT[p]};border-radius:6px;overflow:hidden;border:1px solid #252a38;background:#10131c;`;
+    if (a.previewImageUrl) {
+      const img = document.createElement('img');
+      img.src = a.previewImageUrl.startsWith('/') ? 'http://localhost:8002' + a.previewImageUrl : a.previewImageUrl;
+      img.alt = a.title;
+      img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
+      thumbDiv.appendChild(img);
+    }
+    panel.appendChild(thumbDiv);
+
+    const textDiv = document.createElement('div');
+    textDiv.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;gap:5px;justify-content:center;overflow:hidden;padding:2px 0;';
+    const titleText = document.createElement('div');
+    titleText.style.cssText = 'font-size:12px;font-weight:600;color:#c9cfe0;line-height:1.4;';
+    titleText.textContent = a.title;
+    textDiv.appendChild(titleText);
+    if (d.status === 'published' && d.url) {
+      const link = document.createElement('a');
+      link.href = d.url;
+      link.target = '_blank';
+      link.rel = 'noreferrer';
+      link.style.cssText = 'margin-top:4px;font-size:10px;font-weight:500;color:#38bdf8;text-decoration:none;display:inline-flex;align-items:center;gap:2px;';
+      link.innerHTML = 'View live <svg style="display:inline-block;vertical-align:middle;margin-left:2px;" width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 6.5L6.5 1.5M6.5 1.5H3M6.5 1.5V5"/></svg>';
+      textDiv.appendChild(link);
+    }
+    panel.appendChild(textDiv);
+    panels.push(panel);
   });
 
   right.appendChild(tabRow);
-
-  // Thumbnail area
-  const thumbArea = document.createElement('div');
-  thumbArea.style.cssText = 'flex:1;padding:14px 18px;position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:center;';
-  thumbArea.className = 'preview-content';
-  thumbArea.innerHTML = buildThumbnail(PLATFORM_PALETTE[activePlat]);
-  right.appendChild(thumbArea);
-
+  panels.forEach(p => right.appendChild(p));
   card.appendChild(right);
   return card;
 }
 
-// ─── Skeleton card ──────────────────────────────────────────────────
+// --- Skeleton card --------------------------------------------------
 function renderSkeleton() {
   const card = document.createElement('div');
   card.style.cssText = 'background:#181c27;border:1px solid #252a38;border-radius:8px;display:flex;overflow:hidden;min-height:148px;';
@@ -718,7 +889,7 @@ function renderSkeleton() {
   return card;
 }
 
-// ─── Render ────────────────────────────────────────────────────────
+// --- Render --------------------------------------------------------
 function render() {
   const grid    = document.getElementById('card-grid');
   const emptyEl = document.getElementById('empty-state');
@@ -727,28 +898,57 @@ function render() {
   emptyEl.style.display = 'none';
   noRes.style.display   = 'none';
 
-  if (showEmpty)    { emptyEl.style.display = 'flex'; document.getElementById('article-count').textContent = '0 articles'; return; }
+  if (showEmpty)    { emptyEl.style.display = 'flex'; document.getElementById('article-count').textContent = '0 articles'; syncDetailsPanel(); return; }
   if (showSkeleton) {
     for (let i = 0; i < 5; i++) grid.appendChild(renderSkeleton());
     document.getElementById('article-count').textContent = '— articles';
+    syncDetailsPanel();
     return;
   }
 
   const filtered = ARTICLES.filter(matchesFilters).sort((a, b) => a.urgency - b.urgency);
   document.getElementById('article-count').textContent = `${filtered.length} article${filtered.length !== 1 ? 's' : ''}`;
 
-  if (filtered.length === 0) { noRes.style.display = 'flex'; return; }
+  if (filtered.length === 0) { noRes.style.display = 'flex'; syncDetailsPanel(); return; }
   filtered.forEach(a => grid.appendChild(renderCard(a)));
+  syncDetailsPanel();
 }
 
-// ─── Interactions ──────────────────────────────────────────────────
+function syncDetailsPanel() {
+  const panel = document.getElementById('side-panel');
+  const content = document.getElementById('panel-content');
+  const arrow = document.getElementById('side-strip-arrow');
+  if (!selectedId) {
+    panel.classList.add('hidden');
+    return;
+  }
+
+  panel.classList.remove('hidden');
+  if (detailsPanelOpen) {
+    panel.style.width = '300px';
+    panel.style.flexBasis = '300px';
+    content.style.display = 'flex';
+    arrow.innerHTML = '<polyline points="9 18 15 12 9 6"/>';
+  } else {
+    panel.style.width = '12px';
+    panel.style.flexBasis = '12px';
+    content.style.display = 'none';
+    arrow.innerHTML = '<polyline points="15 18 9 12 15 6"/>';
+  }
+}
+
+// --- Interactions --------------------------------------------------
 function selectCard(id) {
   closeMenus();
-  selectedId = id === selectedId ? null : id;
+  if (id === selectedId) {
+    detailsPanelOpen = !detailsPanelOpen;
+    syncDetailsPanel();
+    return;
+  }
+  selectedId = id;
   render();
-  const panel = document.getElementById('side-panel');
-  if (!selectedId) { panel.classList.add('hidden'); return; }
-  panel.classList.remove('hidden');
+  detailsPanelOpen = true;
+  syncDetailsPanel();
   const a = ARTICLES.find(x => x.id === selectedId);
   document.getElementById('panel-title').textContent = a.title;
   document.getElementById('panel-destinations').innerHTML = ['medium','hashnode','devto'].map(p => {
@@ -772,9 +972,22 @@ function selectCard(id) {
   pb.style.background = a.action.bg;
   pb.style.color = a.action.color;
   pb.style.border = `1px solid ${a.action.border}`;
+  pb.onclick = async () => { await runArticleAction(a); };
+  document.getElementById('panel-inspect-btn').onclick = async () => { await runArticleAction(a, 'inspect'); };
 }
 
-function closePanel() { selectedId = null; render(); document.getElementById('side-panel').classList.add('hidden'); }
+function toggleDetailsPanel() {
+  if (!selectedId) return;
+  detailsPanelOpen = !detailsPanelOpen;
+  syncDetailsPanel();
+}
+
+function closePanel() {
+  selectedId = null;
+  detailsPanelOpen = true;
+  render();
+  syncDetailsPanel();
+}
 
 function setStatusFilter(val, el) {
   statusFilter = val;
@@ -803,6 +1016,17 @@ function clearFilters() {
 
 function toggleSkeleton() { showSkeleton = !showSkeleton; showEmpty = false; render(); }
 function toggleEmpty()    { showEmpty = !showEmpty; showSkeleton = false; render(); }
+
+function toggleImportMenu(e) {
+  e.stopPropagation();
+  const menu = document.getElementById('import-menu');
+  const isOpen = menu.style.display === 'block';
+  menu.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) {
+    const close = () => { menu.style.display = 'none'; document.removeEventListener('click', close); };
+    document.addEventListener('click', close);
+  }
+}
 
 function setView(v) {
   document.querySelectorAll('.nav-tab').forEach(t => {
@@ -834,7 +1058,15 @@ function closeMenus() {
   openMenuId = null;
 }
 
+showSkeleton = true;
 render();
+loadOverview()
+  .catch(error => { alert(`Failed to load overview: ${error.message}`); })
+  .finally(() => {
+    showSkeleton = false;
+    render();
+  });
 </script>
 </body>
 </html>
+

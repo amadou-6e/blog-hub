@@ -606,11 +606,14 @@ class TestMediumDevToImportDraft:
                             f"Response: {resp.text[:300]}")
             article_id, article_url = existing
             print(f"[devto] Reusing existing article (id={article_id}): {article_url}")
+            # Also update the body to ensure current content (not stale old content).
             pub = _requests.put(
                 f"{_DEVTO_BASE_URL}/articles/{article_id}",
                 headers=headers,
                 json={"article": {
-                    "published": True
+                    "title": title,
+                    "body_markdown": body,
+                    "published": True,
                 }},
                 timeout=30,
             )
@@ -717,11 +720,24 @@ class TestMediumDevToImportDraft:
                 # Real element (from diag dump): div.textInput.textInput--large.js-importUrl
                 # NOTE: .editable class and role="textbox" are added by JS *after* hydration.
                 # The base class js-importUrl is always present in the SSR'd HTML.
+                # Wait explicitly for the div to become contenteditable before typing.
+                try:
+                    page.wait_for_selector(
+                        'div.js-importUrl[contenteditable="true"]',
+                        state="visible",
+                        timeout=30_000,
+                    )
+                    print("[url-import] Import div is interactive (contenteditable)")
+                except PWTimeout:
+                    print("[url-import] WARNING: js-importUrl not contenteditable after 30s "
+                          "\u2014 will attempt click anyway")
+
                 url_input = None
                 for sel in [
+                        'div.textInput.textInput--large.js-importUrl.editable[role="textbox"]',
+                        'div.js-importUrl[contenteditable="true"]',  # hydrated (preferred)
                         'div.js-importUrl',
                         'div.textInput.textInput--large.js-importUrl',
-                        'div.textInput.textInput--large.js-importUrl.editable[role="textbox"]',
                         'div[role="textbox"]',
                         'input[placeholder*="URL"]',
                         'input[type="url"]',
@@ -741,7 +757,7 @@ class TestMediumDevToImportDraft:
                                 f"Diag dump: {diag_dir / 'import_page.html'}")
 
                 url_input.click()
-                page.keyboard.press("Control+a")
+                page.keyboard.press("Control+A")
                 page.keyboard.type(devto_url)
                 page.wait_for_timeout(1000)
 
@@ -756,9 +772,16 @@ class TestMediumDevToImportDraft:
                         btn = page.locator(btn_sel).first
                         btn.wait_for(state="visible", timeout=3000)
                         btn.click()
+                        print(f"[url-import] Clicked Import with selector: {btn_sel!r}")
                         break
                     except PWTimeout:
                         pass
+
+                # ── Diagnostic: screenshot 3 seconds after click ──────────
+                page.wait_for_timeout(3000)
+                (diag_dir / "post_click.png").write_bytes(page.screenshot(full_page=True))
+                post_click_url = page.url
+                print(f"[url-import] URL 3s after click: {post_click_url}")
 
                 # ── 4. Wait for editor URL (Medium redirects on success) ────
                 try:
@@ -1178,8 +1201,22 @@ class TestMediumGithubCdnImportDraft:
                                 f"URL: {page.url}\nDiag: {diag_dir}")
 
                 # ── 2. Enter the rawcdn URL ─────────────────────────────────
+                # Wait for contenteditable attribute (JS hydration) before typing.
+                try:
+                    page.wait_for_selector(
+                        'div.js-importUrl[contenteditable="true"]',
+                        state="visible",
+                        timeout=30_000,
+                    )
+                    print("[github-cdn] Import div is interactive (contenteditable)")
+                except PWTimeout:
+                    print("[github-cdn] WARNING: js-importUrl not contenteditable after 30s "
+                          "\u2014 will attempt click anyway")
+
                 url_input = None
                 for sel in [
+                        'div.textInput.textInput--large.js-importUrl.editable[role="textbox"]',
+                        'div.js-importUrl[contenteditable="true"]',  # hydrated (preferred)
                         "div.js-importUrl",
                         "div.textInput.textInput--large.js-importUrl",
                         'div[role="textbox"]',
@@ -1201,7 +1238,7 @@ class TestMediumGithubCdnImportDraft:
                                 f"Diag: {diag_dir / 'import_page.html'}")
 
                 url_input.click()
-                page.keyboard.press("Control+a")
+                page.keyboard.press("Control+A")
                 page.keyboard.type(pages_url)
                 page.wait_for_timeout(1000)
 
@@ -1409,6 +1446,538 @@ class TestMediumGithubCdnImportDraft:
             text = re.sub(r"<[^>]+>", "", code_part).strip()
             auto_in_code += len(re.findall(r"Auto\s+\(\w+\)", text))
         print(f"\n[github-cdn] Auto(...) inside code content: {auto_in_code} "
+              f"({'CLEAN' if auto_in_code == 0 else 'CORRUPTED'})")
+        assert auto_in_code == 0, (
+            f"{auto_in_code} Auto(...) language-label artefacts found INSIDE code content "
+            f"(excluding the codeBlockMenu-button UI element).  This is real corruption.")
+
+
+# ---------------------------------------------------------------------------
+# Shared inline-markdown helper (module level)
+# ---------------------------------------------------------------------------
+
+
+def _strip_inline_md(text: str) -> str:
+    """Strip common inline Markdown, returning plain text for Telegraph nodes."""
+    text = re.sub(r"\*\*\*([^*]+)\*\*\*", r"\1", text)
+    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
+    text = re.sub(r"\*([^*]+)\*", r"\1", text)
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Telegraph → Medium URL import test class
+# ---------------------------------------------------------------------------
+# Strategy: Publish the article as a telegra.ph page via the Telegraph API.
+# telegra.ph is a legitimate, widely-used anonymous publishing platform by
+# Telegram.  Unlike DEV.to (which applies Rouge syntax highlighting) and GitHub
+# Pages / rawcdn (which Medium's backend blocks), telegra.ph pages contain
+# exactly the content we POST: bare ``<pre>`` nodes with plain text and no
+# syntax-highlighting spans.
+#
+# Telegraph API features used:
+#   createAccount — no credentials required, returns a persistent access_token
+#   createPage    — POST title + Node array; code blocks are ``{"tag":"pre",...}``
+#   editPage      — update content on subsequent runs (idempotent)
+#   getPageList   — find existing page by title to avoid duplicates
+#
+# Token persistence:
+#   1. TELEGRAPH_ACCESS_TOKEN env var (highest priority)
+#   2. tests/fixtures/telegraph_token.txt  (written on first createAccount call)
+#   3. Fresh createAccount call (no auth required)
+#
+# Teardown: Telegraph pages cannot be deleted via API.  The fixture is
+# idempotent — it finds the existing page and updates it each run.
+#
+# Skip condition: none — Telegraph is fully public.
+# ---------------------------------------------------------------------------
+
+_TELEGRAPH_API = "https://api.telegra.ph"
+_TELEGRAPH_TOKEN_ENVVAR = "TELEGRAPH_ACCESS_TOKEN"
+_TELEGRAPH_TOKEN_FILE = _FIXTURES_DIR / "telegraph_token.txt"
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(360)
+class TestMediumTelegraphImportDraft:
+    """
+    End-to-end: publish article to telegra.ph → import URL into Medium → assert DOM.
+
+    telegra.ph pages contain exactly the HTML we define (plain ``<pre>`` nodes,
+    no spans).  This isolates whether Medium's importer preserves bare code
+    blocks independently of DEV.to's syntax-highlighting pipeline.
+    """
+
+    # ── Telegraph helpers ───────────────────────────────────────────────────
+
+    @staticmethod
+    def _get_or_create_token() -> str:
+        """Return a Telegraph access token, persisting it for reuse."""
+        import requests as _req
+        token = os.environ.get(_TELEGRAPH_TOKEN_ENVVAR, "").strip()
+        if token:
+            return token
+        if _TELEGRAPH_TOKEN_FILE.exists():
+            token = _TELEGRAPH_TOKEN_FILE.read_text(encoding="utf-8").strip()
+            if token:
+                return token
+        r = _req.post(
+            f"{_TELEGRAPH_API}/createAccount",
+            json={
+                "short_name": "BlogHub",
+                "author_name": "Blog Hub Tests"
+            },
+            timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json()
+        if not data.get("ok"):
+            raise RuntimeError(f"Telegraph createAccount failed: {data}")
+        token = data["result"]["access_token"]
+        _TELEGRAPH_TOKEN_FILE.write_text(token, encoding="utf-8")
+        print(f"[telegraph] Created new account, token saved to {_TELEGRAPH_TOKEN_FILE}")
+        return token
+
+    @staticmethod
+    def _markdown_to_telegraph_nodes(markdown_body: str) -> list:
+        """Convert Markdown body to a Telegraph Node array.
+
+        Code fences → ``{"tag": "pre", "children": [...]}`` with line breaks as
+        ``{"tag": "br"}`` nodes and empty lines as ``"\u00a0"`` (non-breaking
+        space).  No syntax-highlighting spans — content is exactly what we define.
+        """
+        nodes: list = []
+        lines = markdown_body.replace("\r\n", "\n").split("\n")
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+
+            # Fenced code block
+            if re.match(r"^```", line):
+                code_lines: list[str] = []
+                i += 1
+                while i < len(lines) and not re.match(r"^```", lines[i]):
+                    code_lines.append(lines[i])
+                    i += 1
+                children: list = []
+                for j, cl in enumerate(code_lines):
+                    if j > 0:
+                        children.append({"tag": "br"})
+                    children.append(cl if cl.strip() else "\u00a0")
+                if any(isinstance(c, str) and c.strip() and c != "\u00a0" for c in children):
+                    # Separate adjacent <pre> blocks so Medium's importer
+                    # doesn't merge them into a single code block.
+                    if nodes and isinstance(nodes[-1], dict) and nodes[-1].get("tag") == "pre":
+                        nodes.append({"tag": "p", "children": ["\u00a0"]})
+                    nodes.append({"tag": "pre", "children": children})
+                i += 1  # skip closing ```
+                continue
+
+            # Headings
+            if line.startswith("### "):
+                text = _strip_inline_md(line[4:].strip())
+                if text:
+                    nodes.append({"tag": "h4", "children": [text]})
+            elif line.startswith("## "):
+                text = _strip_inline_md(line[3:].strip())
+                if text:
+                    nodes.append({"tag": "h3", "children": [text]})
+            elif line.startswith("# "):
+                pass  # H1 is the page title; skip
+            elif re.match(r"^---+\s*$", line):
+                nodes.append({"tag": "hr"})
+            elif re.match(r"^!\[", line.strip()):
+                m = re.match(r"!\[([^\]]*)\]\(([^)]+)\)", line.strip())
+                if m:
+                    nodes.append({"tag": "img", "attrs": {"src": m.group(2)}})
+            elif line.startswith("> "):
+                text = _strip_inline_md(line[2:].strip())
+                if text:
+                    nodes.append({"tag": "blockquote", "children": [text]})
+            elif line.strip():
+                text = _strip_inline_md(line.strip())
+                if text:
+                    nodes.append({"tag": "p", "children": [text]})
+
+            i += 1
+
+        return nodes
+
+    # ── Fixtures ─────────────────────────────────────────────────────────────
+
+    @pytest.fixture(scope="class")
+    def telegraph_article(self):
+        """Create or update a Telegraph page with the sample article content.
+
+        Idempotent: finds an existing page with the same title under the token's
+        account and calls editPage; otherwise calls createPage.  Returns the
+        canonical page URL (``https://telegra.ph/<path>``).
+        """
+        import requests as _req
+
+        token = self._get_or_create_token()
+
+        markdown_text = _SAMPLE_MD.read_text(encoding="utf-8")
+        from blogs.medium._render import render_medium_markdown
+        rendered = render_medium_markdown(
+            markdown_text,
+            image_base_url=_IMAGE_BASE_URL,
+            strip_planning_tail=True,
+        )
+        title = rendered.title or "Untitled"
+        body = re.sub(r"^\s*#[^#][^\n]*\n", "", rendered.body_markdown, count=1).strip()
+        nodes = self._markdown_to_telegraph_nodes(body)
+
+        # Check if a page with this title already exists on the account
+        existing_path: str | None = None
+        try:
+            r = _req.get(
+                f"{_TELEGRAPH_API}/getPageList",
+                params={
+                    "access_token": token,
+                    "limit": 200
+                },
+                timeout=15,
+            )
+            if r.ok:
+                data = r.json()
+                if data.get("ok"):
+                    for page in data["result"].get("pages", []):
+                        if page.get("title", "").strip() == title.strip():
+                            existing_path = page["path"]
+                            break
+        except Exception as _e:
+            print(f"[telegraph] getPageList error (non-fatal): {_e}")
+
+        if existing_path:
+            r = _req.post(
+                f"{_TELEGRAPH_API}/editPage/{existing_path}",
+                json={
+                    "access_token": token,
+                    "title": title,
+                    "content": nodes,
+                    "return_content": False,
+                },
+                timeout=30,
+            )
+            r.raise_for_status()
+            result = r.json()
+            if not result.get("ok"):
+                pytest.fail(f"Telegraph editPage failed: {result}")
+            page_url = "https://telegra.ph/" + result["result"]["path"]
+            print(f"\n[telegraph] Updated existing page: {page_url}")
+        else:
+            r = _req.post(
+                f"{_TELEGRAPH_API}/createPage",
+                json={
+                    "access_token": token,
+                    "title": title,
+                    "content": nodes,
+                    "return_content": False,
+                },
+                timeout=30,
+            )
+            r.raise_for_status()
+            result = r.json()
+            if not result.get("ok"):
+                pytest.fail(f"Telegraph createPage failed: {result}")
+            page_url = "https://telegra.ph/" + result["result"]["path"]
+            print(f"\n[telegraph] Created new page: {page_url}")
+
+        return page_url
+
+    @pytest.fixture(scope="class")
+    def url_import_result(self, session_file, telegraph_article):
+        """Verify page reachability, then drive Medium URL import from Telegraph."""
+        from playwright.sync_api import sync_playwright
+        from playwright.sync_api import TimeoutError as PWTimeout
+
+        telegraph_url = telegraph_article
+
+        import requests as _req_check
+        print(f"\n[telegraph] Checking page reachability: {telegraph_url}")
+        for _attempt in range(6):  # up to 30 s
+            try:
+                r = _req_check.get(
+                    telegraph_url,
+                    timeout=10,
+                    allow_redirects=True,
+                    headers={"User-Agent": "Mozilla/5.0"},
+                )
+                if r.status_code == 200 and len(r.text) > 1000:
+                    print(f"[telegraph] Page reachable (attempt {_attempt + 1}, "
+                          f"size={len(r.text)} bytes)")
+                    break
+                print(f"[telegraph] Attempt {_attempt + 1}: status={r.status_code}, "
+                      f"size={len(r.text)} — waiting 5 s...")
+            except Exception as _e:
+                print(f"[telegraph] Attempt {_attempt + 1}: error {_e} — waiting 5 s...")
+            time.sleep(5)
+        else:
+            pytest.fail(f"Telegraph page not reachable after 30 s: {telegraph_url}")
+
+        print(f"[telegraph] Importing: {telegraph_url}")
+
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(
+                headless=False,
+                slow_mo=80,
+                args=_BROWSER_ARGS,
+            )
+            context = browser.new_context(
+                storage_state=session_file,
+                viewport={
+                    "width": 1280,
+                    "height": 720
+                },
+                user_agent=_USER_AGENT,
+                extra_http_headers={"Accept-Language": "en-US,en;q=0.9"},
+            )
+            context.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });")
+            page = context.new_page()
+            page.set_default_timeout(120_000)
+            page.set_default_navigation_timeout(120_000)
+
+            try:
+                # ── 1. Navigate to import page ──────────────────────────────
+                page.goto("https://medium.com/p/import", wait_until="networkidle")
+                page.wait_for_timeout(5000)
+
+                # ── Diagnostic dump ─────────────────────────────────────────
+                diag_ts = time.strftime("%Y%m%dT%H%M%S")
+                diag_dir = _DUMP_DIR / f"telegraph_import_diag_{diag_ts}"
+                diag_dir.mkdir(parents=True, exist_ok=True)
+                (diag_dir / "import_page.html").write_text(page.content(), encoding="utf-8")
+                page.screenshot(path=str(diag_dir / "import_page.png"), full_page=True)
+                print(f"[telegraph] Diag dump: {diag_dir} (URL: {page.url})")
+
+                if "/signin" in page.url or "/m/signin" in page.url or "/login" in page.url:
+                    pytest.fail(f"Medium redirected to login — session may be expired.\n"
+                                f"URL: {page.url}\nDiag: {diag_dir}")
+
+                # ── 2. Enter the Telegraph URL ──────────────────────────────
+                try:
+                    page.wait_for_selector(
+                        'div.js-importUrl[contenteditable="true"]',
+                        state="visible",
+                        timeout=30_000,
+                    )
+                    print("[telegraph] Import div is interactive (contenteditable)")
+                except PWTimeout:
+                    print("[telegraph] WARNING: js-importUrl not contenteditable after 30 s "
+                          "— will attempt click anyway")
+
+                url_input = None
+                for sel in [
+                        'div.textInput.textInput--large.js-importUrl.editable[role="textbox"]',
+                        'div.js-importUrl[contenteditable="true"]',
+                        'div.js-importUrl',
+                        'div.textInput.textInput--large.js-importUrl',
+                        'div[role="textbox"]',
+                        'input[placeholder*="URL"]',
+                        'input[type="url"]',
+                ]:
+                    try:
+                        el = page.locator(sel).first
+                        el.wait_for(state="visible", timeout=5000)
+                        url_input = el
+                        print(f"[telegraph] Selector matched: {sel!r}")
+                        break
+                    except PWTimeout:
+                        pass
+
+                if url_input is None:
+                    pytest.fail(f"Could not locate URL input on Medium import page.\n"
+                                f"Current URL: {page.url}\n"
+                                f"Diag: {diag_dir / 'import_page.html'}")
+
+                url_input.click()
+                page.keyboard.press("Control+A")
+                page.keyboard.type(telegraph_url)
+                page.wait_for_timeout(1000)
+
+                # ── 3. Click Import ─────────────────────────────────────────
+                for btn_sel in [
+                        'button[data-action="import-url"]',
+                        'button:has-text("Import")',
+                        'button[type="submit"]',
+                ]:
+                    try:
+                        btn = page.locator(btn_sel).first
+                        btn.wait_for(state="visible", timeout=3000)
+                        btn.click()
+                        print(f"[telegraph] Clicked Import with selector: {btn_sel!r}")
+                        break
+                    except PWTimeout:
+                        pass
+
+                # ── Diagnostic: screenshot 3 s after click ──────────────────
+                page.wait_for_timeout(3000)
+                (diag_dir / "post_click.png").write_bytes(page.screenshot(full_page=True))
+                print(f"[telegraph] URL 3 s after click: {page.url}")
+
+                # ── 4. Wait for editor redirect ─────────────────────────────
+                try:
+                    page.wait_for_url(
+                        lambda u: re.search(r"medium\.com/p/.+/edit", u) is not None,
+                        timeout=180_000,
+                    )
+                except PWTimeout:
+                    page_text = page.evaluate("() => document.body.innerText || ''")
+                    pytest.fail(f"Medium did not redirect to draft editor.\n"
+                                f"Current URL: {page.url}\n"
+                                f"Page snippet: {page_text[:400]}\n\n"
+                                "telegra.ph may not be on Medium's import allowlist.")
+
+                draft_url = page.url
+                print(f"[telegraph] Draft URL: {draft_url}")
+
+                # ── 5. Scroll-through to force full render ──────────────────
+                try:
+                    page.wait_for_selector('[contenteditable="true"]', timeout=20_000)
+                except PWTimeout:
+                    pass
+                page.wait_for_timeout(3000)
+                page.evaluate("""() => new Promise(resolve => {
+                    let pos = 0;
+                    const step = () => {
+                        pos += 600;
+                        window.scrollTo(0, pos);
+                        if (pos < document.body.scrollHeight) setTimeout(step, 150);
+                        else resolve();
+                    };
+                    step();
+                })""")
+                page.wait_for_timeout(2000)
+                page.evaluate("window.scrollTo(0, 0)")
+                page.wait_for_timeout(600)
+
+                full_page_html: str = page.content()
+                editor_html: str = page.evaluate("""
+                    () => {
+                        const candidates = [
+                            document.querySelector('.postArticle-content'),
+                            document.querySelector('.pw-editor'),
+                            document.querySelector('[data-testid="richTextEditor"]'),
+                            document.querySelector('.ProseMirror'),
+                            document.querySelector('[contenteditable="true"]'),
+                            document.body,
+                        ];
+                        for (const el of candidates) {
+                            if (el && el.innerHTML && el.innerHTML.length > 100)
+                                return el.innerHTML;
+                        }
+                        return document.body.innerHTML;
+                    }
+                """)
+
+                auto_typescript_count = editor_html.count("Auto (TypeScript)")
+                print(f"[telegraph] 'Auto (TypeScript)' count: {auto_typescript_count} "
+                      f"({'CLEAN' if auto_typescript_count == 0 else 'CORRUPTED'})")
+
+                (diag_dir / "editor_dump.html").write_text(editor_html, encoding="utf-8")
+                (diag_dir / "full_page.html").write_text(full_page_html, encoding="utf-8")
+                meta = {
+                    "method": "telegraph_url_import",
+                    "telegraph_url": telegraph_url,
+                    "timestamp": diag_ts,
+                    "draft_url": draft_url,
+                    "session_file": session_file,
+                    "editor_html_bytes": len(editor_html.encode()),
+                    "full_page_html_bytes": len(full_page_html.encode()),
+                    "auto_typescript_corruption_count": auto_typescript_count,
+                }
+                (diag_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+                print(f"[telegraph] Dump: {diag_dir}")
+
+                return {
+                    "draft_url": draft_url,
+                    "editor_html": editor_html,
+                    "full_page_html": full_page_html,
+                    "dump_dir": str(diag_dir),
+                    "auto_typescript_count": auto_typescript_count,
+                }
+
+            finally:
+                context.close()
+                browser.close()
+
+    # ── Tests ────────────────────────────────────────────────────────────────
+
+    def test_draft_url_is_medium_edit_url(self, url_import_result):
+        assert re.search(
+            r"medium\.com/p/.+/edit",
+            url_import_result["draft_url"]), (f"Draft URL does not look like a Medium editor URL: "
+                                              f"{url_import_result['draft_url']}")
+
+    def test_editor_html_is_non_empty(self, url_import_result):
+        assert len(url_import_result["editor_html"]) >= _URL_IMPORT_MIN_EDITOR_BYTES, (
+            f"Editor HTML too small: {len(url_import_result['editor_html'])} bytes "
+            f"(need ≥{_URL_IMPORT_MIN_EDITOR_BYTES}).")
+
+    def test_editor_has_title(self, url_import_result):
+        assert _EXPECTED_TITLE in url_import_result["editor_html"], (
+            f"Expected title not found in editor HTML:\n{_EXPECTED_TITLE}")
+
+    def test_editor_has_title_exactly_once(self, url_import_result):
+        count = url_import_result["editor_html"].count(_EXPECTED_TITLE)
+        assert count == 1, f"Expected title appears {count}× (want exactly 1)."
+
+    def test_editor_h2_count_not_below_expected(self, url_import_result):
+        h3_count = len(re.findall(r"<h3\b", url_import_result["editor_html"], re.IGNORECASE))
+        assert h3_count >= _URL_IMPORT_MIN_H3_COUNT, (
+            f"Only {h3_count} <h3> elements in editor (need ≥{_URL_IMPORT_MIN_H3_COUNT}).")
+
+    def test_editor_code_block_count_not_below_expected(self, url_import_result):
+        pre_count = len(re.findall(r"<pre\b", url_import_result["editor_html"], re.IGNORECASE))
+        assert pre_count >= _URL_IMPORT_MIN_PRE_COUNT, (
+            f"Only {pre_count} <pre> elements in editor (need ≥{_URL_IMPORT_MIN_PRE_COUNT}).")
+
+    def test_code_blocks_have_substantive_content(self, url_import_result):
+        """Non-empty code blocks must reach the minimum count."""
+        editor = url_import_result["editor_html"]
+        pre_blocks = re.findall(r"<pre\b[^>]*>(.*?)</pre>", editor, re.IGNORECASE | re.DOTALL)
+        real_content = []
+        for raw in pre_blocks:
+            code_part = re.sub(r'<div[^>]*codeBlockMenu-button[^>]*>.*?</div>',
+                               '',
+                               raw,
+                               flags=re.DOTALL)
+            text = re.sub(r"<[^>]+>", "", code_part).strip()
+            if len(text) >= _URL_IMPORT_MIN_PRE_TEXT_CHARS:
+                real_content.append(text[:60])
+        print(f"\n[telegraph] Non-empty code blocks: {len(real_content)} "
+              f"(of {len(pre_blocks)} total including empty separators)")
+        assert len(real_content) >= _URL_IMPORT_MIN_PRE_COUNT, (
+            f"Only {len(real_content)} code blocks with ≥{_URL_IMPORT_MIN_PRE_TEXT_CHARS} "
+            f"chars (need ≥{_URL_IMPORT_MIN_PRE_COUNT}).")
+
+    def test_no_planning_markers_leaked(self, url_import_result):
+        for marker in _PLANNING_MARKERS:
+            assert marker not in url_import_result["editor_html"], (
+                f"Planning marker leaked: {marker!r}")
+
+    def test_last_content_sentence_present(self, url_import_result):
+        """URL import must deliver the full article — last sentence in editor_html."""
+        assert _EXPECTED_LAST_SENTENCE in url_import_result["editor_html"], (
+            "Last content sentence not found in editor HTML — article truncated during import")
+
+    def test_no_auto_language_corruption(self, url_import_result):
+        """Auto(...) text must not appear inside code block content."""
+        editor = url_import_result["editor_html"]
+        pre_blocks = re.findall(r"<pre\b[^>]*>(.*?)</pre>", editor, re.IGNORECASE | re.DOTALL)
+        auto_in_code = 0
+        for raw in pre_blocks:
+            code_part = re.sub(r'<div[^>]*codeBlockMenu-button[^>]*>.*?</div>',
+                               '',
+                               raw,
+                               flags=re.DOTALL)
+            text = re.sub(r"<[^>]+>", "", code_part).strip()
+            auto_in_code += len(re.findall(r"Auto\s+\(\w+\)", text))
+        print(f"\n[telegraph] Auto(...) inside code content: {auto_in_code} "
               f"({'CLEAN' if auto_in_code == 0 else 'CORRUPTED'})")
         assert auto_in_code == 0, (
             f"{auto_in_code} Auto(...) language-label artefacts found INSIDE code content "

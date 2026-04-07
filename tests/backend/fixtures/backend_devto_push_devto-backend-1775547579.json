@@ -1,0 +1,62 @@
+{
+  "push_response": {
+    "jobId": "job_feae5518",
+    "status": "done"
+  },
+  "job": {
+    "jobId": "job_feae5518",
+    "type": "push",
+    "status": "done",
+    "articleId": "art_45989432",
+    "result": {
+      "devto": {
+        "status": "draft",
+        "label": "Draft",
+        "url": "https://dev.to/amadou6e/backend-devto-live-chain-3184-temp-slug-1937800",
+        "error": null,
+        "draft_id": "3464366"
+      }
+    },
+    "error": null
+  },
+  "article": {
+    "id": "art_45989432",
+    "title": "Backend DEV.to live chain",
+    "updatedAt": "2026-04-07T07:39:40.907275Z",
+    "wordCount": 15,
+    "gate": "pending",
+    "previewImageUrl": null,
+    "source": "native",
+    "sourcePlatform": null,
+    "destinations": {
+      "medium": {
+        "status": "none",
+        "label": "\u2014",
+        "url": null,
+        "error": null
+      },
+      "hashnode": {
+        "status": "none",
+        "label": "\u2014",
+        "url": null,
+        "error": null
+      },
+      "devto": {
+        "status": "draft",
+        "label": "Draft",
+        "url": "https://dev.to/amadou6e/backend-devto-live-chain-3184-temp-slug-1937800",
+        "error": null
+      }
+    },
+    "recentTimeline": [
+      {
+        "timestamp": "2026-04-07T07:39:40.907112Z",
+        "event": "Draft pushed to Devto"
+      },
+      {
+        "timestamp": "2026-04-07T07:39:39.274915Z",
+        "event": "Article created"
+      }
+    ]
+  }
+}

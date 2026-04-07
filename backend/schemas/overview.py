@@ -82,6 +82,9 @@ class ArticleSummary(BaseModel):
     updated_at: datetime = Field(alias="updatedAt")
     word_count: int = Field(alias="wordCount")
     gate: GateStatus
+    preview_image_url: Optional[str] = Field(default=None, alias="previewImageUrl")
+    source: str = "native"
+    source_platform: Optional[str] = Field(default=None, alias="sourcePlatform")
     destinations: dict[Platform, PlatformSummary]
     recent_timeline: list[TimelineEvent] = Field(
         alias="recentTimeline",

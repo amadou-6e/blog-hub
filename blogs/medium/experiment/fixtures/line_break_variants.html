@@ -1,0 +1,34 @@
+<h1>Line Break Variants</h1>
+<p>These sections isolate the line-break and blank-line encodings we tested on plain <code>pre</code> blocks.</p>
+
+<h2>Variant: pre_br_nbsp</h2>
+<p>Expected source shape: plain <code>pre</code> with explicit line breaks and non-breaking space for empty lines.</p>
+<pre>def pattern_two():<br>    first = 1<br><br>    second = 2<br>    return first + second</pre>
+
+<h2>Variant: pre_br_empty</h2>
+<p>Expected source shape: plain <code>pre</code> with explicit line breaks and truly empty blank lines.</p>
+<pre>def pattern_seven():<br>    rows = []<br>    for index in range(20):<br>        rows.append({<br>            "marker": "PATTERN-07-CODE",<br>            "index": index,<br>            "value": index * 3,<br>        })<br>    return rows<br><br>result = pattern_seven()<br>for row in result:<br>    print(row["marker"], row["index"], row["value"])</pre>
+
+<h2>Variant: pre_newline_nbsp</h2>
+<p>Expected source shape: plain <code>pre</code> with literal newlines and non-breaking space for empty lines.</p>
+<pre>def pattern_seven():
+    rows = []
+    for index in range(20):
+        rows.append({
+            "marker": "PATTERN-07-CODE",
+            "index": index,
+            "value": index * 3,
+        })
+    return rows
+
+result = pattern_seven()
+for row in result:
+    print(row["marker"], row["index"], row["value"])</pre>
+
+<h2>Variant: pre_newline_empty</h2>
+<p>Expected source shape: plain <code>pre</code> with literal newlines and empty blank lines.</p>
+<pre>def pattern_two():
+    first = 1
+
+    second = 2
+    return first + second</pre>

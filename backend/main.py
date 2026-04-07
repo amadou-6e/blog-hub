@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.routers import articles, connections, dev, jobs, platforms
+from backend.routers import agent, articles, connections, dev, jobs, platforms
 
 app = FastAPI(
     title="BlogHub API",
@@ -19,6 +19,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(agent.router)
 app.include_router(articles.router)
 app.include_router(connections.router)
 app.include_router(jobs.router)
@@ -34,3 +35,12 @@ def health():
 # Serve static HTML screens at /screens/...
 _screens_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "screens"))
 app.mount("/screens", StaticFiles(directory=_screens_dir), name="screens")
+
+_generated_previews_dir = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "generated_previews"))
+os.makedirs(_generated_previews_dir, exist_ok=True)
+app.mount(
+    "/generated-previews",
+    StaticFiles(directory=_generated_previews_dir),
+    name="generated-previews",
+)

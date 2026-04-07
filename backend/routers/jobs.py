@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from backend.schemas.overview import JobResponse
-import backend.store.memory as store
+import backend.store as store
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
