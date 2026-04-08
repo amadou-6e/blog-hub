@@ -791,6 +791,77 @@ class SQLiteStore:
             return False
         return True
 
+    # ── Auth: users ───────────────────────────────────────────────────────────────
+
+    def create_user(self, email: str, password_hash: str) -> dict:
+        user_id = str(uuid.uuid4())
+        now_s = _ts(_now())
+        self._con.execute(
+            "INSERT INTO users (id, email, password_hash, created_at) VALUES (?,?,?,?)",
+            (user_id, email, password_hash, now_s),
+        )
+        self._con.commit()
+        return {"id": user_id, "email": email, "password_hash": password_hash,
+                "created_at": now_s, "is_active": True}
+
+    def get_user_by_email(self, email: str) -> dict | None:
+        row = self._con.execute(
+            "SELECT id, email, password_hash, created_at, is_active "
+            "FROM users WHERE email=?",
+            (email,),
+        ).fetchone()
+        if not row:
+            return None
+        return {"id": row["id"], "email": row["email"],
+                "password_hash": row["password_hash"],
+                "created_at": row["created_at"], "is_active": bool(row["is_active"])}
+
+    def get_user_by_id(self, user_id: str) -> dict | None:
+        row = self._con.execute(
+            "SELECT id, email, created_at, is_active FROM users WHERE id=?",
+            (user_id,),
+        ).fetchone()
+        if not row:
+            return None
+        return {"id": row["id"], "email": row["email"],
+                "created_at": row["created_at"], "is_active": bool(row["is_active"])}
+
+    # ── Auth: sessions ────────────────────────────────────────────────────────────
+
+    def create_session(self, token: str, user_id: str, expires_at: str,
+                       remember_me: bool = False) -> None:
+        now_s = _ts(_now())
+        self._con.execute(
+            "INSERT INTO sessions (token, user_id, expires_at, created_at, remember_me) "
+            "VALUES (?,?,?,?,?)",
+            (token, user_id, expires_at, now_s, int(remember_me)),
+        )
+        self._con.commit()
+
+    def get_session(self, token: str) -> dict | None:
+        row = self._con.execute(
+            "SELECT token, user_id, expires_at, remember_me FROM sessions WHERE token=?",
+            (token,),
+        ).fetchone()
+        if not row:
+            return None
+        if datetime.fromisoformat(row["expires_at"]) <= datetime.now(timezone.utc):
+            self._con.execute("DELETE FROM sessions WHERE token=?", (token,))
+            self._con.commit()
+            return None
+        return {"token": row["token"], "user_id": row["user_id"],
+                "expires_at": row["expires_at"], "remember_me": bool(row["remember_me"])}
+
+    def delete_session(self, token: str) -> None:
+        self._con.execute("DELETE FROM sessions WHERE token=?", (token,))
+        self._con.commit()
+
+    def delete_expired_sessions(self) -> int:
+        now_s = _ts(datetime.now(timezone.utc))
+        cur = self._con.execute("DELETE FROM sessions WHERE expires_at <= ?", (now_s,))
+        self._con.commit()
+        return cur.rowcount
+
     # ── Platforms ────────────────────────────────────────────────────────────
 
     def list_platforms(self) -> list[dict]:

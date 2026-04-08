@@ -9,11 +9,14 @@ To switch backends, change _backend below and nothing else.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from backend.store.backends.sqlite import SQLiteStore
 
-_DB_PATH = os.environ.get("BLOGHUB_DB_PATH", "data/bloghub.db")
-_backend = SQLiteStore(_DB_PATH)
+_BLOG_HUB_DIR = Path(__file__).resolve().parents[2]  # backend/store/__init__.py → blog-hub/
+_DB_PATH = os.environ.get("BLOGHUB_DB_PATH", str(_BLOG_HUB_DIR / "data" / "bloghub.db"))
+_BLOBS_DIR = os.environ.get("BLOGHUB_BLOBS_DIR", str(_BLOG_HUB_DIR / "data" / "blobs"))
+_backend = SQLiteStore(_DB_PATH, _BLOBS_DIR)
 
 # ── Articles ──────────────────────────────────────────────────────────────────
 
@@ -32,6 +35,10 @@ def create_article(*a, **kw):
 
 def update_article_body(*a, **kw):
     return _backend.update_article_body(*a, **kw)
+
+
+def store_asset(*a, **kw):
+    return _backend.store_asset(*a, **kw)
 
 
 def update_article_title(*a, **kw):
@@ -117,6 +124,90 @@ def get_job(*a, **kw):
 
 def complete_job(*a, **kw):
     return _backend.complete_job(*a, **kw)
+
+
+# ── Comments ──────────────────────────────────────────────────────────────────
+
+
+def list_comments(*a, **kw):
+    return _backend.list_comments(*a, **kw)
+
+
+def add_comment(*a, **kw):
+    return _backend.add_comment(*a, **kw)
+
+
+def update_comment(*a, **kw):
+    return _backend.update_comment(*a, **kw)
+
+
+def delete_comment(*a, **kw):
+    return _backend.delete_comment(*a, **kw)
+
+
+# ── Patches ───────────────────────────────────────────────────────────────────
+
+
+def list_patches(*a, **kw):
+    return _backend.list_patches(*a, **kw)
+
+
+def add_patch(*a, **kw):
+    return _backend.add_patch(*a, **kw)
+
+
+def set_patch_state(*a, **kw):
+    return _backend.set_patch_state(*a, **kw)
+
+
+def delete_patches(*a, **kw):
+    return _backend.delete_patches(*a, **kw)
+
+
+# ── Chat log ──────────────────────────────────────────────────────────────────
+
+
+def list_chat(*a, **kw):
+    return _backend.list_chat(*a, **kw)
+
+
+def add_chat_message(*a, **kw):
+    return _backend.add_chat_message(*a, **kw)
+
+
+# ── Auth: users ───────────────────────────────────────────────────────────────
+
+
+def create_user(email: str, password_hash: str) -> dict:
+    return _backend.create_user(email, password_hash)
+
+
+def get_user_by_email(email: str) -> "dict | None":
+    return _backend.get_user_by_email(email)
+
+
+def get_user_by_id(user_id: str) -> "dict | None":
+    return _backend.get_user_by_id(user_id)
+
+
+# ── Auth: sessions ────────────────────────────────────────────────────────────
+
+
+def create_session(token: str, user_id: str, expires_at: str,
+                   remember_me: bool = False) -> None:
+    return _backend.create_session(token, user_id, expires_at, remember_me)
+
+
+def get_session(token: str) -> "dict | None":
+    return _backend.get_session(token)
+
+
+def delete_session(token: str) -> None:
+    return _backend.delete_session(token)
+
+
+def delete_expired_sessions() -> int:
+    return _backend.delete_expired_sessions()
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
