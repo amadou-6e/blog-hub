@@ -9,11 +9,14 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import shutil
 import sqlite3
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+from backend.store.crypto import decrypt_token, encrypt_token
 
 # ─── Static metadata ──────────────────────────────────────────────────────────
 
@@ -68,17 +71,35 @@ _PLATFORM_META: list[dict] = [
 # ─── Schema ───────────────────────────────────────────────────────────────────
 
 _DDL = """
+CREATE TABLE IF NOT EXISTS users (
+    id            TEXT PRIMARY KEY,
+    email         TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    is_active     INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token       TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at  TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    remember_me INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS articles (
     id              TEXT PRIMARY KEY,
     title           TEXT NOT NULL,
     body            TEXT NOT NULL DEFAULT '',
+    body_path       TEXT,
     word_count      INTEGER NOT NULL DEFAULT 0,
     gate            TEXT NOT NULL DEFAULT 'pending',
     source          TEXT NOT NULL DEFAULT 'native',
     source_platform TEXT,
     canonical_url   TEXT,
     created_at      TEXT NOT NULL,
-    updated_at      TEXT NOT NULL
+    updated_at      TEXT NOT NULL,
+    user_id         TEXT REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS article_destinations (
@@ -105,7 +126,8 @@ CREATE TABLE IF NOT EXISTS connections (
     status        TEXT NOT NULL DEFAULT 'connected',
     username      TEXT,
     connected_at  TEXT NOT NULL,
-    error_message TEXT
+    error_message TEXT,
+    user_id       TEXT REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS jobs (
@@ -116,7 +138,48 @@ CREATE TABLE IF NOT EXISTS jobs (
     result       TEXT,
     error        TEXT,
     created_at   TEXT NOT NULL,
-    completed_at TEXT
+    completed_at TEXT,
+    user_id      TEXT REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS article_assets (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    article_id  TEXT    NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+    filename    TEXT    NOT NULL,
+    asset_path  TEXT    NOT NULL,
+    mime_type   TEXT,
+    created_at  TEXT    NOT NULL,
+    UNIQUE(article_id, filename)
+);
+
+CREATE TABLE IF NOT EXISTS article_comments (
+    id          TEXT PRIMARY KEY,
+    article_id  TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+    author      TEXT NOT NULL,
+    text        TEXT NOT NULL,
+    anchor      TEXT,
+    resolved    INTEGER NOT NULL DEFAULT 0,
+    has_patch   INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS article_patches (
+    id          TEXT PRIMARY KEY,
+    article_id  TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+    comment_id  TEXT REFERENCES article_comments(id) ON DELETE SET NULL,
+    label       TEXT NOT NULL,
+    removed     TEXT NOT NULL,
+    added       TEXT NOT NULL,
+    state       TEXT NOT NULL DEFAULT 'pending',
+    created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS article_chat_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    article_id  TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+    role        TEXT NOT NULL,
+    text        TEXT NOT NULL,
+    created_at  TEXT NOT NULL
 );
 """
 
@@ -249,8 +312,10 @@ def _seed_articles() -> list[dict]:
 
 class SQLiteStore:
 
-    def __init__(self, db_path: str) -> None:
+    def __init__(self, db_path: str, blobs_dir: str = "data/blobs") -> None:
         self._db_path = db_path
+        self._blobs_dir = Path(blobs_dir).resolve()
+        self._blobs_dir.mkdir(parents=True, exist_ok=True)
         self._con = sqlite3.connect(db_path, check_same_thread=False)
         self._con.row_factory = sqlite3.Row
         self._con.execute("PRAGMA journal_mode=WAL")
@@ -259,6 +324,16 @@ class SQLiteStore:
         # Migrate existing DBs that pre-date the error column
         try:
             self._con.execute("ALTER TABLE jobs ADD COLUMN error TEXT")
+            self._con.commit()
+        except Exception:
+            pass  # column already exists
+        try:
+            self._con.execute("ALTER TABLE articles ADD COLUMN body_path TEXT")
+            self._con.commit()
+        except Exception:
+            pass  # column already exists
+        try:
+            self._con.execute("ALTER TABLE article_comments ADD COLUMN anchor TEXT")
             self._con.commit()
         except Exception:
             pass  # column already exists
@@ -278,12 +353,13 @@ class SQLiteStore:
         self._con.commit()
 
     def _insert_article(self, art: dict) -> None:
+        body_path = self._write_body(art["id"], art["body"])
         self._con.execute(
             """INSERT OR IGNORE INTO articles
-               (id, title, body, word_count, gate, source, source_platform,
+               (id, title, body, body_path, word_count, gate, source, source_platform,
                 canonical_url, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
-            (art["id"], art["title"], art["body"],
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (art["id"], art["title"], "", body_path,
              art["word_count"], art["gate"], art["source"], art["source_platform"],
              art.get("canonical_url"), art["created_at"], art["updated_at"]),
         )
@@ -300,6 +376,28 @@ class SQLiteStore:
                 "INSERT INTO article_timeline (article_id, timestamp, event) VALUES (?,?,?)",
                 (art["id"], entry["timestamp"], entry["event"]),
             )
+
+    # ── Blob helpers ─────────────────────────────────────────────────────────
+
+    def _body_path_for(self, article_id: str) -> Path:
+        return self._blobs_dir / "articles" / article_id / "body.md"
+
+    def _write_body(self, article_id: str, body: str) -> str:
+        """Write body to disk. Returns the path relative to blobs_dir."""
+        p = self._body_path_for(article_id)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        (p.parent / "assets").mkdir(exist_ok=True)
+        p.write_text(body, encoding="utf-8")
+        return str(p.relative_to(self._blobs_dir))
+
+    def _read_body(self, row: sqlite3.Row) -> str:
+        """Read body from disk if body_path set, else fall back to body column."""
+        body_path = row["body_path"]
+        if body_path:
+            full = self._blobs_dir / body_path
+            if full.exists():
+                return full.read_text(encoding="utf-8")
+        return row["body"]
 
     # ── Article assembly ─────────────────────────────────────────────────────
 
@@ -334,7 +432,7 @@ class SQLiteStore:
             "title":
                 row["title"],
             "body":
-                row["body"],
+                self._read_body(row),
             "word_count":
                 row["word_count"],
             "gate":
@@ -445,13 +543,14 @@ class SQLiteStore:
         article_id = f"art_{uuid.uuid4().hex[:8]}"
         now_s = _ts(_now())
         body = _seed_body(title)
+        body_path = self._write_body(article_id, body)
         self._con.execute(
             """INSERT INTO articles
-               (id, title, body, word_count, gate, source, source_platform,
+               (id, title, body, body_path, word_count, gate, source, source_platform,
                 canonical_url, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
-            (article_id, title, body, len(title.split()) + 11, "pending", source, source_platform,
-             canonical_url, now_s, now_s),
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (article_id, title, "", body_path, len(title.split()) + 11, "pending", source,
+             source_platform, canonical_url, now_s, now_s),
         )
         for p in _PLATFORMS:
             self._con.execute(
@@ -470,9 +569,10 @@ class SQLiteStore:
                             body: str,
                             event: str = "Article generated by AI") -> None:
         word_count = len(body.split())
+        body_path = self._write_body(article_id, body)
         self._con.execute(
-            "UPDATE articles SET body=?, word_count=?, updated_at=? WHERE id=?",
-            (body, word_count, _ts(_now()), article_id),
+            "UPDATE articles SET body='', body_path=?, word_count=?, updated_at=? WHERE id=?",
+            (body_path, word_count, _ts(_now()), article_id),
         )
         self._add_timeline(article_id, event)
         self._con.commit()
@@ -498,6 +598,9 @@ class SQLiteStore:
                 blocked.append(aid)
             else:
                 self._con.execute("DELETE FROM articles WHERE id=?", (aid,))
+                blob_dir = self._blobs_dir / "articles" / aid
+                if blob_dir.exists():
+                    shutil.rmtree(blob_dir)
         self._con.commit()
         return blocked
 
@@ -594,9 +697,9 @@ class SQLiteStore:
             row = rows.get(conn_id)
             if row:
                 status = row["status"]
-                username = row["username"]
-                connected_at = row["connected_at"]
-                error_message = row["error_message"]
+                username = row["username"] or None
+                connected_at = row["connected_at"] or None
+                error_message = row["error_message"] or None
             else:
                 status = "connected" if self._connection_has_env_secret(conn_id) else "disconnected"
                 username = None
@@ -631,7 +734,7 @@ class SQLiteStore:
                ON CONFLICT(platform) DO UPDATE SET
                token=excluded.token, status=excluded.status, username=excluded.username,
                connected_at=excluded.connected_at, error_message=excluded.error_message""",
-            (conn_id, token, status, username, now_s, error),
+            (conn_id, encrypt_token(token), status, username, now_s, error),
         )
         self._con.commit()
         meta = _CONNECTION_META[conn_id]
@@ -648,13 +751,23 @@ class SQLiteStore:
         }
 
     def delete_connection(self, conn_id: str) -> None:
-        self._con.execute("DELETE FROM connections WHERE platform=?", (conn_id,))
+        # Insert a "disconnected" stub row rather than deleting the row.
+        # Deleting would let _connection_has_env_secret() auto-report "connected"
+        # when the env var is present, which breaks tests and the UI delete flow.
+        self._con.execute(
+            """INSERT OR REPLACE INTO connections
+               (platform, token, status, username, connected_at, error_message)
+               VALUES (?, '', 'disconnected', NULL, '', NULL)""",
+            (conn_id,),
+        )
         self._con.commit()
 
     def get_connection_token(self, conn_id: str) -> str | None:
         row = self._con.execute("SELECT token FROM connections WHERE platform=?",
                                 (conn_id,)).fetchone()
-        return row["token"] if row else None
+        if not row or not row["token"]:
+            return None
+        return decrypt_token(row["token"]) or None
 
     def count_connected(self) -> int:
         return sum(1 for c in self.list_connections() if c["status"] == "connected")
@@ -681,17 +794,6 @@ class SQLiteStore:
     # ── Platforms ────────────────────────────────────────────────────────────
 
     def list_platforms(self) -> list[dict]:
-        # Under pytest with no saved connections, return seed state (all connected).
-        # Mirrors the memory store's PYTEST_CURRENT_TEST bypass so existing tests pass.
-        if os.environ.get("PYTEST_CURRENT_TEST"):
-            count = self._con.execute("SELECT COUNT(*) FROM connections").fetchone()[0]
-            if count == 0:
-                return [{
-                    "id": p["id"],
-                    "label": p["label"],
-                    "username": p["username"],
-                    "connected": True
-                } for p in _PLATFORM_META]
         connections = {c["id"]: c for c in self.list_connections()}
         result = []
         for pm in _PLATFORM_META:
@@ -748,17 +850,206 @@ class SQLiteStore:
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
+    def store_asset(
+        self,
+        article_id: str,
+        filename: str,
+        data: bytes,
+        mime_type: str | None = None,
+    ) -> str:
+        """Write binary asset to disk and record in article_assets. Returns asset_path."""
+        assets_dir = self._blobs_dir / "articles" / article_id / "assets"
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        dest = assets_dir / filename
+        dest.write_bytes(data)
+        rel = str(dest.relative_to(self._blobs_dir))
+        now_s = _ts(_now())
+        self._con.execute(
+            """INSERT INTO article_assets (article_id, filename, asset_path, mime_type, created_at)
+               VALUES (?,?,?,?,?)
+               ON CONFLICT(article_id, filename) DO UPDATE SET
+               asset_path=excluded.asset_path, mime_type=excluded.mime_type""",
+            (article_id, filename, rel, mime_type, now_s),
+        )
+        self._con.commit()
+        return rel
+
     def reset(self) -> None:
         """Drop all data and re-seed. Used by the /api/dev/reset endpoint in tests."""
         self._con.executescript("""
+            DELETE FROM article_chat_log;
+            DELETE FROM article_patches;
+            DELETE FROM article_comments;
             DELETE FROM article_timeline;
             DELETE FROM article_destinations;
+            DELETE FROM article_assets;
             DELETE FROM articles;
             DELETE FROM jobs;
+            DELETE FROM connections;
         """)
+        # Insert explicit "disconnected" rows for all platforms so that
+        # list_connections() does not fall back to env-var auto-detection.
+        for conn_id in _CONNECTION_META:
+            self._con.execute(
+                """INSERT OR REPLACE INTO connections
+                   (platform, token, status, username, connected_at, error_message)
+                   VALUES (?, '', 'disconnected', NULL, '', NULL)""",
+                (conn_id,),
+            )
         self._con.commit()
+        articles_blobs = self._blobs_dir / "articles"
+        if articles_blobs.exists():
+            shutil.rmtree(articles_blobs)
         self._seed_if_empty()
         self._oauth_pending.clear()
+
+    # ── Comments ─────────────────────────────────────────────────────────────
+
+    def list_comments(self, article_id: str) -> list[dict]:
+        rows = self._con.execute(
+            "SELECT * FROM article_comments WHERE article_id=? ORDER BY created_at ASC",
+            (article_id,),
+        ).fetchall()
+        return [self._comment_row_to_dict(r) for r in rows]
+
+    def add_comment(self,
+                    article_id: str,
+                    author: str,
+                    text: str,
+                    anchor: str | None = None) -> dict:
+        comment_id = f"c_{uuid.uuid4().hex[:8]}"
+        now_s = _ts(_now())
+        self._con.execute(
+            "INSERT INTO article_comments (id, article_id, author, text, anchor, resolved, has_patch, created_at) "
+            "VALUES (?,?,?,?,?,0,0,?)",
+            (comment_id, article_id, author, text, anchor, now_s),
+        )
+        self._con.commit()
+        return self._comment_row_to_dict(
+            self._con.execute("SELECT * FROM article_comments WHERE id=?",
+                              (comment_id,)).fetchone())
+
+    def update_comment(self,
+                       article_id: str,
+                       comment_id: str,
+                       resolved: bool | None = None,
+                       text: str | None = None) -> dict | None:
+        row = self._con.execute(
+            "SELECT * FROM article_comments WHERE id=? AND article_id=?",
+            (comment_id, article_id),
+        ).fetchone()
+        if row is None:
+            return None
+        if resolved is not None:
+            self._con.execute(
+                "UPDATE article_comments SET resolved=? WHERE id=?",
+                (1 if resolved else 0, comment_id),
+            )
+        if text is not None:
+            self._con.execute("UPDATE article_comments SET text=? WHERE id=?", (text, comment_id))
+        self._con.commit()
+        return self._comment_row_to_dict(
+            self._con.execute("SELECT * FROM article_comments WHERE id=?",
+                              (comment_id,)).fetchone())
+
+    def delete_comment(self, article_id: str, comment_id: str) -> bool:
+        cur = self._con.execute(
+            "DELETE FROM article_comments WHERE id=? AND article_id=?",
+            (comment_id, article_id),
+        )
+        self._con.commit()
+        return cur.rowcount > 0
+
+    @staticmethod
+    def _comment_row_to_dict(row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "article_id": row["article_id"],
+            "author": row["author"],
+            "text": row["text"],
+            "anchor": row["anchor"],
+            "resolved": bool(row["resolved"]),
+            "has_patch": bool(row["has_patch"]),
+            "created_at": row["created_at"],
+        }
+
+    # ── Patches ──────────────────────────────────────────────────────────────
+
+    def list_patches(self, article_id: str) -> list[dict]:
+        rows = self._con.execute(
+            "SELECT * FROM article_patches WHERE article_id=? ORDER BY created_at ASC",
+            (article_id,),
+        ).fetchall()
+        return [self._patch_row_to_dict(r) for r in rows]
+
+    def add_patch(self,
+                  article_id: str,
+                  label: str,
+                  removed: str,
+                  added: str,
+                  comment_id: str | None = None) -> dict:
+        patch_id = f"p_{uuid.uuid4().hex[:8]}"
+        now_s = _ts(_now())
+        self._con.execute(
+            "INSERT INTO article_patches (id, article_id, comment_id, label, removed, added, state, created_at) "
+            "VALUES (?,?,?,?,?,?,'pending',?)",
+            (patch_id, article_id, comment_id, label, removed, added, now_s),
+        )
+        if comment_id:
+            self._con.execute("UPDATE article_comments SET has_patch=1 WHERE id=?", (comment_id,))
+        self._con.commit()
+        return self._patch_row_to_dict(
+            self._con.execute("SELECT * FROM article_patches WHERE id=?", (patch_id,)).fetchone())
+
+    def set_patch_state(self, article_id: str, patch_id: str, state: str) -> dict | None:
+        row = self._con.execute(
+            "SELECT * FROM article_patches WHERE id=? AND article_id=?",
+            (patch_id, article_id),
+        ).fetchone()
+        if row is None:
+            return None
+        self._con.execute("UPDATE article_patches SET state=? WHERE id=?", (state, patch_id))
+        self._con.commit()
+        return self._patch_row_to_dict(
+            self._con.execute("SELECT * FROM article_patches WHERE id=?", (patch_id,)).fetchone())
+
+    def delete_patches(self, article_id: str) -> None:
+        self._con.execute("DELETE FROM article_patches WHERE article_id=?", (article_id,))
+        self._con.execute("UPDATE article_comments SET has_patch=0 WHERE article_id=?",
+                          (article_id,))
+        self._con.commit()
+
+    @staticmethod
+    def _patch_row_to_dict(row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "article_id": row["article_id"],
+            "comment_id": row["comment_id"],
+            "label": row["label"],
+            "removed": row["removed"],
+            "added": row["added"],
+            "state": row["state"],
+            "created_at": row["created_at"],
+        }
+
+    # ── Chat log ─────────────────────────────────────────────────────────────
+
+    def list_chat(self, article_id: str) -> list[dict]:
+        rows = self._con.execute(
+            "SELECT role, text, created_at FROM article_chat_log "
+            "WHERE article_id=? ORDER BY id ASC",
+            (article_id,),
+        ).fetchall()
+        return [{"role": r["role"], "text": r["text"], "created_at": r["created_at"]} for r in rows]
+
+    def add_chat_message(self, article_id: str, role: str, text: str) -> dict:
+        now_s = _ts(_now())
+        self._con.execute(
+            "INSERT INTO article_chat_log (article_id, role, text, created_at) VALUES (?,?,?,?)",
+            (article_id, role, text, now_s),
+        )
+        self._con.commit()
+        return {"role": role, "text": text, "created_at": now_s}
 
     # ── Internal helpers ─────────────────────────────────────────────────────
 
