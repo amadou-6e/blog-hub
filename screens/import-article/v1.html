@@ -39,20 +39,20 @@
     #nav-bar {
       flex-shrink: 0; height: 48px; background: #0f1117;
       border-bottom: 1px solid #252a38;
-      display: flex; align-items: center; padding: 0 32px; z-index: 40;
+      display: flex; align-items: center; padding: 0 24px; z-index: 40;
     }
     #step-bar {
       flex-shrink: 0; background: #0f1117; border-bottom: 1px solid #252a38;
-      padding: 14px 32px;
+      padding: 14px 48px;
     }
     #content-area {
-      flex: 1; overflow-y: auto; padding: 36px 32px 96px;
+      flex: 1; overflow-y: auto; padding: 36px 48px 96px;
     }
     .content-col { max-width: 800px; margin: 0 auto; }
     #action-bar {
       position: fixed; bottom: 0; left: 0; right: 0;
       background: #0f1117; border-top: 1px solid #252a38;
-      padding: 12px 32px; display: flex; align-items: center; z-index: 40;
+      padding: 12px 48px; display: flex; align-items: center; z-index: 40;
     }
 
     /* ── Nav bar elements ── */
@@ -94,15 +94,16 @@
 
     /* ── Action bar ── */
     #back-btn {
-      font-size: 13px; color: #5a6080; background: transparent; border: none;
-      cursor: pointer; font-family: inherit; padding: 6px 0; transition: color 100ms;
+      font-size: 13px; color: #c9cfe0; background: transparent;
+      border: 1px solid #3a3f52; border-radius: 6px;
+      cursor: pointer; font-family: inherit; padding: 7px 28px; transition: border-color 100ms, color 100ms;
     }
-    #back-btn:hover { color: #c9cfe0; }
+    #back-btn:hover { border-color: #6366f1; color: #e8eaf2; }
     #action-dots { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; }
     .dot { border-radius: 3px; transition: all 150ms; }
     #primary-btn {
       margin-left: auto; font-size: 13px; font-weight: 500;
-      padding: 7px 18px; border-radius: 6px; background: #6366f1; color: #fff;
+      padding: 7px 28px; border-radius: 6px; background: #6366f1; color: #fff;
       border: none; cursor: pointer; font-family: inherit;
       transition: opacity 100ms, background 100ms; white-space: nowrap;
     }
@@ -170,6 +171,24 @@
     .draft-badge.draft { background: #1e2a4a; color: #6ea8fe; border: 1px solid #2a3d6a; }
     .draft-badge.published { background: #0d2830; color: #38bdf8; border: 1px solid #1a3d4a; }
 
+    /* ── Draft search + filter ── */
+    #draft-search-wrap { border-bottom: 1px solid #252a38; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+    #draft-search {
+      width: 100%; background: #181c27; border: 1px solid #252a38; border-radius: 6px;
+      padding: 7px 10px; font-size: 12px; color: #e8eaf2; font-family: Inter, sans-serif;
+      outline: none; transition: border-color 120ms; box-sizing: border-box;
+    }
+    #draft-search:focus { border-color: #6366f1; }
+    #draft-search::placeholder { color: #3a3f52; }
+    .filter-pills { display: flex; gap: 6px; }
+    .filter-pill {
+      font-size: 11px; font-weight: 500; padding: 3px 10px; border-radius: 20px;
+      border: 1px solid #252a38; background: none; color: #5a6080; cursor: pointer;
+      font-family: Inter, sans-serif; transition: color 80ms, border-color 80ms, background 80ms;
+    }
+    .filter-pill:hover { border-color: #3a3f52; color: #c9cfe0; }
+    .filter-pill.active { background: #1e2540; border-color: #6366f1; color: #e8eaf2; }
+
     /* ── Review pane ── */
     #title-input {
       width: 100%; background: none; border: none; border-bottom: 2px solid transparent;
@@ -188,6 +207,18 @@
     #markdown-preview pre { background: #181c27; border: 1px solid #252a38; border-radius: 6px; padding: 12px 14px; margin-bottom: 10px; overflow-x: auto; }
     #markdown-preview strong { color: #e8eaf2; }
     #markdown-preview ul { padding-left: 18px; margin-bottom: 10px; }
+    #markdown-preview ol { padding-left: 18px; margin-bottom: 10px; }
+    #markdown-preview blockquote { border-left: 3px solid #6366f1; padding-left: 12px; margin-bottom: 10px; color: #7a82a0; }
+    #markdown-preview img { max-width: 100%; border-radius: 4px; margin: 6px 0; display: block; }
+    #markdown-preview hr { border: none; border-top: 1px solid #252a38; margin: 14px 0; }
+
+    /* ── Cover image ── */
+    .cover-img-box { width: 100%; border-radius: 8px; overflow: hidden; background: #181c27; border: 1px solid #252a38; }
+    .cover-img { width: 100%; display: block; object-fit: cover; border-radius: 7px; }
+    .cover-img-box.hashnode { aspect-ratio: 1600 / 840; }
+    .cover-img-box.devto    { aspect-ratio: 1000 / 420; }
+    .cover-img-box.medium   { aspect-ratio: 16 / 9; }
+    .cover-img-box.upload   { aspect-ratio: 16 / 9; }
 
     /* ── Drop zone ── */
     #drop-zone {
@@ -281,7 +312,17 @@
         <span id="platform-list-title" style="font-size:14px;font-weight:500;color:#e8eaf2;"></span>
         <span id="article-count-label" style="font-size:12px;color:#5a6080;margin-left:4px;"></span>
       </div>
-      <div id="draft-rows" style="border:1px solid #252a38;border-top:none;border-radius:0 0 8px 8px;overflow:hidden;"></div>
+      <div style="border:1px solid #252a38;border-top:none;border-radius:0 0 8px 8px;overflow:hidden;">
+        <div id="draft-search-wrap">
+          <input id="draft-search" type="text" placeholder="Search articles…" oninput="setDraftSearch(this.value)" />
+          <div class="filter-pills">
+            <button class="filter-pill active" id="pill-all"       onclick="setDraftFilter('all')">All</button>
+            <button class="filter-pill"        id="pill-draft"     onclick="setDraftFilter('draft')">Draft</button>
+            <button class="filter-pill"        id="pill-published" onclick="setDraftFilter('published')">Published</button>
+          </div>
+        </div>
+        <div id="draft-rows"></div>
+      </div>
       <div id="load-more-wrap" style="display:none;padding:10px 12px 12px;">
         <button onclick="loadMore()" style="font-size:12px;color:#5a6080;background:none;border:none;cursor:pointer;padding:4px 0;font-family:inherit;transition:color 100ms;"
           onmouseover="this.style.color='#c9cfe0'" onmouseout="this.style.color='#5a6080'">Load more</button>
@@ -290,6 +331,14 @@
 
     <!-- REVIEW PANE ─────────────────────────────────────────────── -->
     <div id="view-review" style="display:none;">
+      <div id="cover-image-wrap" style="display:none;margin-bottom:20px;">
+        <div style="font-size:11px;font-weight:500;color:#5a6080;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Cover image</div>
+        <div id="cover-image-container" class="cover-img-box">
+          <img id="cover-image" src="" alt="Cover" class="cover-img"
+            onerror="document.getElementById('cover-image-wrap').style.display='none'" />
+        </div>
+        <div id="cover-image-hint" style="font-size:11px;color:#3a3f52;margin-top:6px;"></div>
+      </div>
       <div style="margin-bottom:20px;">
         <input id="title-input" type="text" placeholder="Article title" oninput="syncTitle(this.value)" />
         <div id="review-meta" style="font-size:12px;color:#5a6080;margin-top:6px;"></div>
@@ -371,44 +420,16 @@
 </div>
 
 <script>
-// ─── Mock data ───────────────────────────────────────────────────
-const PLATFORMS = [
-  {
-    id: 'medium',
-    name: 'Medium',
-    bg: '#292929', color: '#e8eaf2', initials: 'M',
-    connected: true,
-    articles: [
-      { id: 'med-draft-001', title: 'How I built a distributed cache from scratch', snippet: 'A deep dive into consistent hashing, sharding strategies, and the night I caused a production outage at 2am that taught me more than six months of tutorials.', status: 'draft', wordCount: 1840, age: '3 days ago', body: mockBody('How I built a distributed cache from scratch') },
-      { id: 'med-draft-002', title: 'The case for boring technology in 2026', snippet: 'Everyone wants the shiny new framework. Here is why your next project should use the dullest tool in the shed — and why that is the right call.', status: 'draft', wordCount: 920, age: '1 week ago', body: mockBody('The case for boring technology in 2026') },
-      { id: 'med-post-003', title: 'Postgres full-text search vs Elasticsearch', snippet: 'When does it make sense to reach for a dedicated search engine, and when is Postgres good enough? I ran the benchmarks so you do not have to.', status: 'published', wordCount: 2300, age: '2 weeks ago', body: mockBody('Postgres full-text search vs Elasticsearch') },
-      { id: 'med-post-004', title: 'Why I stopped writing REST APIs', snippet: 'After years of hand-crafting endpoints, I switched to tRPC and have not looked back. Here is what changed, what did not, and what I still miss.', status: 'published', wordCount: 1200, age: '1 month ago', body: mockBody('Why I stopped writing REST APIs') },
-      { id: 'med-draft-005', title: 'Migrating a monolith: what actually worked', snippet: 'Everyone has an opinion on microservices migration. This is mine, and it comes with scars to prove it. We moved 400k lines of Rails to Go over 18 months.', status: 'draft', wordCount: 3100, age: '3 weeks ago', body: mockBody('Migrating a monolith: what actually worked') },
-    ]
-  },
-  {
-    id: 'hashnode',
-    name: 'Hashnode',
-    bg: '#2c6ef7', color: '#fff', initials: 'H',
-    connected: true,
-    articles: [
-      { id: 'hn-draft-001', title: 'Building a CLI tool in Go from zero', snippet: 'Go has excellent standard library support for building CLIs. No framework needed. Here is how I built a production-grade tool with subcommands, flags, and config file support.', status: 'draft', wordCount: 2100, age: '5 days ago', body: mockBody('Building a CLI tool in Go from zero') },
-      { id: 'hn-draft-002', title: 'Docker without root: a practical guide', snippet: 'Running Docker as root in production is a security risk most teams accept silently. Here is how to eliminate it without sacrificing DX.', status: 'draft', wordCount: 1650, age: '2 weeks ago', body: mockBody('Docker without root: a practical guide') },
-      { id: 'hn-post-003', title: 'Rate limiting that actually works', snippet: 'Token bucket, leaky bucket, sliding window — most teams pick one and hope for the best. Here is a principled comparison with real throughput numbers.', status: 'published', wordCount: 1900, age: '1 month ago', body: mockBody('Rate limiting that actually works') },
-    ]
-  },
-  {
-    id: 'devto',
-    name: 'Dev.to',
-    bg: '#181818', color: '#e8eaf2', initials: 'D',
-    connected: false,
-    articles: []
-  }
-];
+// ─── Platform UI metadata ────────────────────────────────────────
+// Visual presentation only — connected status and articles come from API.
+const PLATFORM_META = {
+  medium:   { name: 'Medium',   bg: '#292929', color: '#e8eaf2', initials: 'M' },
+  hashnode: { name: 'Hashnode', bg: '#2c6ef7', color: '#fff',    initials: 'H' },
+  devto:    { name: 'Dev.to',   bg: '#181818', color: '#e8eaf2', initials: 'D' },
+};
 
-function mockBody(title) {
-  return `## ${title}\n\nThis is a preview of the article content. In a real import, the full Markdown body would be fetched from the platform API and rendered here.\n\n**Key sections covered:**\n- Background and motivation\n- Core implementation details\n- Benchmarks and results\n- Lessons learned\n\nThe editor will open with this content pre-loaded into the article workspace, ready for editing and publishing to your chosen destinations.\n\n\`\`\`js\n// Example code block\nconst result = await importArticle({ platform, draftId });\nconsole.log(result.id);\n\`\`\`\n\nMore content follows in the full article...`;
-}
+// Populated from GET /api/connections on init
+let PLATFORMS = [];
 
 // ─── App state ───────────────────────────────────────────────────
 const params     = new URLSearchParams(location.search);
@@ -421,6 +442,10 @@ let selectedArticle  = null;  // article object
 let uploadedFile     = null;  // { name, content, title, wordCount }
 let editedTitle      = '';
 let showError        = false;
+let draftSearch      = '';
+let draftFilter      = 'all';
+let platformArticles = {};    // connId → DraftSummary[] | null (null = loading)
+let fetchingBodyForId = null; // article id being body-fetched
 
 // Upload mode: 2 steps; Platform mode: 3 steps
 const totalSteps = MODE === 'upload' ? 2 : 3;
@@ -434,13 +459,71 @@ const STEP_LABELS = MODE === 'upload'
 document.addEventListener('DOMContentLoaded', () => {
   renderStepBar();
   if (MODE === 'platform') {
-    renderPlatformGrid();
     showView('platform-pick');
+    initConnections();
   } else {
     showView('upload');
   }
   renderActionBar();
 });
+
+async function initConnections() {
+  try {
+    const res = await fetch('/api/connections');
+    const data = await res.json();
+    const blogIds = new Set(['medium', 'hashnode', 'devto']);
+    PLATFORMS = data.connections
+      .filter(c => blogIds.has(c.id))
+      .map(c => ({
+        id: c.id,
+        name: PLATFORM_META[c.id]?.name || c.label,
+        bg:      PLATFORM_META[c.id]?.bg      || '#252a38',
+        color:   PLATFORM_META[c.id]?.color   || '#e8eaf2',
+        initials: PLATFORM_META[c.id]?.initials || c.id[0].toUpperCase(),
+        connected: c.status === 'connected',
+      }));
+  } catch {
+    PLATFORMS = Object.entries(PLATFORM_META).map(([id, m]) => ({ id, ...m, connected: false }));
+  }
+  renderPlatformGrid();
+  renderActionBar();
+}
+
+async function loadDrafts(connId) {
+  if (platformArticles[connId] !== undefined) { renderDraftList(); return; }
+  platformArticles[connId] = null; // mark loading
+  renderDraftList();
+  try {
+    const res = await fetch(`/api/connections/${encodeURIComponent(connId)}/drafts?per_page=100`);
+    if (!res.ok) throw new Error('API error');
+    const data = await res.json();
+    platformArticles[connId] = data.drafts.map(d => ({
+      id:         d.id,
+      title:      d.title,
+      snippet:    d.snippet || '',
+      status:     d.status,
+      wordCount:  d.word_count || 0,
+      age:        _relativeAge(d.updated_at),
+      coverImage: d.cover_image || null,
+      body:       null, // fetched on demand
+    }));
+  } catch {
+    platformArticles[connId] = [];
+  }
+  renderDraftList();
+}
+
+function _relativeAge(iso) {
+  if (!iso) return '';
+  const ms   = Date.now() - new Date(iso).getTime();
+  const days = Math.floor(ms / 86400000);
+  if (days < 1) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 7) return `${days} days ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks} week${weeks > 1 ? 's' : ''} ago`;
+  return `${Math.floor(days / 30)} months ago`;
+}
 
 // ─── Views ───────────────────────────────────────────────────────
 const VIEWS = ['platform-pick', 'draft-list', 'review', 'upload'];
@@ -520,7 +603,17 @@ function advance() {
   renderStepBar();
 
   if (MODE === 'platform') {
-    if (step === 2) { renderDraftList(); showView('draft-list'); }
+    if (step === 2) {
+      draftSearch = ''; draftFilter = 'all';
+      const si = document.getElementById('draft-search');
+      if (si) si.value = '';
+      ['all','draft','published'].forEach(k => {
+        const el = document.getElementById('pill-' + k);
+        if (el) el.classList.toggle('active', k === 'all');
+      });
+      showView('draft-list');
+      loadDrafts(selectedPlatform.id);
+    }
     if (step === 3) { renderReview(); showView('review'); }
   } else {
     if (step === 2) { renderReview(); showView('review'); }
@@ -569,7 +662,7 @@ function renderPlatformGrid() {
       <div class="platform-logo" style="background:${p.bg};color:${p.color};">${p.initials}</div>
       <div>
         <div style="font-size:13px;font-weight:500;color:#e8eaf2;">${p.name}</div>
-        <div style="font-size:11px;color:#5a6080;">${p.connected ? p.articles.length + ' articles' : 'Not connected'}</div>
+        <div style="font-size:11px;color:#5a6080;">${p.connected ? (platformArticles[p.id]?.length != null ? platformArticles[p.id].length + ' articles' : 'Connected') : 'Not connected'}</div>
       </div>
       <div class="platform-check">
         <svg viewBox="0 0 10 10"><path d="M1.5 5l2.5 2.5 4.5-4.5"/></svg>
@@ -586,56 +679,114 @@ function selectPlatform(id) {
 }
 
 // ─── Draft list ──────────────────────────────────────────────────
-let visibleCount = 3;
+let visibleCount = 20;
 function renderDraftList() {
   if (!selectedPlatform) return;
   const p = selectedPlatform;
-  const articles = p.articles;
 
   document.getElementById('platform-list-title').textContent = p.name;
-  document.getElementById('article-count-label').textContent = `${articles.length} articles`;
   const logoSm = document.getElementById('platform-logo-sm');
   logoSm.style.background = p.bg;
   logoSm.style.color = p.color;
   logoSm.textContent = p.initials;
 
   const rows = document.getElementById('draft-rows');
-  const slice = articles.slice(0, visibleCount);
+  const raw  = platformArticles[p.id];
 
-  if (articles.length === 0) {
-    rows.innerHTML = '<div style="padding:24px;text-align:center;font-size:13px;color:#5a6080;">No articles found on this platform.</div>';
+  // Still loading
+  if (raw === null || raw === undefined) {
+    rows.innerHTML = '<div style="padding:24px;text-align:center;font-size:13px;color:#5a6080;display:flex;align-items:center;justify-content:center;gap:8px;"><span class="spinner" style="width:14px;height:14px;"></span> Loading articles…</div>';
+    document.getElementById('article-count-label').textContent = '';
+    document.getElementById('load-more-wrap').style.display = 'none';
     return;
   }
 
-  rows.innerHTML = slice.map(a => `
-    <div class="draft-row ${selectedArticle?.id === a.id ? 'selected' : ''}"
+  // Apply status filter and search query
+  let articles = raw;
+  if (draftFilter !== 'all') articles = articles.filter(a => a.status === draftFilter);
+  if (draftSearch) articles = articles.filter(a =>
+    a.title.toLowerCase().includes(draftSearch) ||
+    (a.snippet || '').toLowerCase().includes(draftSearch)
+  );
+
+  document.getElementById('article-count-label').textContent = `${articles.length} article${articles.length !== 1 ? 's' : ''}`;
+
+  const slice = articles.slice(0, visibleCount);
+
+  if (articles.length === 0) {
+    rows.innerHTML = '<div style="padding:24px;text-align:center;font-size:13px;color:#5a6080;">No articles found.</div>';
+    document.getElementById('load-more-wrap').style.display = 'none';
+    return;
+  }
+
+  rows.innerHTML = slice.map(a => {
+    const isSelected  = selectedArticle?.id === a.id;
+    const isFetching  = fetchingBodyForId  === a.id;
+    const loadingCue  = isFetching
+      ? '<span class="spinner" style="width:11px;height:11px;border-width:1.5px;margin-left:6px;"></span>'
+      : '';
+    return `
+    <div class="draft-row ${isSelected ? 'selected' : ''}"
       onclick="selectArticle('${a.id}')">
-      <div class="draft-row-title">${a.title}</div>
+      <div class="draft-row-title" style="display:flex;align-items:center;">${a.title}${loadingCue}</div>
       <div class="draft-row-snippet">${a.snippet}</div>
       <div class="draft-row-meta">
         <span class="draft-badge ${a.status}">${a.status}</span>
         <span style="font-size:11px;color:#3a3f52;">·</span>
-        <span style="font-size:11px;color:#5a6080;">${a.wordCount.toLocaleString()} words</span>
+        <span style="font-size:11px;color:#5a6080;">${(a.wordCount||0).toLocaleString()} words</span>
         <span style="font-size:11px;color:#3a3f52;">·</span>
         <span style="font-size:11px;color:#5a6080;">${a.age}</span>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 
   const loadWrap = document.getElementById('load-more-wrap');
   loadWrap.style.display = visibleCount < articles.length ? 'block' : 'none';
 }
 
-function selectArticle(id) {
+async function selectArticle(id) {
   if (!selectedPlatform) return;
-  selectedArticle = selectedPlatform.articles.find(a => a.id === id) || null;
+  const articles = platformArticles[selectedPlatform.id] || [];
+  selectedArticle = articles.find(a => a.id === id) || null;
   editedTitle = selectedArticle?.title || '';
   renderDraftList();
   renderActionBar();
+
+  // Pre-fetch body if not already loaded
+  if (selectedArticle && !selectedArticle.body) {
+    fetchingBodyForId = id;
+    renderDraftList();
+    try {
+      const r = await fetch(`/api/connections/${encodeURIComponent(selectedPlatform.id)}/drafts/${encodeURIComponent(id)}`);
+      if (r.ok) {
+        const d = await r.json();
+        selectedArticle.body = d.body || '';
+      }
+    } catch {}
+    fetchingBodyForId = null;
+    renderDraftList();
+    renderActionBar();
+  }
 }
 
 function loadMore() {
-  visibleCount += 3;
+  visibleCount += 20;
+  renderDraftList();
+}
+
+function setDraftFilter(f) {
+  draftFilter = f;
+  visibleCount = 20;
+  ['all', 'draft', 'published'].forEach(k => {
+    const el = document.getElementById('pill-' + k);
+    if (el) el.classList.toggle('active', k === f);
+  });
+  renderDraftList();
+}
+
+function setDraftSearch(q) {
+  draftSearch = q.toLowerCase();
+  visibleCount = 20;
   renderDraftList();
 }
 
@@ -658,6 +809,24 @@ function renderReview() {
   editedTitle = title;
   document.getElementById('title-input').value = title;
   document.getElementById('review-meta').textContent = meta;
+
+  // Cover image
+  const coverWrap = document.getElementById('cover-image-wrap');
+  const coverImg  = document.getElementById('cover-image');
+  const coverHint = document.getElementById('cover-image-hint');
+  const coverCon  = document.getElementById('cover-image-container');
+  const coverUrl  = (MODE === 'platform' && selectedArticle?.coverImage) ? selectedArticle.coverImage : null;
+  if (coverUrl) {
+    const platClass = selectedPlatform?.id || 'upload';
+    coverCon.className = `cover-img-box ${platClass}`;
+    const hints = { hashnode: 'Hashnode cover — 1600 × 840', devto: 'Dev.to cover — 1000 × 420', medium: 'Medium cover — 16:9', upload: '16:9' };
+    coverHint.textContent = hints[platClass] || '';
+    coverImg.src = coverUrl;
+    coverWrap.style.display = 'block';
+  } else {
+    coverWrap.style.display = 'none';
+  }
+
   renderMarkdown(body);
 
   // Warnings (unresolved images etc.)
@@ -684,21 +853,88 @@ function syncTitle(val) {
   renderActionBar();
 }
 
-function renderMarkdown(md) {
-  // Minimal markdown renderer
-  let html = md
-    .replace(/```[\w]*\n([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
-    .replace(/^### (.+)$/gm, '<h3 style="font-size:14px;font-weight:600;color:#e8eaf2;margin-bottom:6px;">$1</h3>')
-    .replace(/^## (.+)$/gm,  '<h2 style="font-size:16px;font-weight:600;color:#e8eaf2;margin-bottom:8px;">$1</h2>')
-    .replace(/^# (.+)$/gm,   '<h1 style="font-size:18px;font-weight:600;color:#e8eaf2;margin-bottom:10px;">$1</h1>')
+function inlineMarkdown(text) {
+  return text
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2" style="max-width:100%;border-radius:4px;margin:4px 0;vertical-align:middle;" />')
+    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2" style="max-width:100%;border-radius:4px;margin:6px 0;" />')
-    .replace(/^- (.+)$/gm, '<li style="margin-bottom:3px;">$1</li>')
-    .replace(/\n\n/g, '</p><p style="margin-bottom:10px;">')
-    .replace(/^(?!<[h|l|p|u|pre])(.+)$/gm, '<p style="margin-bottom:10px;">$1</p>');
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color:#6366f1;" target="_blank">$1</a>');
+}
 
-  document.getElementById('markdown-preview').innerHTML = html;
+function renderMarkdown(md) {
+  if (!md) { document.getElementById('markdown-preview').innerHTML = ''; return; }
+  const lines  = md.split('\n');
+  const parts  = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // fenced code block
+    if (/^```/.test(line)) {
+      const lang = line.slice(3).trim();
+      const code = [];
+      i++;
+      while (i < lines.length && !/^```/.test(lines[i])) { code.push(lines[i]); i++; }
+      const escaped = code.join('\n').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      parts.push(`<pre><code${lang ? ` class="language-${lang}"` : ''}>${escaped}</code></pre>`);
+      i++; continue;
+    }
+    // ATX headings
+    const hm = line.match(/^(#{1,6})\s+(.+)/);
+    if (hm) {
+      const lvl = hm[1].length;
+      const sz  = [22,18,16,14,13,12][lvl-1];
+      parts.push(`<h${lvl} style="font-size:${sz}px;font-weight:600;color:#e8eaf2;margin-bottom:${lvl<=2?10:6}px;margin-top:${lvl<=2?16:10}px;">${inlineMarkdown(hm[2])}</h${lvl}>`);
+      i++; continue;
+    }
+    // HR
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(line.trim())) {
+      parts.push('<hr />'); i++; continue;
+    }
+    // Block image on its own line
+    const bim = line.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (bim) {
+      parts.push(`<img alt="${bim[1]}" src="${bim[2]}" style="max-width:100%;border-radius:6px;margin:8px 0;display:block;" />`);
+      i++; continue;
+    }
+    // Blockquote
+    if (/^>\s?/.test(line)) {
+      const bqLines = [];
+      while (i < lines.length && /^>\s?/.test(lines[i])) {
+        bqLines.push(inlineMarkdown(lines[i].replace(/^>\s?/, ''))); i++;
+      }
+      parts.push(`<blockquote>${bqLines.join('<br />')}</blockquote>`);
+      continue;
+    }
+    // Unordered list
+    if (/^[\-\*\+]\s/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^[\-\*\+]\s/.test(lines[i])) {
+        items.push(`<li style="margin-bottom:3px;">${inlineMarkdown(lines[i].replace(/^[\-\*\+]\s/, ''))}</li>`); i++;
+      }
+      parts.push(`<ul>${items.join('')}</ul>`);
+      continue;
+    }
+    // Ordered list
+    if (/^\d+\.\s/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\d+\.\s/.test(lines[i])) {
+        items.push(`<li style="margin-bottom:3px;">${inlineMarkdown(lines[i].replace(/^\d+\.\s/, ''))}</li>`); i++;
+      }
+      parts.push(`<ol>${items.join('')}</ol>`);
+      continue;
+    }
+    // Empty line — paragraph break
+    if (line.trim() === '') { i++; continue; }
+    // Paragraph
+    const pLines = [];
+    while (i < lines.length && lines[i].trim() !== '' && !/^[\-\*\+#>`]|^\d+\.|^```/.test(lines[i])) {
+      pLines.push(inlineMarkdown(lines[i])); i++;
+    }
+    if (pLines.length) parts.push(`<p style="margin-bottom:10px;">${pLines.join(' ')}</p>`);
+  }
+  document.getElementById('markdown-preview').innerHTML = parts.join('\n');
 }
 
 // ─── Drop zone ───────────────────────────────────────────────────
@@ -932,6 +1168,8 @@ async function doImport() {
         platform: selectedPlatform.id,
         draft_id: selectedArticle.id,
         title: editedTitle,
+        content: selectedArticle.body || undefined,
+        status: selectedArticle.status,
       };
     }
 
