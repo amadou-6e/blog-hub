@@ -133,3 +133,32 @@ class TestMe:
     def test_me_returns_401_when_not_logged_in(self, client):
         r = client.get("/api/auth/me")
         assert r.status_code == 401
+
+
+class TestMiddleware:
+    def test_protected_route_returns_401_without_cookie(self, client):
+        r = client.get("/api/articles")
+        assert r.status_code == 401
+
+    def test_protected_route_accessible_with_valid_session(self, client):
+        client.post("/api/auth/register",
+                    json={"email": "mw@example.com", "password": "password123"})
+        r = client.get("/api/articles")
+        assert r.status_code == 200
+
+    def test_health_is_public(self, client):
+        r = client.get("/health")
+        assert r.status_code == 200
+
+    def test_register_is_public(self, client):
+        r = client.post("/api/auth/register",
+                        json={"email": "pub@example.com", "password": "password123"})
+        assert r.status_code == 201
+
+    def test_login_is_public(self, client):
+        client.post("/api/auth/register",
+                    json={"email": "loginpub@example.com", "password": "password123"})
+        r = client.post("/api/auth/login",
+                        json={"email": "loginpub@example.com", "password": "password123",
+                              "remember_me": False})
+        assert r.status_code == 200

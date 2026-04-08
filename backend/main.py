@@ -6,6 +6,8 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.routers import agent, articles, comments, connections, dev, jobs, patches, platforms
 from backend.routers import auth as auth_router
+from backend.middleware.auth import AuthMiddleware
+import backend.store as store
 
 app = FastAPI(
     title="BlogHub API",
@@ -31,6 +33,13 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )
+app.add_middleware(AuthMiddleware)
+
+
+@app.on_event("startup")
+def startup_cleanup():
+    store.delete_expired_sessions()
+
 
 app.include_router(auth_router.router)
 app.include_router(agent.router)
