@@ -63,3 +63,73 @@ class TestSessions:
         deleted = store.delete_expired_sessions()
         assert deleted == 1
         assert store.get_session("valid1") is not None
+
+
+class TestRegister:
+    def test_register_creates_user_and_sets_cookie(self, client):
+        r = client.post("/api/auth/register",
+                        json={"email": "new@example.com", "password": "password123"})
+        assert r.status_code == 201
+        assert r.json()["email"] == "new@example.com"
+        assert "bloghub_session" in r.cookies
+
+    def test_register_duplicate_email_returns_409(self, client):
+        client.post("/api/auth/register",
+                    json={"email": "dup@example.com", "password": "password123"})
+        r = client.post("/api/auth/register",
+                        json={"email": "dup@example.com", "password": "password123"})
+        assert r.status_code == 409
+
+    def test_register_short_password_returns_422(self, client):
+        r = client.post("/api/auth/register",
+                        json={"email": "short@example.com", "password": "1234567"})
+        assert r.status_code == 422
+
+
+class TestLogin:
+    def test_login_valid_credentials(self, client):
+        client.post("/api/auth/register",
+                    json={"email": "login@example.com", "password": "password123"})
+        r = client.post("/api/auth/login",
+                        json={"email": "login@example.com", "password": "password123",
+                              "remember_me": False})
+        assert r.status_code == 200
+        assert "bloghub_session" in r.cookies
+
+    def test_login_wrong_password_returns_401(self, client):
+        client.post("/api/auth/register",
+                    json={"email": "wp@example.com", "password": "password123"})
+        r = client.post("/api/auth/login",
+                        json={"email": "wp@example.com", "password": "wrongpassword",
+                              "remember_me": False})
+        assert r.status_code == 401
+        assert r.json()["detail"] == "Invalid email or password"
+
+    def test_login_unknown_email_returns_401(self, client):
+        r = client.post("/api/auth/login",
+                        json={"email": "ghost@example.com", "password": "password123",
+                              "remember_me": False})
+        assert r.status_code == 401
+        assert r.json()["detail"] == "Invalid email or password"
+
+
+class TestLogout:
+    def test_logout_clears_session(self, client):
+        client.post("/api/auth/register",
+                    json={"email": "logout@example.com", "password": "password123"})
+        r = client.post("/api/auth/logout")
+        assert r.status_code == 200
+        assert r.json()["status"] == "logged_out"
+
+
+class TestMe:
+    def test_me_returns_user_when_logged_in(self, client):
+        client.post("/api/auth/register",
+                    json={"email": "me@example.com", "password": "password123"})
+        r = client.get("/api/auth/me")
+        assert r.status_code == 200
+        assert r.json()["email"] == "me@example.com"
+
+    def test_me_returns_401_when_not_logged_in(self, client):
+        r = client.get("/api/auth/me")
+        assert r.status_code == 401
