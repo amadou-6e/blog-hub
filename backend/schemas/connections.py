@@ -69,6 +69,7 @@ class DraftSummary(BaseModel):
     updated_at: str
     status: str  # "draft" | "published"
     snippet: str = ""
+    cover_image: Optional[str] = None
 
 
 class DraftListResponse(BaseModel):
@@ -88,3 +89,4 @@ class DraftContent(BaseModel):
     status: str
     body: str
     canonical_url: Optional[str] = None
+    cover_image: Optional[str] = None

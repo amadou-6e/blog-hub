@@ -258,9 +258,11 @@ class ImportArticleRequest(BaseModel):
     draft_id: Optional[str] = None
     # upload source
     filename: Optional[str] = None
-    content: Optional[str] = None
-    # shared — user-edited title from the Review step
+    # shared fields
+    content: Optional[str] = None     # pre-fetched body (platform) or parsed MD (upload)
     title: str
+    status: Optional[str] = None      # "draft" | "published" — from platform draft
+    cover_image: Optional[str] = None # cover image URL from platform
 
 
 class ImportArticleResponse(BaseModel):
@@ -274,8 +276,10 @@ def import_article(body: ImportArticleRequest):
     Create an article workspace from an existing platform draft or an uploaded
     Markdown file. Returns the new article id for navigation to the editor.
 
-    source="platform": fetches content from GET /api/connections/{platform}/drafts/{draft_id}.
-    source="upload":   uses the content field directly (already parsed client-side).
+    source="platform": uses body.content (pre-fetched by the client on the Review step).
+                       Falls back to fetching via GET /api/connections/{platform}/drafts/{draft_id}
+                       if body.content is absent.
+    source="upload":   uses body.content directly (already parsed client-side).
     """
     if body.source not in ("platform", "upload"):
         raise HTTPException(status_code=422, detail="source must be 'platform' or 'upload'")
@@ -284,30 +288,34 @@ def import_article(body: ImportArticleRequest):
         if not body.platform or not body.draft_id:
             raise HTTPException(status_code=422, detail="platform and draft_id required for source=platform")
 
-        token = store.get_connection_token(body.platform)
-        if not token:
-            raise HTTPException(
-                status_code=404,
-                detail={"error": "platform_not_connected", "platform": body.platform},
-            )
-
-        # Fetch content via the connections router's mock data.
-        # In production this would call the platform API directly.
-        from backend.routers.connections import _MOCK_DRAFTS
-        drafts = _MOCK_DRAFTS.get(body.platform, [])
-        draft = next((d for d in drafts if d["id"] == body.draft_id), None)
-        if draft is None:
-            raise HTTPException(status_code=404, detail={"error": "draft_not_found"})
-
-        content = draft["body"]
-        canonical_url = draft.get("canonical_url")
         platform_label = {"medium": "Medium", "hashnode": "Hashnode", "devto": "Dev.to"}.get(
             body.platform, body.platform
         )
         event = f"Imported from {platform_label}"
 
-        # Check if this article already exists locally (SEO cross-post grouping).
-        # Match by canonical_url first, then fall back to exact title.
+        if body.content:
+            # Client pre-fetched the body on the Review step — use it directly.
+            content = body.content
+            canonical_url = None  # not available without a separate API call
+        else:
+            # Fallback: fetch content from the connections router.
+            token = store.get_connection_token(body.platform)
+            if not token:
+                raise HTTPException(
+                    status_code=404,
+                    detail={"error": "platform_not_connected", "platform": body.platform},
+                )
+            from backend.routers.connections import _fetch_draft
+            draft = _fetch_draft(body.platform, body.draft_id, token)
+            if draft is None:
+                raise HTTPException(status_code=404, detail={"error": "draft_not_found"})
+            content = draft["body"]
+            canonical_url = draft.get("canonical_url")
+
+        # Deduplication: match by canonical_url then exact title.
+        canonical_url = getattr(body, "canonical_url", None) or (
+            canonical_url if not body.content else None
+        )
         existing = None
         if canonical_url:
             existing = store.find_article_by_canonical_url(canonical_url)
@@ -315,13 +323,12 @@ def import_article(body: ImportArticleRequest):
             existing = store.find_article_by_title(body.title)
 
         if existing is not None:
-            # Merge this platform into the existing article's destinations.
             store.merge_platform_into_article(
                 article_id=existing["id"],
                 platform=body.platform,
-                status=draft.get("status", "draft"),
+                status=body.status or "draft",
                 url=None,
-                draft_id=draft["id"],
+                draft_id=body.draft_id,
                 event=event,
             )
             return ImportArticleResponse(id=existing["id"], title=existing["title"])

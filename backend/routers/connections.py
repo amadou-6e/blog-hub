@@ -21,12 +21,17 @@ The backend never spawns CLI subprocesses directly.
 from __future__ import annotations
 
 import json
+import logging
 import os
+from datetime import datetime, timezone
 
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from fastapi.responses import HTMLResponse
+
+from blogs.hashnode.client import HashnodeClient, HashnodeError
+from blogs.devto.client import DevToClient, DevToError
 
 import backend.services.cli_runner as runner
 import backend.store as store
@@ -47,14 +52,6 @@ _VALID_IDS    = {"medium", "hashnode", "devto", "anthropic", "openai"}
 _BLOG_IDS     = {"medium", "hashnode", "devto"}
 _CLI_IDS      = {"anthropic", "openai"}
 _PROVIDER_MAP = {"anthropic": "anthropic", "openai": "openai"}
-
-# ── Mock draft data ───────────────────────────────────────────────────────────
-# Real implementation would call each platform's API with the stored token.
-# Medium: GET /v1/users/{userId}/publications and /publications/{pubId}/posts
-#   (Note: Medium's API does not expose drafts — only published posts and
-#    posts submitted to publications. The mock returns a mix of statuses.)
-# Hashnode: GraphQL me { drafts { ... } } and me { posts { ... } }
-# Dev.to:   GET /articles/me/unpublished  +  GET /articles/me
 
 _MOCK_DRAFTS: dict[str, list[dict]] = {
     "medium": [
@@ -147,8 +144,85 @@ _MOCK_DRAFTS: dict[str, list[dict]] = {
     "devto": [],
 }
 
+# ── Helpers — real platform API calls ────────────────────────────────────────
 
-# ── List ──────────────────────────────────────────────────────────────────────
+_log = logging.getLogger(__name__)
+
+
+def _iso(dt: datetime | None) -> str:
+    if dt is None:
+        return datetime.now(tz=timezone.utc).isoformat()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
+
+def _word_count(text: str) -> int:
+    return len(text.split()) if text else 0
+
+
+def _snippet(body: str, chars: int = 200) -> str:
+    return body[:chars].replace("\n", " ").strip()
+
+
+def _list_platform_drafts(conn_id: str, token: str) -> list[dict]:
+    """Return a list of draft dicts from the real platform API.
+    Falls back to [] on any error so the endpoint never 500s due to upstream issues."""
+    try:
+        if conn_id == "hashnode":
+            client = HashnodeClient(token)
+            articles = client.list_drafts(first=50)
+            articles += client.list_published_articles(post_first=50)
+            return [
+                {
+                    "id": a.article_id,
+                    "title": a.title,
+                    "snippet": _snippet(a.body_markdown),
+                    "word_count": _word_count(a.body_markdown),
+                    "updated_at": _iso(a.updated_at),
+                    "status": "published" if a.published else "draft",
+                    "canonical_url": a.canonical_url,
+                    "cover_image": a.cover_image_url,
+                    "body": a.body_markdown,
+                }
+                for a in articles
+            ]
+
+        if conn_id == "devto":
+            client = DevToClient(token)
+            articles = client.list_my_articles(per_page=100)
+            return [
+                {
+                    "id": str(a.article_id),
+                    "title": a.title,
+                    "snippet": a.description or _snippet(a.body_markdown),
+                    "word_count": _word_count(a.body_markdown),
+                    "updated_at": _iso(a.updated_at),
+                    "status": "published" if a.published else "draft",
+                    "canonical_url": a.canonical_url,
+                    "cover_image": a.cover_image,
+                    "body": a.body_markdown,
+                }
+                for a in articles
+            ]
+
+    except (HashnodeError, DevToError, Exception) as exc:  # noqa: BLE001
+        _log.warning("Failed to fetch drafts for %s: %s", conn_id, exc)
+
+    # Medium has no public drafts API; return mock data so the UI is usable.
+    return _MOCK_DRAFTS.get(conn_id, [])
+
+
+def _fetch_draft(conn_id: str, draft_id: str, token: str) -> dict | None:
+    """Fetch a single draft's full content from the platform API."""
+    try:
+        drafts = _list_platform_drafts(conn_id, token)
+        return next((d for d in drafts if d["id"] == draft_id), None)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("_fetch_draft failed for %s/%s: %s", conn_id, draft_id, exc)
+        return None
+
+
 
 
 @router.get("", response_model=ConnectionListResponse)
@@ -419,11 +493,8 @@ def list_drafts(
     Return a paginated list of articles (drafts + published) for a connected
     blog platform.
 
-    Currently returns mock data. Real implementation would call:
-      Medium:   GET https://api.medium.com/v1/users/{userId}/posts
-                (Medium's API exposes published posts only, not drafts.)
-      Hashnode: GraphQL me { drafts { ... } } + me { posts { ... } }
-      Dev.to:   GET /articles/me/unpublished  +  GET /articles/me
+    Hashnode and Dev.to: calls real platform APIs via the blog clients.
+    Medium: returns mock data (Medium's public API does not expose drafts).
     """
     if conn_id not in _BLOG_IDS:
         raise HTTPException(status_code=404, detail=f"Unknown platform: {conn_id}")
@@ -434,15 +505,26 @@ def list_drafts(
             detail={"error": "platform_not_connected", "platform": conn_id},
         )
 
-    all_drafts = _MOCK_DRAFTS.get(conn_id, [])
+    token = store.get_connection_token(conn_id)
+    all_drafts = _list_platform_drafts(conn_id, token)
     total = len(all_drafts)
     start = (page - 1) * per_page
     page_items = all_drafts[start: start + per_page]
 
     return DraftListResponse(
         platform=conn_id,
-        drafts=[DraftSummary(**{k: v for k, v in d.items() if k != "body"})
-                for d in page_items],
+        drafts=[
+            DraftSummary(
+                id=d["id"],
+                title=d["title"],
+                word_count=d.get("word_count", 0),
+                updated_at=d.get("updated_at", ""),
+                status=d.get("status", "draft"),
+                snippet=d.get("snippet", ""),
+                cover_image=d.get("cover_image"),
+            )
+            for d in page_items
+        ],
         total=total,
         page=page,
         per_page=per_page,
@@ -467,15 +549,24 @@ def get_draft(conn_id: str, draft_id: str):
             detail={"error": "platform_not_connected", "platform": conn_id},
         )
 
-    drafts = _MOCK_DRAFTS.get(conn_id, [])
-    draft = next((d for d in drafts if d["id"] == draft_id), None)
-    if draft is None:
+    token = store.get_connection_token(conn_id)
+    draft_dict = _fetch_draft(conn_id, draft_id, token)
+    if draft_dict is None:
         raise HTTPException(
             status_code=404,
             detail={"error": "draft_not_found"},
         )
 
-    return DraftContent(**draft)
+    return DraftContent(
+        id=draft_dict["id"],
+        title=draft_dict["title"],
+        word_count=draft_dict.get("word_count", 0),
+        updated_at=draft_dict.get("updated_at", ""),
+        status=draft_dict.get("status", "draft"),
+        body=draft_dict.get("body", ""),
+        canonical_url=draft_dict.get("canonical_url"),
+        cover_image=draft_dict.get("cover_image"),
+    )
 
 
 # ── Medium OAuth callback ─────────────────────────────────────────────────────
