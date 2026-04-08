@@ -338,6 +338,17 @@ class SQLiteStore:
             self._con.commit()
         except Exception:
             pass  # column already exists
+        # Migrate DBs that pre-date multi-user auth (user_id columns).
+        for stmt in (
+            "ALTER TABLE articles ADD COLUMN user_id TEXT",
+            "ALTER TABLE connections ADD COLUMN user_id TEXT",
+            "ALTER TABLE jobs ADD COLUMN user_id TEXT",
+        ):
+            try:
+                self._con.execute(stmt)
+                self._con.commit()
+            except Exception:
+                pass  # column already exists
         self._con.commit()
         self._seed_if_empty()
         # Ephemeral — no need to persist across restarts
@@ -352,15 +363,16 @@ class SQLiteStore:
     SEED_USER_HASH = "$2b$12$BJsbJlf3SZUMUISLA8oASeFn.Q3U.Ar6TqoIFtu0F9OlYyev.DZLC"
 
     def _seed_if_empty(self) -> None:
-        count = self._con.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
-        if count > 0:
-            return
-        # Create the seed user (owner of all seed articles).
+        # Always ensure the seed user exists (safe with INSERT OR IGNORE).
         now_s = _ts(_now())
         self._con.execute(
             "INSERT OR IGNORE INTO users (id, email, password_hash, created_at) VALUES (?,?,?,?)",
             (self.SEED_USER_ID, self.SEED_USER_EMAIL, self.SEED_USER_HASH, now_s),
         )
+        count = self._con.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
+        if count > 0:
+            self._con.commit()
+            return
         for art in _seed_articles():
             self._insert_article(art, user_id=self.SEED_USER_ID)
         self._con.commit()
