@@ -345,24 +345,36 @@ class SQLiteStore:
 
     # ── Seed ─────────────────────────────────────────────────────────────────
 
+    # Known seed credentials — used by tests to log in without re-registering.
+    SEED_USER_ID = "user_seed"
+    SEED_USER_EMAIL = "seed@example.com"
+    # bcrypt hash of "seed1234"
+    SEED_USER_HASH = "$2b$12$BJsbJlf3SZUMUISLA8oASeFn.Q3U.Ar6TqoIFtu0F9OlYyev.DZLC"
+
     def _seed_if_empty(self) -> None:
         count = self._con.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
         if count > 0:
             return
+        # Create the seed user (owner of all seed articles).
+        now_s = _ts(_now())
+        self._con.execute(
+            "INSERT OR IGNORE INTO users (id, email, password_hash, created_at) VALUES (?,?,?,?)",
+            (self.SEED_USER_ID, self.SEED_USER_EMAIL, self.SEED_USER_HASH, now_s),
+        )
         for art in _seed_articles():
-            self._insert_article(art)
+            self._insert_article(art, user_id=self.SEED_USER_ID)
         self._con.commit()
 
-    def _insert_article(self, art: dict) -> None:
+    def _insert_article(self, art: dict, user_id: str | None = None) -> None:
         body_path = self._write_body(art["id"], art["body"])
         self._con.execute(
             """INSERT OR IGNORE INTO articles
                (id, title, body, body_path, word_count, gate, source, source_platform,
-                canonical_url, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                canonical_url, created_at, updated_at, user_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (art["id"], art["title"], "", body_path,
              art["word_count"], art["gate"], art["source"], art["source_platform"],
-             art.get("canonical_url"), art["created_at"], art["updated_at"]),
+             art.get("canonical_url"), art["created_at"], art["updated_at"], user_id),
         )
         for platform, dest in art["destinations"].items():
             self._con.execute(
@@ -974,16 +986,9 @@ class SQLiteStore:
             DELETE FROM articles;
             DELETE FROM jobs;
             DELETE FROM connections;
+            DELETE FROM sessions;
+            DELETE FROM users;
         """)
-        # Insert explicit "disconnected" rows for all platforms so that
-        # list_connections() does not fall back to env-var auto-detection.
-        for conn_id in _CONNECTION_META:
-            self._con.execute(
-                """INSERT OR REPLACE INTO connections
-                   (platform, token, status, username, connected_at, error_message)
-                   VALUES (?, '', 'disconnected', NULL, '', NULL)""",
-                (conn_id,),
-            )
         self._con.commit()
         articles_blobs = self._blobs_dir / "articles"
         if articles_blobs.exists():

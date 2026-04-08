@@ -82,8 +82,9 @@ def list_articles(
 
 
 @router.post("", response_model=CreateArticleResponse, status_code=201)
-def create_article(body: CreateArticleRequest):
-    article = store.create_article(title=body.title)
+def create_article(request: Request, body: CreateArticleRequest):
+    user_id: str = request.state.user_id
+    article = store.create_article(user_id, title=body.title)
     return CreateArticleResponse(
         id=article["id"],
         title=article["title"],
@@ -92,8 +93,9 @@ def create_article(body: CreateArticleRequest):
 
 
 @router.delete("", status_code=204)
-def delete_articles(body: DeleteArticleRequest):
-    blocked = store.delete_articles(ids=body.ids, force=body.force)
+def delete_articles(request: Request, body: DeleteArticleRequest):
+    user_id: str = request.state.user_id
+    blocked = store.delete_articles(user_id, ids=body.ids, force=body.force)
     if blocked:
         raise HTTPException(
             status_code=409,
@@ -127,8 +129,9 @@ class ArticleDetailResponse(BaseModel):
 
 
 @router.get("/{article_id}", response_model=ArticleDetailResponse)
-def get_article(article_id: str):
-    article = store.get_article(article_id)
+def get_article(request: Request, article_id: str):
+    user_id: str = request.state.user_id
+    article = store.get_article(user_id, article_id)
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
     return ArticleDetailResponse(
@@ -163,15 +166,16 @@ class ArticlePatchResponse(BaseModel):
 
 
 @router.patch("/{article_id}", response_model=ArticlePatchResponse)
-def patch_article(article_id: str, body: ArticlePatchRequest):
-    article = store.get_article(article_id)
+def patch_article(request: Request, article_id: str, body: ArticlePatchRequest):
+    user_id: str = request.state.user_id
+    article = store.get_article(user_id, article_id)
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
     if body.title is not None:
-        store.update_article_title(article_id, body.title)
+        store.update_article_title(user_id, article_id, body.title)
     if body.content is not None:
-        store.update_article_body(article_id, body.content, event="Auto-saved")
-    updated = store.get_article(article_id)
+        store.update_article_body(user_id, article_id, body.content, event="Auto-saved")
+    updated = store.get_article(user_id, article_id)
     return ArticlePatchResponse(
         updated_at=str(updated["updated_at"]),
         word_count=updated["word_count"],
@@ -230,11 +234,12 @@ def _extract_title(markdown: str) -> str:
 
 
 @router.post("/generate", response_model=GenerateArticleResponse, status_code=201)
-def generate_article(body: GenerateArticleRequest):
+def generate_article(request: Request, body: GenerateArticleRequest):
     """
     Generate a new article via an AI provider and store it.
     Optionally pushes drafts to the selected destinations.
     """
+    user_id: str = request.state.user_id
     if body.provider not in ("anthropic", "openai"):
         raise HTTPException(400, f"Unknown provider: {body.provider}")
 
@@ -244,7 +249,7 @@ def generate_article(body: GenerateArticleRequest):
 
     # Both providers go through the CLI runner — Anthropic via claude -p,
     # OpenAI via codex exec (uses the OAuth session or API key).
-    api_key = store.get_connection_token(body.provider) if body.provider == "openai" else None
+    api_key = store.get_connection_token(user_id, body.provider) if body.provider == "openai" else None
     try:
         result = runner.run_task(
             provider=body.provider,
@@ -263,18 +268,18 @@ def generate_article(body: GenerateArticleRequest):
         raise HTTPException(502, "Generation produced empty output")
 
     title = _extract_title(generated_md)
-    article = store.create_article(title=title)
-    store.update_article_body(article["id"], generated_md)
+    article = store.create_article(user_id, title=title)
+    store.update_article_body(user_id, article["id"], generated_md)
 
     if body.destinations:
-        store.set_destinations_pending(article["id"], body.destinations)
+        store.set_destinations_pending(user_id, article["id"], body.destinations)
         results = push_article_to_platforms(
-            store.get_article(article["id"]),
+            store.get_article(user_id, article["id"]),
             body.destinations,
-            get_connection_token=store.get_connection_token,
+            get_connection_token=lambda conn_id: store.get_connection_token(user_id, conn_id),
         )
         for platform, push_result in results.items():
-            store.apply_push_result(
+            store.apply_push_result(user_id,
                 article["id"],
                 platform,
                 success=push_result.success,
@@ -288,23 +293,25 @@ def generate_article(body: GenerateArticleRequest):
 
 
 @router.post("/{article_id}/push", response_model=AsyncAccepted, status_code=202)
-def push_article(article_id: str, body: dict = {}):
-    article = store.get_article(article_id)
+def push_article(request: Request, article_id: str, body: dict = {}):
+    user_id: str = request.state.user_id
+    article = store.get_article(user_id, article_id)
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
 
     platforms = body.get("platforms", list(article["destinations"].keys()))
-    store.set_destinations_pending(article_id, platforms)
-    job = store.create_job("push", article_id)
+    store.set_destinations_pending(user_id, article_id, platforms)
+    job = store.create_job(user_id, "push", article_id)
 
     results = push_article_to_platforms(
         article,
         platforms,
-        get_connection_token=store.get_connection_token,
+        get_connection_token=lambda conn_id: store.get_connection_token(user_id, conn_id),
     )
     job_result: dict[str, dict] = {}
     for platform, result in results.items():
         store.apply_push_result(
+            user_id,
             article_id,
             platform,
             success=result.success,
@@ -320,7 +327,7 @@ def push_article(article_id: str, body: dict = {}):
             "error": result.error,
             "draft_id": result.draft_id,
         }
-    store.complete_job(job["job_id"], result=job_result)
+    store.complete_job(user_id, job["job_id"], result=job_result)
 
     return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
 
@@ -347,7 +354,7 @@ class ImportArticleResponse(BaseModel):
 
 
 @router.post("/import", response_model=ImportArticleResponse, status_code=201)
-def import_article(body: ImportArticleRequest):
+def import_article(request: Request, body: ImportArticleRequest):
     """
     Create an article workspace from an existing platform draft or an uploaded
     Markdown file. Returns the new article id for navigation to the editor.
@@ -355,6 +362,7 @@ def import_article(body: ImportArticleRequest):
     source="platform": fetches content from GET /api/connections/{platform}/drafts/{draft_id}.
     source="upload":   uses the content field directly (already parsed client-side).
     """
+    user_id: str = request.state.user_id
     if body.source not in ("platform", "upload"):
         raise HTTPException(status_code=422, detail="source must be 'platform' or 'upload'")
 
@@ -363,7 +371,7 @@ def import_article(body: ImportArticleRequest):
             raise HTTPException(status_code=422,
                                 detail="platform and draft_id required for source=platform")
 
-        token = store.get_connection_token(body.platform)
+        token = store.get_connection_token(user_id, body.platform)
         if not token:
             raise HTTPException(
                 status_code=404,
@@ -417,15 +425,15 @@ def import_article(body: ImportArticleRequest):
         # Match by canonical_url first, then fall back to exact title.
         existing = None
         if canonical_url:
-            existing = store.find_article_by_canonical_url(canonical_url)
+            existing = store.find_article_by_canonical_url(user_id, canonical_url)
         if existing is None:
-            existing = store.find_article_by_title(body.title)
+            existing = store.find_article_by_title(user_id, body.title)
 
         if existing is not None:
             # Merge this platform into the existing article's destinations.
             _draft_id = body.draft_id if body.content else draft["id"]
             _status = body.status if body.content else draft.get("status", "draft")
-            store.merge_platform_into_article(
+            store.merge_platform_into_article(user_id,
                 article_id=existing["id"],
                 platform=body.platform,
                 status=_status,
@@ -445,12 +453,13 @@ def import_article(body: ImportArticleRequest):
 
     source_platform = body.platform if body.source == "platform" else None
     article = store.create_article(
+        user_id,
         title=body.title,
         source=body.source,
         source_platform=source_platform,
         canonical_url=canonical_url if body.source == "platform" else None,
     )
-    store.update_article_body(article["id"], content, event=event)
+    store.update_article_body(user_id, article["id"], content, event=event)
 
     return ImportArticleResponse(id=article["id"], title=body.title)
 
@@ -604,17 +613,18 @@ async def parse_upload(file: UploadFile = File(...)):
 
 
 @router.post("/{article_id}/inspect", response_model=AsyncAccepted, status_code=202)
-def inspect_article(article_id: str):
-    article = store.get_article(article_id)
+def inspect_article(request: Request, article_id: str):
+    user_id: str = request.state.user_id
+    article = store.get_article(user_id, article_id)
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
 
-    job = store.create_job("inspect", article_id)
+    job = store.create_job(user_id, "inspect", article_id)
 
     # Simulate: word count >= 500 → pass, else warn
     gate = "pass" if article["word_count"] >= 500 else "warn"
-    store.apply_inspect_result(article_id, gate)
-    store.complete_job(job["job_id"], result={"gate": gate})
+    store.apply_inspect_result(user_id, article_id, gate)
+    store.complete_job(user_id, job["job_id"], result={"gate": gate})
 
     return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
 
@@ -623,23 +633,24 @@ def inspect_article(article_id: str):
 
 
 @router.post("/{article_id}/regenerate", response_model=AsyncAccepted, status_code=202)
-def regenerate_patches(article_id: str):
+def regenerate_patches(request: Request, article_id: str):
     """
     Read all unresolved comments on an article, call the AI to produce
     patch suggestions, and persist them as article_patches rows.
     Returns a job ID for polling.
     """
-    article = store.get_article(article_id)
+    user_id: str = request.state.user_id
+    article = store.get_article(user_id, article_id)
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
 
-    comments = store.list_comments(article_id)
+    comments = store.list_comments(user_id, article_id)
     unresolved = [c for c in comments if not c["resolved"]]
 
-    job = store.create_job("regenerate", article_id)
+    job = store.create_job(user_id, "regenerate", article_id)
 
     if not unresolved:
-        store.complete_job(job["job_id"], result={"patches_created": 0})
+        store.complete_job(user_id, job["job_id"], result={"patches_created": 0})
         return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
 
     # Build a prompt asking the AI to produce diff suggestions for each comment.
@@ -661,27 +672,27 @@ def regenerate_patches(article_id: str):
     # Determine which provider to use (prefer anthropic, fall back to openai).
     provider = None
     for p in ("anthropic", "openai"):
-        if store.get_connection_token(p):
+        if store.get_connection_token(user_id, p):
             provider = p
             break
 
     if provider is None:
-        store.complete_job(job["job_id"], error="No AI provider connected")
+        store.complete_job(user_id, job["job_id"], error="No AI provider connected")
         return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
 
-    api_key = store.get_connection_token(provider) if provider == "openai" else None
+    api_key = store.get_connection_token(user_id, provider) if provider == "openai" else None
     try:
         result = runner.run_task(provider=provider,
                                  task="generate",
                                  article_md=prompt,
                                  api_key=api_key)
     except runner.RunnerUnavailable as exc:
-        store.complete_job(job["job_id"], error=str(exc))
+        store.complete_job(user_id, job["job_id"], error=str(exc))
         return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
 
     if result.get("exit_code", 1) != 0:
         err = (result.get("stderr") or result.get("stdout") or "unknown error")[:500]
-        store.complete_job(job["job_id"], error=f"Regeneration failed: {err}")
+        store.complete_job(user_id, job["job_id"], error=f"Regeneration failed: {err}")
         return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
 
     # Parse PATCH_START…PATCH_END blocks from the output.
@@ -689,7 +700,7 @@ def regenerate_patches(article_id: str):
     raw_output = result.get("stdout", "")
     patch_blocks = _re.findall(r"PATCH_START\s*(.*?)\s*PATCH_END", raw_output, _re.DOTALL)
 
-    store.delete_patches(article_id)
+    store.delete_patches(user_id, article_id)
     patches_created = 0
     for block in patch_blocks:
         fields: dict[str, str] = {}
@@ -700,6 +711,7 @@ def regenerate_patches(article_id: str):
                 fields[field] = m.group(1).strip()
         if "REMOVED" in fields and "ADDED" in fields:
             store.add_patch(
+                user_id,
                 article_id=article_id,
                 label=fields.get("LABEL", "Suggested edit"),
                 removed=fields["REMOVED"],
@@ -708,7 +720,7 @@ def regenerate_patches(article_id: str):
             )
             patches_created += 1
 
-    store.complete_job(job["job_id"], result={"patches_created": patches_created})
+    store.complete_job(user_id, job["job_id"], result={"patches_created": patches_created})
     return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
 
 
@@ -730,10 +742,11 @@ class ChatMessage(BaseModel):
 
 
 @router.get("/{article_id}/chat")
-def get_chat(article_id: str):
-    if store.get_article(article_id) is None:
+def get_chat(request: Request, article_id: str):
+    user_id: str = request.state.user_id
+    if store.get_article(user_id, article_id) is None:
         raise HTTPException(status_code=404, detail="Article not found")
-    messages = store.list_chat(article_id)
+    messages = store.list_chat(user_id, article_id)
     return {
         "messages": [
             ChatMessage(role=m["role"], text=m["text"], createdAt=m["created_at"]) for m in messages
@@ -742,25 +755,26 @@ def get_chat(article_id: str):
 
 
 @router.post("/{article_id}/chat", response_model=ChatResponse)
-def post_chat(article_id: str, body: ChatRequest):
+def post_chat(request: Request, article_id: str, body: ChatRequest):
     """
     Execute a chat command against the article. Persists both request and
     reply to the article_chat_log table. Returns the bot reply.
     """
-    article = store.get_article(article_id)
+    user_id: str = request.state.user_id
+    article = store.get_article(user_id, article_id)
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
 
     cmd = body.command.strip()
-    store.add_chat_message(article_id, "user", cmd)
+    store.add_chat_message(user_id, article_id, "user", cmd)
 
-    reply = _dispatch_chat(article_id, article, cmd)
-    store.add_chat_message(article_id, "bot", reply)
+    reply = _dispatch_chat(user_id, article_id, article, cmd)
+    store.add_chat_message(user_id, article_id, "bot", reply)
 
     return ChatResponse(reply=reply)
 
 
-def _dispatch_chat(article_id: str, article: dict, cmd: str) -> str:
+def _dispatch_chat(user_id: str, article_id: str, article: dict, cmd: str) -> str:
     """Map a chat command string to a reply string by executing real operations."""
     lower = cmd.lower().strip()
 
@@ -782,7 +796,7 @@ def _dispatch_chat(article_id: str, article: dict, cmd: str) -> str:
         return "\n".join(lines) if lines else "No destinations configured."
 
     if lower == "comment list":
-        comments = store.list_comments(article_id)
+        comments = store.list_comments(user_id, article_id)
         if not comments:
             return "No comments on this article."
         lines = []
@@ -792,7 +806,7 @@ def _dispatch_chat(article_id: str, article: dict, cmd: str) -> str:
         return "\n".join(lines)
 
     if lower == "regenerate":
-        comments = store.list_comments(article_id)
+        comments = store.list_comments(user_id, article_id)
         unresolved = [c for c in comments if not c["resolved"]]
         if not unresolved:
             return "No unresolved comments to regenerate from."
@@ -808,7 +822,7 @@ def _dispatch_chat(article_id: str, article: dict, cmd: str) -> str:
 
     if lower.startswith("patch apply "):
         patch_id = cmd[len("patch apply "):].strip()
-        updated = store.set_patch_state(article_id, patch_id, "accepted")
+        updated = store.set_patch_state(user_id, article_id, patch_id, "accepted")
         if updated is None:
             return f"Patch '{patch_id}' not found."
         return f"Patch {patch_id} applied."

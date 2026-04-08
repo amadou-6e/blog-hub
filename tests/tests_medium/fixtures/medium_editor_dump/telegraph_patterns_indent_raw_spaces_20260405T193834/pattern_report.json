@@ -1,0 +1,118 @@
+{
+  "generated_at": "2026-04-05T17:39:15Z",
+  "total_pre_blocks": 26,
+  "patterns": [
+    {
+      "pattern_id": "pattern_01",
+      "heading": "Pattern 01 \u2014 Consecutive fenced blocks",
+      "heading_found": true,
+      "anchor": "PATTERN-01-ANCHOR",
+      "anchor_found": true,
+      "code_markers": {
+        "PATTERN-01-CODE": true
+      },
+      "all_code_markers_found": true
+    },
+    {
+      "pattern_id": "pattern_02",
+      "heading": "Pattern 02 \u2014 Empty lines inside code block",
+      "heading_found": true,
+      "anchor": "PATTERN-02-ANCHOR",
+      "anchor_found": true,
+      "code_markers": {
+        "return first + second": true
+      },
+      "all_code_markers_found": true
+    },
+    {
+      "pattern_id": "pattern_03",
+      "heading": "Pattern 03 \u2014 XML and comparison operators",
+      "heading_found": true,
+      "anchor": "PATTERN-03-ANCHOR",
+      "anchor_found": true,
+      "code_markers": {
+        "PATTERN-03-CODE": true,
+        "<node id=\"pattern-03\">": true
+      },
+      "all_code_markers_found": true
+    },
+    {
+      "pattern_id": "pattern_04",
+      "heading": "Pattern 04 \u2014 List directly before code",
+      "heading_found": true,
+      "anchor": "PATTERN-04-ANCHOR",
+      "anchor_found": true,
+      "code_markers": {
+        "MATCH (n:Paper)-[:CITES]->(m:Paper)": true
+      },
+      "all_code_markers_found": true
+    },
+    {
+      "pattern_id": "pattern_05",
+      "heading": "Pattern 05 \u2014 Paragraph directly after code",
+      "heading_found": true,
+      "anchor": "PATTERN-05-ANCHOR",
+      "anchor_found": true,
+      "code_markers": {
+        "PATTERN-05-CODE": true
+      },
+      "all_code_markers_found": true
+    },
+    {
+      "pattern_id": "pattern_06",
+      "heading": "Pattern 06 \u2014 Blockquote before code",
+      "heading_found": true,
+      "anchor": "PATTERN-06-ANCHOR",
+      "anchor_found": true,
+      "code_markers": {
+        "SELECT \"PATTERN-06-CODE\" AS marker": true
+      },
+      "all_code_markers_found": true
+    },
+    {
+      "pattern_id": "pattern_07",
+      "heading": "Pattern 07 \u2014 Long code block",
+      "heading_found": true,
+      "anchor": "PATTERN-07-ANCHOR",
+      "anchor_found": true,
+      "code_markers": {
+        "PATTERN-07-CODE": true
+      },
+      "all_code_markers_found": true
+    },
+    {
+      "pattern_id": "pattern_08",
+      "heading": "Pattern 08 \u2014 Heading immediately before code",
+      "heading_found": true,
+      "anchor": "PATTERN-08-ANCHOR",
+      "anchor_found": true,
+      "code_markers": {
+        "PATTERN-08-CODE": true
+      },
+      "all_code_markers_found": true
+    },
+    {
+      "pattern_id": "pattern_09",
+      "heading": "Pattern 09 \u2014 Two code blocks separated by a blank paragraph",
+      "heading_found": true,
+      "anchor": "PATTERN-09-ANCHOR",
+      "anchor_found": true,
+      "code_markers": {
+        "PATTERN-09-CODE-A": true,
+        "PATTERN-09-CODE-B": true
+      },
+      "all_code_markers_found": true
+    },
+    {
+      "pattern_id": "pattern_10",
+      "heading": "Pattern 10 \u2014 Image-adjacent code marker",
+      "heading_found": true,
+      "anchor": "PATTERN-10-ANCHOR",
+      "anchor_found": true,
+      "code_markers": {
+        "PATTERN-10-CODE": true
+      },
+      "all_code_markers_found": true
+    }
+  ]
+}

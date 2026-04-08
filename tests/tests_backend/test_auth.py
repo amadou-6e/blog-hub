@@ -130,14 +130,14 @@ class TestMe:
         assert r.status_code == 200
         assert r.json()["email"] == "me@example.com"
 
-    def test_me_returns_401_when_not_logged_in(self, client):
-        r = client.get("/api/auth/me")
+    def test_me_returns_401_when_not_logged_in(self, anon_client):
+        r = anon_client.get("/api/auth/me")
         assert r.status_code == 401
 
 
 class TestMiddleware:
-    def test_protected_route_returns_401_without_cookie(self, client):
-        r = client.get("/api/articles")
+    def test_protected_route_returns_401_without_cookie(self, anon_client):
+        r = anon_client.get("/api/articles")
         assert r.status_code == 401
 
     def test_protected_route_accessible_with_valid_session(self, client):

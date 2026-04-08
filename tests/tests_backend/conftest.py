@@ -21,13 +21,21 @@ def reset_store():
 
 
 @pytest.fixture
-def client():
+def anon_client():
+    """Unauthenticated TestClient — use only for tests that need to verify 401 responses."""
     return TestClient(app)
 
 
 @pytest.fixture
+def client(anon_client):
+    """TestClient pre-authenticated as the seed user (owns the seed articles)."""
+    anon_client.post("/api/auth/login",
+                     json={"email": "seed@example.com", "password": "seed1234",
+                           "remember_me": False})
+    return anon_client
+
+
+@pytest.fixture
 def auth_client(client):
-    """TestClient with a registered and logged-in user session."""
-    client.post("/api/auth/register",
-                json={"email": "test@example.com", "password": "password123"})
+    """Alias for client — kept for backward compatibility."""
     return client
