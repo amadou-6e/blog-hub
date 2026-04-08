@@ -1,0 +1,62 @@
+<h1>Code Class Variants</h1>
+<p>These sections capture the class-bearing code-node combinations we tested.</p>
+
+<h2>Variant: tag_pre_code_class_language</h2>
+<pre><code class="language-python">def pattern_seven():
+    rows = []
+    for index in range(20):
+        rows.append({
+            "marker": "PATTERN-07-CODE",
+            "index": index,
+            "value": index * 3,
+        })
+    return rows
+
+result = pattern_seven()
+for row in result:
+    print(row["marker"], row["index"], row["value"])</code></pre>
+
+<h2>Variant: tag_pre_code_class_raw</h2>
+<pre><code class="python">def pattern_seven():
+    rows = []
+    for index in range(20):
+        rows.append({
+            "marker": "PATTERN-07-CODE",
+            "index": index,
+            "value": index * 3,
+        })
+    return rows
+
+result = pattern_seven()
+for row in result:
+    print(row["marker"], row["index"], row["value"])</code></pre>
+
+<h2>Variant: tag_code_class_language</h2>
+<code class="language-python">def pattern_seven():
+    rows = []
+    for index in range(20):
+        rows.append({
+            "marker": "PATTERN-07-CODE",
+            "index": index,
+            "value": index * 3,
+        })
+    return rows
+
+result = pattern_seven()
+for row in result:
+    print(row["marker"], row["index"], row["value"])</code>
+
+<h2>Variant: tag_code_class_raw</h2>
+<code class="python">def pattern_seven():
+    rows = []
+    for index in range(20):
+        rows.append({
+            "marker": "PATTERN-07-CODE",
+            "index": index,
+            "value": index * 3,
+        })
+    return rows
+
+result = pattern_seven()
+for row in result:
+    print(row["marker"], row["index"], row["value"])</code>

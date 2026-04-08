@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BlogHub — New Article</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            surface: '#0f1117', panel: '#181c27', border: '#252a38',
+            'border-hi': '#3a3f52', muted: '#5a6080', text: '#c9cfe0',
+            bright: '#e8eaf2', accent: '#6366f1',
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; }
+    body { background: #0f1117; color: #c9cfe0; margin: 0; }
+
+    textarea { resize: none; }
+    textarea:focus { outline: none; }
+    input[type=text]:focus { outline: none; }
+    input[type=range] {
+      -webkit-appearance: none; appearance: none;
+      height: 3px; border-radius: 2px; outline: none; cursor: pointer;
+      background: #252a38; width: 100%;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 14px; height: 14px;
+      border-radius: 50%; background: #6366f1; cursor: pointer;
+    }
+
+    .skill-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 14px; border-radius: 6px;
+      border: 1px solid #252a38; background: #0f1117;
+      cursor: pointer; transition: border-color 100ms, background 100ms;
+    }
+    .skill-row:hover { border-color: #3a3f52; }
+    .skill-row.selected { border-color: #6366f1; background: #1a1f30; }
+
+    .dest-card {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 14px; border-radius: 6px;
+      border: 1px solid #252a38; transition: border-color 100ms;
+    }
+    .dest-card.on  { border-color: #6366f1; background: #1a1f30; }
+    .dest-card.warn { border-color: #4a3d1a; background: #1a1800; cursor: not-allowed; }
+    .dest-card.off { opacity: 0.45; cursor: not-allowed; }
+
+    .toggle-track {
+      width: 32px; height: 18px; border-radius: 9999px;
+      position: relative; flex-shrink: 0; transition: background 120ms;
+    }
+    .toggle-thumb {
+      position: absolute; top: 2px; width: 14px; height: 14px;
+      border-radius: 50%; background: #fff;
+      transition: left 120ms;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spin { animation: spin 1s linear infinite; }
+
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #252a38; border-radius: 3px; }
+
+    .file-drop {
+      border: 1px dashed #252a38; border-radius: 6px;
+      padding: 14px 16px; cursor: pointer;
+      transition: border-color 120ms, background 120ms;
+      text-align: center;
+    }
+    .file-drop:hover { border-color: #6366f1; background: #1a1f30; }
+    .file-drop.drag-over { border-color: #6366f1; background: #1a1f30; }
+  </style>
+</head>
+<body class="font-sans" style="height:100vh;display:flex;flex-direction:column;overflow:hidden;">
+
+<!-- ═══ Top nav ════════════════════════════════════════════════════ -->
+<nav style="height:48px;background:#0f1117;border-bottom:1px solid #252a38;flex-shrink:0;display:flex;align-items:center;padding:0 32px;z-index:40;">
+  <div style="display:flex;align-items:center;gap:24px;">
+    <div style="display:flex;align-items:center;gap:8px;">
+      <div style="width:22px;height:22px;border-radius:5px;background:#6366f1;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <path d="M2 2h8M2 6h5M2 10h7" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <span style="color:#e8eaf2;font-weight:600;font-size:14px;letter-spacing:-0.02em;">BlogHub</span>
+    </div>
+    <div style="display:flex;align-items:stretch;height:48px;">
+      <a href="../overview/v3.html" style="padding:0 14px;font-size:13px;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid transparent;color:#5a6080;display:flex;align-items:center;text-decoration:none;">Articles</a>
+      <button style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid #6366f1;color:#e8eaf2;font-weight:500;">New article</button>
+    </div>
+  </div>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:14px;">
+    <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#5a6080;">
+      <span style="width:6px;height:6px;border-radius:50%;background:#4ade80;display:inline-block;"></span>
+      3 platforms connected
+    </div>
+  </div>
+</nav>
+
+<!-- ═══ Step indicator ════════════════════════════════════════════ -->
+<div id="step-bar" style="flex-shrink:0;background:#0f1117;border-bottom:1px solid #252a38;padding:14px 32px;">
+  <div style="max-width:880px;margin:0 auto;display:flex;align-items:center;gap:0;">
+    <!-- Step 1 -->
+    <div id="si-1" class="step-item" style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+      <div id="si-circle-1" style="width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;background:#6366f1;color:#fff;">✓</div>
+      <span style="font-size:11px;color:#5a6080;">Prompt &amp; Context</span>
+    </div>
+    <!-- Connector 1-2 -->
+    <div id="si-conn-1" style="flex:1;height:2px;background:#6366f1;margin:0 6px;margin-bottom:14px;"></div>
+    <!-- Step 2 -->
+    <div id="si-2" class="step-item" style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+      <div id="si-circle-2" style="width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;border:2px solid #6366f1;background:#1a1f30;color:#6366f1;">2</div>
+      <span style="font-size:11px;color:#e8eaf2;font-weight:500;">Configure</span>
+    </div>
+    <!-- Connector 2-3 -->
+    <div id="si-conn-2" style="flex:1;height:2px;background:#252a38;margin:0 6px;margin-bottom:14px;"></div>
+    <!-- Step 3 -->
+    <div id="si-3" class="step-item" style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+      <div id="si-circle-3" style="width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;border:1px solid #252a38;background:#1a1e2a;color:#5a6080;">3</div>
+      <span style="font-size:11px;color:#5a6080;">Destinations</span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Content area ══════════════════════════════════════════════ -->
+<div style="flex:1;overflow:hidden;display:flex;">
+
+  <!-- Scrollable main column -->
+  <div style="flex:1;overflow-y:auto;padding:36px 32px 100px;">
+    <div style="max-width:880px;margin:0 auto;display:flex;gap:40px;align-items:flex-start;">
+
+      <!-- Main content (steps) -->
+      <div style="flex:1;min-width:0;">
+
+        <!-- ══ STEP 1: Prompt ════════════════════════════════════ -->
+        <div id="step-1" class="step-content">
+          <div style="margin-bottom:24px;">
+            <div style="font-size:18px;font-weight:600;color:#e8eaf2;margin-bottom:4px;">What's the article about?</div>
+            <div style="font-size:13px;color:#5a6080;">Write a brief or load a template. The more context, the better the first draft.</div>
+          </div>
+
+          <!-- Textarea panel -->
+          <div style="background:#181c27;border:1px solid #252a38;border-radius:8px;padding:20px;">
+            <label style="display:block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#5a6080;margin-bottom:8px;">Article brief</label>
+            <textarea id="prompt-text" rows="7" placeholder="e.g. A practical guide to zero-downtime Postgres migrations using pg_repack, covering common pitfalls and how to verify success."
+              style="width:100%;background:#0f1117;border:1px solid #6366f1;border-radius:6px;padding:12px 14px;font-size:14px;line-height:1.7;color:#c9cfe0;font-family:inherit;"
+              oninput="onPromptInput()"></textarea>
+
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;">
+              <!-- Templates -->
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span style="font-size:11px;color:#5a6080;flex-shrink:0;">Templates:</span>
+                <button onclick="loadTemplate('tutorial')" style="font-size:11px;padding:3px 9px;border-radius:4px;border:1px solid #252a38;background:transparent;color:#5a6080;cursor:pointer;font-family:inherit;transition:color 100ms,border-color 100ms;"
+                  onmouseover="this.style.color='#c9cfe0';this.style.borderColor='#3a3f52'"
+                  onmouseout="this.style.color='#5a6080';this.style.borderColor='#252a38'">+ Tutorial</button>
+                <button onclick="loadTemplate('comparison')" style="font-size:11px;padding:3px 9px;border-radius:4px;border:1px solid #252a38;background:transparent;color:#5a6080;cursor:pointer;font-family:inherit;transition:color 100ms,border-color 100ms;"
+                  onmouseover="this.style.color='#c9cfe0';this.style.borderColor='#3a3f52'"
+                  onmouseout="this.style.color='#5a6080';this.style.borderColor='#252a38'">+ Comparison</button>
+              </div>
+              <!-- Char count + save as template -->
+              <div style="display:flex;align-items:center;gap:10px;">
+                <button onclick="saveAsTemplate()" title="Save current prompt as a template"
+                  style="display:flex;align-items:center;gap:4px;font-size:11px;color:#5a6080;background:transparent;border:none;cursor:pointer;font-family:inherit;padding:0;"
+                  onmouseover="this.style.color='#c9cfe0'" onmouseout="this.style.color='#5a6080'">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                  Save as template
+                </button>
+                <span id="prompt-count" style="font-size:11px;color:#3a3f52;font-family:'JetBrains Mono',monospace;">0</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Context file upload -->
+          <div style="margin-top:12px;">
+            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#5a6080;margin-bottom:6px;">Context file <span style="font-weight:400;text-transform:none;letter-spacing:0;color:#3a3f52;">(optional)</span></div>
+            <div class="file-drop" id="file-drop-zone"
+              onclick="document.getElementById('file-input').click()"
+              ondragover="event.preventDefault();this.classList.add('drag-over')"
+              ondragleave="this.classList.remove('drag-over')"
+              ondrop="handleFileDrop(event)">
+              <input type="file" id="file-input" accept=".md" style="display:none;" onchange="handleFileSelect(event)" />
+              <div id="file-drop-content">
+                <svg style="margin:0 auto 6px;color:#3a3f52;display:block;" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path stroke-linecap="round" d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                </svg>
+                <span style="font-size:12px;color:#5a6080;">Drop a <span style="font-family:'JetBrains Mono',monospace;color:#3a3f52;">.md</span> context file — notes, web links, references — or <span style="color:#6366f1;cursor:pointer;">browse</span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ STEP 2: Configure ═════════════════════════════════ -->
+        <div id="step-2" class="step-content" style="display:none;">
+          <div style="margin-bottom:24px;">
+            <div style="font-size:18px;font-weight:600;color:#e8eaf2;margin-bottom:4px;">Configure generation</div>
+            <div style="font-size:13px;color:#5a6080;">Choose the article format, AI provider, and target length.</div>
+          </div>
+
+          <!-- Skill cards — row list B -->
+          <div style="background:#181c27;border:1px solid #252a38;border-radius:8px;padding:20px;margin-bottom:16px;">
+            <label style="display:block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#5a6080;margin-bottom:12px;">Article format</label>
+            <div style="display:flex;flex-direction:column;gap:6px;" id="skill-list">
+              <!-- rendered by JS -->
+            </div>
+          </div>
+
+          <!-- Provider toggle D -->
+          <div style="background:#181c27;border:1px solid #252a38;border-radius:8px;padding:20px;margin-bottom:16px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+              <div>
+                <div style="font-size:13px;color:#e8eaf2;font-weight:500;">AI provider</div>
+                <div style="font-size:11px;color:#5a6080;margin-top:2px;">Model used for generation</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:1px;border-radius:9999px;padding:2px;background:#0f1117;border:1px solid #252a38;">
+                <button id="provider-claude" onclick="setProvider('claude')"
+                  style="padding:4px 14px;border-radius:9999px;font-size:12px;font-weight:500;background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;transition:background 100ms,color 100ms;">Claude</button>
+                <button id="provider-codex" onclick="setProvider('codex')"
+                  style="padding:4px 14px;border-radius:9999px;font-size:12px;color:#5a6080;background:transparent;border:none;cursor:pointer;font-family:inherit;transition:background 100ms,color 100ms;">Codex</button>
+              </div>
+            </div>
+            <div id="codex-warning" style="display:none;align-items:center;gap:8px;font-size:12px;padding:8px 12px;border-radius:6px;background:#2a2510;border:1px solid #4a3d1a;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2" flex-shrink="0"><path stroke-linecap="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+              <span style="color:#fbbf24;">Codex key not configured.</span>
+              <a href="#" style="color:#6366f1;text-decoration:none;margin-left:2px;">Add in Settings →</a>
+            </div>
+          </div>
+
+          <!-- Word count slider A -->
+          <div style="background:#181c27;border:1px solid #252a38;border-radius:8px;padding:20px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+              <span style="font-size:13px;color:#e8eaf2;font-weight:500;">Target length</span>
+              <span id="word-count-label" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#6366f1;">~1,500 words</span>
+            </div>
+            <input type="range" min="500" max="4000" value="1500" step="100"
+              style="accent-color:#6366f1;"
+              oninput="updateWordCount(this.value)" />
+            <div style="display:flex;justify-content:space-between;margin-top:6px;">
+              <span style="font-size:10px;color:#3a3f52;font-family:'JetBrains Mono',monospace;">500</span>
+              <span style="font-size:10px;color:#3a3f52;font-family:'JetBrains Mono',monospace;">1k</span>
+              <span style="font-size:10px;color:#3a3f52;font-family:'JetBrains Mono',monospace;">2k</span>
+              <span style="font-size:10px;color:#3a3f52;font-family:'JetBrains Mono',monospace;">3k</span>
+              <span style="font-size:10px;color:#3a3f52;font-family:'JetBrains Mono',monospace;">4k</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ STEP 3: Destinations ══════════════════════════════ -->
+        <div id="step-3" class="step-content" style="display:none;">
+          <div style="margin-bottom:24px;">
+            <div style="font-size:18px;font-weight:600;color:#e8eaf2;margin-bottom:4px;">Choose destinations</div>
+            <div style="font-size:13px;color:#5a6080;">Select where drafts will be pushed after generation.</div>
+          </div>
+
+          <div style="background:#181c27;border:1px solid #252a38;border-radius:8px;padding:20px;">
+            <label style="display:block;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#5a6080;margin-bottom:12px;">Push to</label>
+            <div class="dest-list" style="display:flex;flex-direction:column;gap:8px;">
+              <!-- Populated by renderDestinations() → initView() → GET /api/agent/platforms -->
+              <!-- Fallback: Medium connected by default while API loads -->
+              <div class="dest-card on" id="dest-medium">
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <span style="width:7px;height:7px;border-radius:50%;background:#4ade80;flex-shrink:0;"></span>
+                  <div>
+                    <div style="font-size:13px;font-weight:500;color:#e8eaf2;">Medium</div>
+                    <div style="font-size:11px;color:#5a6080;margin-top:1px;">Connected</div>
+                  </div>
+                </div>
+                <div class="toggle-track" id="toggle-medium" style="background:#6366f1;cursor:pointer;" onclick="toggleDest('medium')">
+                  <div class="toggle-thumb" style="left:16px;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /main content -->
+
+      <!-- ══ Config summary panel (right rail) ══════════════════ -->
+      <div style="width:220px;flex-shrink:0;position:sticky;top:0;align-self:flex-start;">
+        <div style="background:#181c27;border:1px solid #252a38;border-radius:8px;padding:16px;">
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#5a6080;margin-bottom:14px;">Summary</div>
+          <div style="display:flex;flex-direction:column;gap:12px;" id="summary-list">
+            <!-- rendered by JS -->
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Action bar (fixed bottom) ════════════════════════════════ -->
+<div id="action-bar" style="position:fixed;bottom:0;left:0;right:0;background:#0f1117;border-top:1px solid #252a38;padding:12px 32px;display:flex;align-items:center;z-index:40;">
+  <!-- Back -->
+  <button id="back-btn" onclick="prevStep()"
+    style="font-size:13px;color:#5a6080;background:transparent;border:none;cursor:pointer;font-family:inherit;padding:6px 0;flex-shrink:0;"
+    onmouseover="this.style.color='#c9cfe0'" onmouseout="this.style.color='#5a6080'">← Back</button>
+
+  <!-- Step dots — absolutely centered in bar -->
+  <div id="action-dots" style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:6px;">
+    <span id="dot-1" style="width:6px;height:6px;border-radius:3px;background:#6366f1;transition:all 150ms;"></span>
+    <span id="dot-2" style="width:20px;height:6px;border-radius:3px;background:#6366f1;transition:all 150ms;"></span>
+    <span id="dot-3" style="width:6px;height:6px;border-radius:3px;background:#252a38;transition:all 150ms;"></span>
+  </div>
+
+  <!-- Next (steps 1-2) — right-aligned -->
+  <!-- Generate (step 3) — switches to absolutely centered -->
+  <button id="next-btn" onclick="nextStep()"
+    style="font-size:13px;font-weight:500;padding:7px 18px;border-radius:6px;background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;white-space:nowrap;margin-left:auto;transition:opacity 100ms;">
+    Next →
+  </button>
+</div>
+
+<script>
+// ─── State ──────────────────────────────────────────────────────
+let currentStep      = 1;               // start at step 1
+let selectedSkill    = 'deep-dive';
+let selectedProvider = 'claude';
+let wordCount        = 1500;
+let destinations     = { medium: true };  // fallback until initView() resolves
+let promptText       = '';
+let uploadedFile     = null;
+let _providersData   = [];             // [{id, label, configured}]
+
+const SKILLS = [
+  { id: 'deep-dive',  label: 'Technical deep-dive', desc: 'In-depth exploration with code examples' },
+  { id: 'tutorial',   label: 'Tutorial / how-to',   desc: 'Step-by-step walkthrough for readers' },
+  { id: 'comparison', label: 'Comparison',           desc: 'Side-by-side evaluation of tools or approaches' },
+  { id: 'opinion',    label: 'Opinion',              desc: 'Your unique take or perspective' },
+];
+
+const TEMPLATES = {
+  tutorial: `Write a step-by-step tutorial on [topic]. The article should walk readers through a real implementation, covering prerequisites, common pitfalls, and how to verify the final result works. Target audience: intermediate to advanced engineers.`,
+  comparison: `Compare [tool A] vs [tool B] for [use case]. Cover: setup complexity, performance characteristics, developer experience, ecosystem maturity, and a summary table. Include concrete examples and a recommendation for different scenarios.`,
+};
+
+// ─── Init ───────────────────────────────────────────────────────
+renderSkills();
+renderSummary();
+renderStep();
+initView();
+
+// ─── initView — load live data from API ─────────────────────────
+async function initView() {
+  try {
+    const [provRes, platRes] = await Promise.all([
+      fetch('/api/agent/providers').then(r => r.json()),
+      fetch('/api/agent/platforms').then(r => r.json()),
+    ]);
+    _providersData = provRes.providers || [];
+    renderProviders(_providersData);
+    renderDestinations(platRes.platforms || []);
+    renderSummary();
+  } catch (e) {
+    // Server not reachable (static file mode) — keep hardcoded fallback state
+  }
+}
+
+// ─── Skills ─────────────────────────────────────────────────────
+function renderSkills() {
+  const list = document.getElementById('skill-list');
+  list.innerHTML = SKILLS.map(s => `
+    <div class="skill-row${s.id === selectedSkill ? ' selected' : ''}" onclick="selectSkill('${s.id}')">
+      <div style="width:6px;height:36px;border-radius:3px;flex-shrink:0;background:${s.id === selectedSkill ? '#6366f1' : '#252a38'};transition:background 100ms;"></div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:13px;font-weight:500;color:#e8eaf2;">${s.label}</div>
+        <div style="font-size:11px;color:#5a6080;margin-top:1px;">${s.desc}</div>
+      </div>
+      ${s.id === selectedSkill ? `
+        <svg flex-shrink="0" width="14" height="14" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="9" stroke="#6366f1" stroke-width="2"/>
+          <path d="M9 12l2 2 4-4" stroke="#6366f1" stroke-width="2" stroke-linecap="round"/>
+        </svg>` : ''}
+    </div>
+  `).join('');
+}
+
+function selectSkill(id) {
+  selectedSkill = id;
+  renderSkills();
+  renderSummary();
+}
+
+// ─── Provider ───────────────────────────────────────────────────
+function renderProviders(providers) {
+  // Update warning state for each provider button based on live API data
+  providers.forEach(p => {
+    if (p.id === 'codex') {
+      const warn = document.getElementById('codex-warning');
+      if (warn) warn.style.display = (!p.configured && selectedProvider === 'codex') ? 'flex' : 'none';
+    }
+    if (p.id === 'claude') {
+      // If Claude not configured and currently selected, show a warning (re-use codex-warning pattern)
+      // For now just reflect in summary — Claude warning handled by disabled Generate state
+    }
+  });
+  updateGenerateEnabled();
+}
+
+function setProvider(p) {
+  selectedProvider = p;
+  const isCodex = p === 'codex';
+  document.getElementById('provider-claude').style.background = isCodex ? 'transparent' : '#6366f1';
+  document.getElementById('provider-claude').style.color      = isCodex ? '#5a6080' : '#fff';
+  document.getElementById('provider-codex').style.background  = isCodex ? '#6366f1' : 'transparent';
+  document.getElementById('provider-codex').style.color       = isCodex ? '#fff' : '#5a6080';
+  // Codex-specific warning
+  const codexProvider = _providersData.find(pr => pr.id === 'codex');
+  const codexWarning = document.getElementById('codex-warning');
+  if (codexWarning) codexWarning.style.display = (isCodex && codexProvider && !codexProvider.configured) ? 'flex' : 'none';
+  updateGenerateEnabled();
+  renderSummary();
+}
+
+function updateGenerateEnabled() {
+  // Disable Generate on step 3 if no destinations selected or provider not configured
+  if (currentStep !== 3) return;
+  const nextBtn = document.getElementById('next-btn');
+  if (!nextBtn) return;
+  const hasDestination = Object.values(destinations).some(Boolean);
+  const providerOk = _providersData.length === 0 ||
+    (_providersData.find(p => p.id === selectedProvider) || {configured: true}).configured;
+  nextBtn.disabled = !(hasDestination && providerOk);
+  nextBtn.style.opacity = nextBtn.disabled ? '0.45' : '1';
+}
+
+// ─── Word count ─────────────────────────────────────────────────
+function updateWordCount(v) {
+  wordCount = parseInt(v);
+  const label = wordCount >= 1000 ? `~${(wordCount/1000).toFixed(wordCount % 1000 === 0 ? 0 : 1)}k words` : `~${wordCount} words`;
+  document.getElementById('word-count-label').textContent = label;
+  renderSummary();
+}
+
+// ─── Prompt ─────────────────────────────────────────────────────
+function onPromptInput() {
+  promptText = document.getElementById('prompt-text').value;
+  document.getElementById('prompt-count').textContent = promptText.length;
+  renderSummary();
+}
+
+function loadTemplate(type) {
+  const ta = document.getElementById('prompt-text');
+  const existing = ta.value.trim();
+  ta.value = existing ? existing + '\n\n' + TEMPLATES[type] : TEMPLATES[type];
+  promptText = ta.value;
+  document.getElementById('prompt-count').textContent = promptText.length;
+  ta.focus();
+  ta.scrollTop = ta.scrollHeight;
+  renderSummary();
+}
+
+function saveAsTemplate() {
+  if (!promptText.trim()) { alert('Write a brief first, then save it as a template.'); return; }
+  alert(`Template saved. You can edit saved templates in Settings → Templates.`);
+}
+
+// ─── File upload ────────────────────────────────────────────────
+function handleFileSelect(e) {
+  const file = e.target.files[0];
+  if (file) setUploadedFile(file);
+}
+
+function handleFileDrop(e) {
+  e.preventDefault();
+  document.getElementById('file-drop-zone').classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file && file.name.endsWith('.md')) {
+    setUploadedFile(file);
+  } else {
+    alert('Only .md files are supported.');
+  }
+}
+
+function setUploadedFile(file) {
+  uploadedFile = file;
+  document.getElementById('file-drop-content').innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="1.5"><path stroke-linecap="round" d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      <span style="font-size:12px;color:#4ade80;font-family:'JetBrains Mono',monospace;">${file.name}</span>
+      <button onclick="event.stopPropagation();clearFile()" style="font-size:11px;color:#5a6080;background:transparent;border:none;cursor:pointer;font-family:inherit;margin-left:4px;"
+        onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#5a6080'">✕</button>
+    </div>`;
+}
+
+function clearFile() {
+  uploadedFile = null;
+  document.getElementById('file-input').value = '';
+  document.getElementById('file-drop-content').innerHTML = `
+    <svg style="margin:0 auto 6px;color:#3a3f52;display:block;" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path stroke-linecap="round" d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+    </svg>
+    <span style="font-size:12px;color:#5a6080;">Drop a <span style="font-family:'JetBrains Mono',monospace;color:#3a3f52;">.md</span> file or <span style="color:#6366f1;cursor:pointer;">browse</span></span>`;
+}
+
+// ─── Destination toggle & render ────────────────────────────────
+function toggleDest(platform) {
+  if (destinations[platform] !== undefined) {
+    destinations[platform] = !destinations[platform];
+    const card  = document.getElementById('dest-' + platform);
+    const track = document.getElementById('toggle-' + platform);
+    const thumb = track && track.querySelector('.toggle-thumb');
+    const on = destinations[platform];
+    if (card)  card.className  = 'dest-card ' + (on ? 'on' : '');
+    if (track) track.style.background = on ? '#6366f1' : '#252a38';
+    if (thumb) thumb.style.left       = on ? '16px' : '2px';
+    updateGenerateEnabled();
+    renderSummary();
+  }
+}
+
+function renderDestinations(platforms) {
+  // Build destinations state map (new connected platforms start toggled on)
+  platforms.forEach(p => {
+    if (destinations[p.id] === undefined) {
+      destinations[p.id] = p.status === 'connected';
+    }
+  });
+
+  const container = document.querySelector('#step-3 .dest-list');
+  if (!container) return;
+
+  container.innerHTML = platforms.map(p => {
+    const isOn       = p.status === 'connected' && destinations[p.id];
+    const isExpired  = p.status === 'expired';
+    const isOff      = p.status === 'not_configured';
+    const dot        = isOn ? '#4ade80' : isExpired ? '#fbbf24' : '#252a38';
+    const cardClass  = isOn ? 'on' : isExpired ? 'warn' : 'off';
+    const statusText = isOn      ? 'Connected'
+                     : isExpired ? `<span style="color:#fbbf24;">Session expired</span>
+                                    <a href="../settings/v2.html" style="font-size:11px;color:#6366f1;text-decoration:none;">Reconnect</a>`
+                     :            `<span style="color:#5a6080;">Not configured</span>
+                                    <a href="../settings/v2.html" style="font-size:11px;color:#5a6080;text-decoration:none;">Add in Settings</a>`;
+    const trackBg   = isOn ? '#6366f1' : '#252a38';
+    const thumbLeft = isOn ? '16px' : '2px';
+    const thumbBg   = isOn ? '#fff' : isExpired ? '#3a3f52' : '#252a38';
+    const onclick   = (p.status === 'connected') ? `toggleDest('${p.id}')` : '';
+    return `
+      <div class="dest-card ${cardClass}" id="dest-${p.id}">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="width:7px;height:7px;border-radius:50%;background:${dot};flex-shrink:0;"></span>
+          <div>
+            <div style="font-size:13px;font-weight:500;color:#e8eaf2;">${p.label}</div>
+            <div style="display:flex;align-items:center;gap:6px;margin-top:1px;font-size:11px;">${statusText}</div>
+          </div>
+        </div>
+        <div class="toggle-track" id="toggle-${p.id}" style="background:${trackBg};${onclick ? 'cursor:pointer;' : ''}"
+             ${onclick ? `onclick="${onclick}"` : ''}>
+          <div class="toggle-thumb" style="left:${thumbLeft};background:${thumbBg};"></div>
+        </div>
+      </div>`;
+  }).join('');
+
+  updateGenerateEnabled();
+  renderSummary();
+}
+
+// ─── Step navigation ────────────────────────────────────────────
+function renderStep() {
+  // Show correct content panel
+  [1,2,3].forEach(n => {
+    const el = document.getElementById('step-' + n);
+    if (el) el.style.display = n === currentStep ? 'block' : 'none';
+  });
+
+  // Step indicator
+  [1,2,3].forEach(n => {
+    const circle = document.getElementById('si-circle-' + n);
+    const label  = circle.nextElementSibling;
+    if (n < currentStep) {
+      // Completed
+      circle.style.background = '#6366f1'; circle.style.border = 'none';
+      circle.style.color = '#fff'; circle.textContent = '✓';
+      label.style.color = '#5a6080'; label.style.fontWeight = '400';
+    } else if (n === currentStep) {
+      // Active
+      circle.style.background = '#1a1f30';
+      circle.style.border = '2px solid #6366f1';
+      circle.style.color = '#6366f1'; circle.textContent = String(n);
+      label.style.color = '#e8eaf2'; label.style.fontWeight = '500';
+    } else {
+      // Future
+      circle.style.background = '#1a1e2a';
+      circle.style.border = '1px solid #252a38';
+      circle.style.color = '#5a6080'; circle.textContent = String(n);
+      label.style.color = '#5a6080'; label.style.fontWeight = '400';
+    }
+  });
+  const conn1 = document.getElementById('si-conn-1');
+  const conn2 = document.getElementById('si-conn-2');
+  conn1.style.background = currentStep >= 2 ? '#6366f1' : '#252a38';
+  conn2.style.background = currentStep >= 3 ? '#6366f1' : '#252a38';
+
+  // Action bar dots
+  const dots = [
+    { id: 'dot-1', step: 1 },
+    { id: 'dot-2', step: 2 },
+    { id: 'dot-3', step: 3 },
+  ];
+  dots.forEach(({ id, step }) => {
+    const el = document.getElementById(id);
+    if (step < currentStep) {
+      el.style.background = '#6366f1'; el.style.width = '6px';
+    } else if (step === currentStep) {
+      el.style.background = '#6366f1'; el.style.width = '20px';
+    } else {
+      el.style.background = '#252a38'; el.style.width = '6px';
+    }
+  });
+
+  // Back button
+  const backBtn = document.getElementById('back-btn');
+  backBtn.style.visibility = currentStep === 1 ? 'hidden' : 'visible';
+
+  // Next / Generate button
+  const nextBtn = document.getElementById('next-btn');
+  const dotsEl  = document.getElementById('action-dots');
+
+  if (currentStep === 3) {
+    // Dots hidden, Generate absolutely centered, next-btn removed from flow
+    dotsEl.style.display    = 'none';
+    nextBtn.style.position  = 'absolute';
+    nextBtn.style.left      = '50%';
+    nextBtn.style.transform = 'translateX(-50%)';
+    nextBtn.style.marginLeft = '0';
+    nextBtn.textContent     = 'Generate ✦';
+    nextBtn.style.padding   = '9px 28px';
+    nextBtn.style.fontSize  = '14px';
+    updateGenerateEnabled();
+  } else {
+    dotsEl.style.display    = 'flex';
+    nextBtn.style.position  = 'static';
+    nextBtn.style.left      = '';
+    nextBtn.style.transform = '';
+    nextBtn.style.marginLeft = 'auto';
+    nextBtn.textContent     = 'Next →';
+    nextBtn.style.padding   = '7px 18px';
+    nextBtn.style.fontSize  = '13px';
+  }
+}
+
+function nextStep() {
+  if (currentStep < 3) {
+    currentStep++;
+    renderStep();
+    renderSummary();
+  } else {
+    startGeneration();
+  }
+}
+
+function prevStep() {
+  if (currentStep > 1) {
+    currentStep--;
+    renderStep();
+  }
+}
+
+async function startGeneration() {
+  const nextBtn = document.getElementById('next-btn');
+  const backBtn = document.getElementById('back-btn');
+
+  // Remove any previous error
+  const prev = document.getElementById('gen-error');
+  if (prev) prev.remove();
+
+  nextBtn.innerHTML = `
+    <svg class="spin" width="11" height="11" viewBox="0 0 24 24" fill="none" style="display:inline;vertical-align:middle;margin-right:6px;">
+      <circle cx="12" cy="12" r="10" stroke="#fff4" stroke-width="3"/>
+      <path d="M12 2a10 10 0 0 1 10 10" stroke="white" stroke-width="3" stroke-linecap="round"/>
+    </svg>Generating…`;
+  nextBtn.disabled = true;
+  nextBtn.style.opacity = '0.75';
+  backBtn.style.opacity = '0.3';
+  backBtn.disabled = true;
+
+  try {
+    // Read context file content if one was uploaded
+    let contextText = null;
+    if (uploadedFile) {
+      contextText = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = e => resolve(e.target.result);
+        reader.onerror = () => reject(new Error('Failed to read context file'));
+        reader.readAsText(uploadedFile);
+      });
+    }
+
+    // Collect selected destinations from the dynamic toggle state
+    const selectedDestinations = Object.entries(destinations)
+      .filter(([, on]) => on)
+      .map(([id]) => id);
+
+    const resp = await fetch('/api/agent/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        brief:       promptText,
+        skill:       selectedSkill,
+        provider:    selectedProvider,
+        wordCount:   wordCount,
+        contextText: contextText,
+        destinations: selectedDestinations,
+      }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      const msg = err.detail || `Server error ${resp.status}`;
+      throw new Error(
+        resp.status === 400
+          ? `Provider not configured — ${msg}`
+          : msg
+      );
+    }
+
+    // 202 — navigate immediately to editor; editor polls the job
+    const { articleId } = await resp.json();
+    window.location.href = `../editor/v2.html?id=${articleId}`;
+
+  } catch (err) {
+    nextBtn.disabled = false;
+    backBtn.disabled = false;
+    nextBtn.style.opacity = '1';
+    backBtn.style.opacity = '1';
+    nextBtn.textContent = 'Generate ✦';
+    updateGenerateEnabled();
+
+    const errorEl = document.createElement('div');
+    errorEl.id = 'gen-error';
+    errorEl.style.cssText = (
+      'position:fixed;bottom:72px;left:50%;transform:translateX(-50%);' +
+      'background:#2a1515;border:1px solid #7f1d1d;border-radius:6px;' +
+      'padding:10px 18px;font-size:12px;color:#f87171;max-width:540px;' +
+      'text-align:center;z-index:50;white-space:pre-wrap;display:flex;align-items:center;gap:10px;'
+    );
+    errorEl.innerHTML = `
+      <span>${err.message || 'Generation failed. Try again.'}</span>
+      <button onclick="startGeneration()" style="font-size:11px;padding:3px 10px;border-radius:4px;background:#3f1515;border:1px solid #7f1d1d;color:#f87171;cursor:pointer;font-family:inherit;white-space:nowrap;">Retry</button>
+    `;
+    document.body.appendChild(errorEl);
+    setTimeout(() => errorEl.remove(), 15000);
+  }
+}
+
+// ─── Summary panel ──────────────────────────────────────────────
+function renderSummary() {
+  const skill = SKILLS.find(s => s.id === selectedSkill);
+  const wLabel = wordCount >= 1000
+    ? `${(wordCount/1000).toFixed(wordCount % 1000 === 0 ? 0 : 1)}k`
+    : wordCount;
+
+  const items = [
+    {
+      label: 'Prompt',
+      done: promptText.trim().length > 10 || uploadedFile,
+      value: uploadedFile
+        ? uploadedFile.name
+        : promptText.trim()
+          ? promptText.trim().slice(0, 60) + (promptText.length > 60 ? '…' : '')
+          : 'Not written yet',
+    },
+    {
+      label: 'Format',
+      done: true,
+      value: skill.label,
+    },
+    {
+      label: 'Provider + length',
+      done: true,
+      value: `${selectedProvider === 'claude' ? 'Claude' : 'Codex'} · ~${wLabel} words`,
+    },
+    {
+      label: 'Destinations',
+      done: Object.values(destinations).some(Boolean),
+      value: (() => {
+        const active = Object.entries(destinations).filter(([,on]) => on).map(([id]) =>
+          id.charAt(0).toUpperCase() + id.slice(1));
+        return active.length ? active.join(', ') : 'None selected';
+      })(),
+    },
+  ];
+
+  document.getElementById('summary-list').innerHTML = items.map(item => `
+    <div style="display:flex;align-items:flex-start;gap:9px;">
+      ${item.done
+        ? `<svg flex-shrink="0" style="margin-top:1px;" width="13" height="13" viewBox="0 0 24 24" fill="none">
+             <circle cx="12" cy="12" r="9" stroke="#6366f1" stroke-width="2"/>
+             <path d="M9 12l2 2 4-4" stroke="#6366f1" stroke-width="2" stroke-linecap="round"/>
+           </svg>`
+        : `<div style="width:13px;height:13px;border-radius:50%;border:2px solid #252a38;flex-shrink:0;margin-top:1px;"></div>`
+      }
+      <div style="min-width:0;">
+        <div style="font-size:10px;color:#5a6080;margin-bottom:1px;">${item.label}</div>
+        <div style="font-size:12px;color:${item.done ? '#c9cfe0' : '#3a3f52'};line-height:1.4;word-break:break-word;">${item.value}</div>
+      </div>
+    </div>
+  `).join('');
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "created": {
+    "article_id": 3454778,
+    "url": "https://dev.to/amadou6e/bloghub-devto-integration-test-1775333453-4450-temp-slug-6884542"
+  },
+  "expected": {
+    "title": "BlogHub DEV.to integration test 1775333453",
+    "body_markdown": "This draft verifies that the live DEV.to integration can create a draft and\nreturn the stored markdown through the authenticated article listing API.\n\n## What this checks\n\n- the title survives round-trip\n- the body markdown survives round-trip\n- local images are rewritten for the publish payload\n\n```python\nprint(\"devto integration\")\n```\n",
+    "description": "This draft verifies that the live DEV.to integration can create a draft and return the stored markdown through the authenticated article listing API.",
+    "canonical_url": "https://example.com/bloghub/devto/1775333453"
+  },
+  "actual": {
+    "id": 3454778,
+    "title": "BlogHub DEV.to integration test 1775333453",
+    "body_markdown": "This draft verifies that the live DEV.to integration can create a draft and\nreturn the stored markdown through the authenticated article listing API.\n\n## What this checks\n\n- the title survives round-trip\n- the body markdown survives round-trip\n- local images are rewritten for the publish payload\n\n```python\nprint(\"devto integration\")\n```\n",
+    "description": "This draft verifies that the live DEV.to integration can create a draft and return the stored markdown through the authenticated article listing API.",
+    "canonical_url": "https://example.com/bloghub/devto/1775333453",
+    "cover_image": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fcdn.example.com%2Fbloghub%2Fdevto%2Fimages%2Ftitle.png",
+    "published": false,
+    "url": "https://dev.to/amadou6e/bloghub-devto-integration-test-1775333453-4450-temp-slug-6884542"
+  }
+}

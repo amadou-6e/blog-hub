@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "baseUrl": "."
+  },
+  "include": [
+    "contracts/**/*.ts",
+    "contracts/compat-check.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

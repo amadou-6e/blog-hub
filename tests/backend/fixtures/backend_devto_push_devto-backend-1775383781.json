@@ -1,0 +1,60 @@
+{
+  "push_response": {
+    "jobId": "job_9c38967c",
+    "status": "done"
+  },
+  "job": {
+    "jobId": "job_9c38967c",
+    "type": "push",
+    "status": "done",
+    "articleId": "art_91b2573e",
+    "result": {
+      "devto": {
+        "status": "draft",
+        "label": "Draft",
+        "url": "https://dev.to/amadou6e/backend-devto-live-chain-devto-backend-1775383781-4g3g-temp-slug-5925744",
+        "error": null,
+        "draft_id": "3456191"
+      }
+    },
+    "error": null
+  },
+  "article": {
+    "id": "art_91b2573e",
+    "title": "Backend DEV.to live chain",
+    "updatedAt": "2026-04-05T10:09:42.939139Z",
+    "wordCount": 15,
+    "gate": "pending",
+    "previewImageUrl": null,
+    "destinations": {
+      "medium": {
+        "status": "none",
+        "label": "\u2014",
+        "url": null,
+        "error": null
+      },
+      "hashnode": {
+        "status": "none",
+        "label": "\u2014",
+        "url": null,
+        "error": null
+      },
+      "devto": {
+        "status": "draft",
+        "label": "Draft",
+        "url": "https://dev.to/amadou6e/backend-devto-live-chain-devto-backend-1775383781-4g3g-temp-slug-5925744",
+        "error": null
+      }
+    },
+    "recentTimeline": [
+      {
+        "timestamp": "2026-04-05T10:09:42.939132Z",
+        "event": "Draft pushed to Devto"
+      },
+      {
+        "timestamp": "2026-04-05T10:09:41.819099Z",
+        "event": "Article created"
+      }
+    ]
+  }
+}

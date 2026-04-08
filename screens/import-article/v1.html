@@ -1,0 +1,1213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Import Article — BlogHub</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            surface: '#0f1117', panel: '#181c27', border: '#252a38',
+            'border-hi': '#3a3f52', muted: '#5a6080', text: '#c9cfe0',
+            bright: '#e8eaf2', accent: '#6366f1',
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/turndown/7.1.2/turndown.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      background: #0f1117; color: #c9cfe0;
+      font-family: Inter, system-ui, sans-serif;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+
+    /* ── Layout shells ── */
+    #nav-bar {
+      flex-shrink: 0; height: 48px; background: #0f1117;
+      border-bottom: 1px solid #252a38;
+      display: flex; align-items: center; padding: 0 24px; z-index: 40;
+    }
+    #step-bar {
+      flex-shrink: 0; background: #0f1117; border-bottom: 1px solid #252a38;
+      padding: 14px 48px;
+    }
+    #content-area {
+      flex: 1; overflow-y: auto; padding: 36px 48px 96px;
+    }
+    .content-col { max-width: 800px; margin: 0 auto; }
+    #action-bar {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: #0f1117; border-top: 1px solid #252a38;
+      padding: 12px 48px; display: flex; align-items: center; z-index: 40;
+    }
+
+    /* ── Nav bar elements ── */
+    .logo-mark {
+      width: 22px; height: 22px; border-radius: 5px; background: #6366f1;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .logo-mark svg { width: 12px; height: 12px; fill: white; }
+    .wordmark { font-size: 14px; font-weight: 600; color: #e8eaf2; margin-left: 8px; }
+    #cancel-link {
+      margin-left: auto; font-size: 13px; color: #5a6080;
+      background: none; border: none; cursor: pointer; font-family: inherit;
+      padding: 4px 0; transition: color 100ms;
+    }
+    #cancel-link:hover { color: #c9cfe0; }
+
+    /* ── Step bar ── */
+    #step-indicator {
+      max-width: 800px; margin: 0 auto;
+      display: flex; align-items: center; gap: 0;
+    }
+    .si-item { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .si-circle {
+      width: 28px; height: 28px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 600; transition: all 160ms;
+    }
+    .si-circle.done  { background: #6366f1; color: #fff; }
+    .si-circle.active { border: 2px solid #6366f1; background: #1a1f30; color: #6366f1; }
+    .si-circle.future { border: 1px solid #252a38; background: #1a1e2a; color: #5a6080; }
+    .si-label { font-size: 11px; transition: color 160ms; }
+    .si-label.done, .si-label.future { color: #5a6080; }
+    .si-label.active { color: #e8eaf2; font-weight: 500; }
+    .si-conn {
+      flex: 1; height: 2px; margin: 0 6px; margin-bottom: 14px; transition: background 160ms;
+    }
+    .si-conn.done { background: #6366f1; }
+    .si-conn.future { background: #252a38; }
+
+    /* ── Action bar ── */
+    #back-btn {
+      font-size: 13px; color: #c9cfe0; background: transparent;
+      border: 1px solid #3a3f52; border-radius: 6px;
+      cursor: pointer; font-family: inherit; padding: 7px 28px; transition: border-color 100ms, color 100ms;
+    }
+    #back-btn:hover { border-color: #6366f1; color: #e8eaf2; }
+    #action-dots { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; }
+    .dot { border-radius: 3px; transition: all 150ms; }
+    #primary-btn {
+      margin-left: auto; font-size: 13px; font-weight: 500;
+      padding: 7px 28px; border-radius: 6px; background: #6366f1; color: #fff;
+      border: none; cursor: pointer; font-family: inherit;
+      transition: opacity 100ms, background 100ms; white-space: nowrap;
+    }
+    #primary-btn:hover:not(:disabled) { background: #4f52d9; }
+    #primary-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* ── Buttons ── */
+    .btn-ghost {
+      font-size: 13px; color: #c9cfe0; background: transparent;
+      border: 1px solid #252a38; border-radius: 6px; cursor: pointer;
+      font-family: inherit; padding: 5px 12px; transition: border-color 100ms, color 100ms;
+    }
+    .btn-ghost:hover { border-color: #3a3f52; color: #e8eaf2; }
+
+    /* ── Platform picker grid ── */
+    #platform-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 10px;
+    }
+    .platform-card {
+      border: 1px solid #252a38; border-radius: 8px; background: #181c27;
+      padding: 14px 16px; display: flex; align-items: center; gap: 12px;
+      cursor: pointer; position: relative; transition: border-color 120ms, background 120ms;
+    }
+    .platform-card:hover:not(.disconnected) { border-color: #3a3f52; }
+    .platform-card.selected { border-color: #6366f1; background: #1e2540; }
+    .platform-card.disconnected { opacity: .4; cursor: not-allowed; }
+    .platform-logo {
+      width: 36px; height: 36px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 17px; font-weight: 700; flex-shrink: 0;
+    }
+    .platform-check {
+      position: absolute; top: 7px; right: 7px;
+      width: 15px; height: 15px; border-radius: 50%; background: #6366f1;
+      display: none; align-items: center; justify-content: center;
+    }
+    .platform-card.selected .platform-check { display: flex; }
+    .platform-check svg { width: 9px; height: 9px; stroke: white; fill: none; stroke-width: 2; }
+
+    /* ── Draft list ── */
+    #draft-list-header {
+      padding: 10px 0; border-bottom: 1px solid #252a38;
+      display: flex; align-items: center; gap: 8px; margin-bottom: 0;
+    }
+    .draft-row {
+      padding: 12px 0; border-left: 2px solid transparent;
+      padding-left: 12px; cursor: pointer;
+      transition: background 80ms, border-color 80ms;
+      border-bottom: 1px solid #252a38;
+    }
+    .draft-row:last-of-type { border-bottom: none; }
+    .draft-row:hover { background: #0f1117; }
+    .draft-row.selected { border-left-color: #6366f1; background: #1e2540; }
+    .draft-row-title { font-size: 13px; font-weight: 500; color: #e8eaf2; margin-bottom: 3px; }
+    .draft-row.selected .draft-row-title { color: #e8eaf2; }
+    .draft-row:not(.selected) .draft-row-title { color: #c9cfe0; font-weight: 400; }
+    .draft-row-snippet { font-size: 11px; color: #5a6080; line-height: 1.5; margin-bottom: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 680px; }
+    .draft-row-meta { display: flex; align-items: center; gap: 8px; }
+    .draft-badge {
+      font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 3px;
+      text-transform: uppercase; letter-spacing: .04em;
+    }
+    .draft-badge.draft { background: #1e2a4a; color: #6ea8fe; border: 1px solid #2a3d6a; }
+    .draft-badge.published { background: #0d2830; color: #38bdf8; border: 1px solid #1a3d4a; }
+
+    /* ── Draft search + filter ── */
+    #draft-search-wrap { border-bottom: 1px solid #252a38; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+    #draft-search {
+      width: 100%; background: #181c27; border: 1px solid #252a38; border-radius: 6px;
+      padding: 7px 10px; font-size: 12px; color: #e8eaf2; font-family: Inter, sans-serif;
+      outline: none; transition: border-color 120ms; box-sizing: border-box;
+    }
+    #draft-search:focus { border-color: #6366f1; }
+    #draft-search::placeholder { color: #3a3f52; }
+    .filter-pills { display: flex; gap: 6px; }
+    .filter-pill {
+      font-size: 11px; font-weight: 500; padding: 3px 10px; border-radius: 20px;
+      border: 1px solid #252a38; background: none; color: #5a6080; cursor: pointer;
+      font-family: Inter, sans-serif; transition: color 80ms, border-color 80ms, background 80ms;
+    }
+    .filter-pill:hover { border-color: #3a3f52; color: #c9cfe0; }
+    .filter-pill.active { background: #1e2540; border-color: #6366f1; color: #e8eaf2; }
+
+    /* ── Review pane ── */
+    #title-input {
+      width: 100%; background: none; border: none; border-bottom: 2px solid transparent;
+      outline: none; font-size: 20px; font-weight: 600; color: #e8eaf2;
+      font-family: Inter, sans-serif; padding: 0 0 4px; transition: border-color 120ms;
+      display: block;
+    }
+    #title-input:focus { border-bottom-color: #6366f1; }
+    #markdown-preview {
+      max-height: 420px; overflow-y: auto; font-size: 13px; color: #c9cfe0;
+      line-height: 1.8; padding-right: 8px;
+    }
+    #markdown-preview p { margin-bottom: 10px; }
+    #markdown-preview h1, #markdown-preview h2 { color: #e8eaf2; font-weight: 600; margin-bottom: 8px; }
+    #markdown-preview code { font-family: 'JetBrains Mono', monospace; font-size: 12px; background: #181c27; border: 1px solid #252a38; padding: 1px 5px; border-radius: 3px; }
+    #markdown-preview pre { background: #181c27; border: 1px solid #252a38; border-radius: 6px; padding: 12px 14px; margin-bottom: 10px; overflow-x: auto; }
+    #markdown-preview strong { color: #e8eaf2; }
+    #markdown-preview ul { padding-left: 18px; margin-bottom: 10px; }
+    #markdown-preview ol { padding-left: 18px; margin-bottom: 10px; }
+    #markdown-preview blockquote { border-left: 3px solid #6366f1; padding-left: 12px; margin-bottom: 10px; color: #7a82a0; }
+    #markdown-preview img { max-width: 100%; border-radius: 4px; margin: 6px 0; display: block; }
+    #markdown-preview hr { border: none; border-top: 1px solid #252a38; margin: 14px 0; }
+
+    /* ── Cover image ── */
+    .cover-img-box { width: 100%; border-radius: 8px; overflow: hidden; background: #181c27; border: 1px solid #252a38; }
+    .cover-img { width: 100%; display: block; object-fit: cover; border-radius: 7px; }
+    .cover-img-box.hashnode { aspect-ratio: 1600 / 840; }
+    .cover-img-box.devto    { aspect-ratio: 1000 / 420; }
+    .cover-img-box.medium   { aspect-ratio: 16 / 9; }
+    .cover-img-box.upload   { aspect-ratio: 16 / 9; }
+
+    /* ── Drop zone ── */
+    #drop-zone {
+      border: 2px dashed #252a38; border-radius: 10px;
+      height: 220px; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 10px;
+      cursor: pointer; transition: border-color 120ms, background 120ms;
+    }
+    #drop-zone.drag-over { border-color: #6366f1; border-style: solid; background: #1e2540; }
+    #drop-zone.error { border-color: #f87171; }
+    #drop-zone:hover:not(.drag-over):not(.error) { border-color: #3a3f52; }
+
+    /* ── Error banner ── */
+    #error-banner {
+      display: none; background: #2d1a1a; border-top: 1px solid #4d2a2a;
+      position: fixed; bottom: 56px; left: 0; right: 0;
+      padding: 10px 32px; align-items: center; gap: 10px; z-index: 39;
+    }
+
+    /* ── Import overlay ── */
+    #import-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(15,17,23,.88); backdrop-filter: blur(3px);
+      align-items: center; justify-content: center; flex-direction: column;
+      gap: 14px; z-index: 100;
+    }
+    #import-overlay.active { display: flex; }
+
+    /* ── Spinner ── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      border: 2px solid #252a38; border-top-color: #6366f1;
+      border-radius: 50%; animation: spin .7s linear infinite;
+    }
+
+    /* ── Empty state ── */
+    .empty-state {
+      padding: 48px 24px; text-align: center;
+    }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #252a38; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3a3f52; }
+  </style>
+</head>
+<body>
+
+<!-- ═══ Nav bar ═══════════════════════════════════════════════════ -->
+<div id="nav-bar">
+  <div class="logo-mark">
+    <svg viewBox="0 0 12 12"><path d="M2 2h8v2H2zM2 5h5v2H2zM2 8h7v2H2z"/></svg>
+  </div>
+  <span class="wordmark">BlogHub</span>
+  <button id="cancel-link" onclick="doCancel()">Cancel</button>
+</div>
+
+<!-- ═══ Step indicator ════════════════════════════════════════════ -->
+<div id="step-bar">
+  <div id="step-indicator">
+    <!-- Populated by JS -->
+  </div>
+</div>
+
+<!-- ═══ Content area ══════════════════════════════════════════════ -->
+<div id="content-area">
+  <div class="content-col">
+
+    <!-- PLATFORM MODE ──────────────────────────────────────────── -->
+    <div id="view-platform-pick">
+      <div style="margin-bottom:20px;">
+        <div style="font-size:18px;font-weight:600;color:#e8eaf2;margin-bottom:4px;">Choose a platform</div>
+        <div style="font-size:13px;color:#5a6080;">Select a connected platform to browse articles available for import.</div>
+      </div>
+      <div id="platform-grid"></div>
+      <!-- no-platforms empty state -->
+      <div id="no-platforms" style="display:none;" class="empty-state">
+        <div style="width:40px;height:40px;border-radius:10px;background:#181c27;border:1px solid #252a38;margin:0 auto 14px;display:flex;align-items:center;justify-content:center;">
+          <svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="#5a6080" stroke-width="1.5"><circle cx="10" cy="10" r="7"/><path d="M7 10h6M10 7v6"/></svg>
+        </div>
+        <div style="font-size:14px;font-weight:500;color:#e8eaf2;margin-bottom:6px;">No platforms connected</div>
+        <div style="font-size:13px;color:#5a6080;margin-bottom:16px;">Connect a platform in Settings to import your articles.</div>
+        <a href="../settings/v2.html" style="font-size:13px;color:#6366f1;text-decoration:none;border:1px solid #6366f1;padding:6px 14px;border-radius:6px;">Open Settings</a>
+      </div>
+    </div>
+
+    <div id="view-draft-list" style="display:none;">
+      <div id="draft-list-header">
+        <div id="platform-logo-sm" style="width:22px;height:22px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;"></div>
+        <span id="platform-list-title" style="font-size:14px;font-weight:500;color:#e8eaf2;"></span>
+        <span id="article-count-label" style="font-size:12px;color:#5a6080;margin-left:4px;"></span>
+      </div>
+      <div style="border:1px solid #252a38;border-top:none;border-radius:0 0 8px 8px;overflow:hidden;">
+        <div id="draft-search-wrap">
+          <input id="draft-search" type="text" placeholder="Search articles…" oninput="setDraftSearch(this.value)" />
+          <div class="filter-pills">
+            <button class="filter-pill active" id="pill-all"       onclick="setDraftFilter('all')">All</button>
+            <button class="filter-pill"        id="pill-draft"     onclick="setDraftFilter('draft')">Draft</button>
+            <button class="filter-pill"        id="pill-published" onclick="setDraftFilter('published')">Published</button>
+          </div>
+        </div>
+        <div id="draft-rows"></div>
+      </div>
+      <div id="load-more-wrap" style="display:none;padding:10px 12px 12px;">
+        <button onclick="loadMore()" style="font-size:12px;color:#5a6080;background:none;border:none;cursor:pointer;padding:4px 0;font-family:inherit;transition:color 100ms;"
+          onmouseover="this.style.color='#c9cfe0'" onmouseout="this.style.color='#5a6080'">Load more</button>
+      </div>
+    </div>
+
+    <!-- REVIEW PANE ─────────────────────────────────────────────── -->
+    <div id="view-review" style="display:none;">
+      <div id="cover-image-wrap" style="display:none;margin-bottom:20px;">
+        <div style="font-size:11px;font-weight:500;color:#5a6080;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Cover image</div>
+        <div id="cover-image-container" class="cover-img-box">
+          <img id="cover-image" src="" alt="Cover" class="cover-img"
+            onerror="document.getElementById('cover-image-wrap').style.display='none'" />
+        </div>
+        <div id="cover-image-hint" style="font-size:11px;color:#3a3f52;margin-top:6px;"></div>
+      </div>
+      <div style="margin-bottom:20px;">
+        <input id="title-input" type="text" placeholder="Article title" oninput="syncTitle(this.value)" />
+        <div id="review-meta" style="font-size:12px;color:#5a6080;margin-top:6px;"></div>
+      </div>
+      <div style="height:1px;background:#252a38;margin-bottom:20px;"></div>
+      <div id="markdown-preview"></div>
+    </div>
+
+    <!-- UPLOAD MODE ─────────────────────────────────────────────── -->
+    <div id="view-upload" style="display:none;">
+      <div style="margin-bottom:20px;">
+        <div style="font-size:18px;font-weight:600;color:#e8eaf2;margin-bottom:4px;">Upload an article</div>
+        <div style="font-size:13px;color:#5a6080;">Drop a file or click to browse. Accepts .md, .zip (with images), .html, or .docx.</div>
+      </div>
+
+      <div id="drop-zone"
+        onclick="triggerFilePicker()"
+        ondragover="onDragOver(event)"
+        ondragleave="onDragLeave(event)"
+        ondrop="onDrop(event)">
+        <!-- idle state -->
+        <div id="dz-idle" style="display:flex;flex-direction:column;align-items:center;gap:10px;">
+          <svg id="dz-icon" viewBox="0 0 32 32" width="32" height="32" fill="none" stroke="#3a3f52" stroke-width="1.5" style="transition:stroke 120ms;">
+            <path d="M16 4v16M10 14l6-6 6 6"/><path d="M6 22v4h20v-4"/>
+          </svg>
+          <div style="text-align:center;">
+            <div style="font-size:14px;font-weight:500;color:#e8eaf2;">Drop your file here</div>
+            <div style="font-size:12px;color:#5a6080;margin-top:3px;">or <span style="color:#6366f1;">click to browse</span></div>
+          </div>
+          <div style="font-size:11px;color:#3a3f52;">.md · .zip · .html · .docx</div>
+        </div>
+        <!-- drag-over state (hidden by default) -->
+        <div id="dz-hover" style="display:none;flex-direction:column;align-items:center;gap:10px;">
+          <svg viewBox="0 0 32 32" width="32" height="32" fill="none" stroke="#6366f1" stroke-width="1.5">
+            <path d="M16 4v16M10 14l6-6 6 6"/><path d="M6 22v4h20v-4"/>
+          </svg>
+          <div style="text-align:center;">
+            <div style="font-size:14px;font-weight:500;color:#e8eaf2;">Release to upload</div>
+            <div style="font-size:12px;color:#6366f1;margin-top:3px;">.md file detected</div>
+          </div>
+        </div>
+        <!-- error state (hidden by default) -->
+        <div id="dz-error" style="display:none;flex-direction:column;align-items:center;gap:10px;">
+          <svg viewBox="0 0 32 32" width="32" height="32" fill="none" stroke="#f87171" stroke-width="1.5"><circle cx="16" cy="16" r="12"/><path d="M16 10v7M16 21v1"/></svg>
+          <div style="text-align:center;">
+            <div id="dz-error-msg" style="font-size:13px;font-weight:500;color:#f87171;"></div>
+            <div style="font-size:12px;color:#5a6080;margin-top:3px;">Accepted: .md, .zip, .html, .docx</div>
+          </div>
+          <button onclick="resetDropZone(event)" style="font-size:12px;color:#5a6080;background:none;border:none;cursor:pointer;font-family:inherit;text-decoration:underline;text-underline-offset:3px;">Try again</button>
+        </div>
+      </div>
+      <input id="file-input" type="file"
+        accept=".md,.zip,.html,.htm,.docx,text/markdown,text/html,application/zip,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        multiple style="display:none;" onchange="onFileInput(event)" />
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══ Error banner (above footer) ══════════════════════════════ -->
+<div id="error-banner">
+  <svg viewBox="0 0 16 16" width="14" height="14" fill="#f87171"><path d="M8 1l7 13H1L8 1zm0 4v5m0 2h.01v.01H8z" fill-rule="evenodd"/></svg>
+  <span id="error-msg" style="font-size:12px;color:#f87171;flex:1;"></span>
+  <button onclick="retryImport()" style="font-size:12px;color:#6366f1;background:none;border:none;cursor:pointer;padding:0;font-family:inherit;white-space:nowrap;">Try again</button>
+</div>
+
+<!-- ═══ Action bar (fixed bottom) ════════════════════════════════ -->
+<div id="action-bar">
+  <button id="back-btn" onclick="goBack()">← Back</button>
+  <div id="action-dots"></div>
+  <button id="primary-btn" onclick="advance()" disabled>Next →</button>
+</div>
+
+<!-- ═══ Import overlay ════════════════════════════════════════════ -->
+<div id="import-overlay">
+  <div class="spinner" style="width:28px;height:28px;"></div>
+  <div style="font-size:14px;font-weight:500;color:#e8eaf2;">Importing article...</div>
+  <div style="font-size:12px;color:#5a6080;">Creating workspace and saving content</div>
+</div>
+
+<script>
+// ─── Platform UI metadata ────────────────────────────────────────
+// Visual presentation only — connected status and articles come from API.
+const PLATFORM_META = {
+  medium:   { name: 'Medium',   bg: '#292929', color: '#e8eaf2', initials: 'M' },
+  hashnode: { name: 'Hashnode', bg: '#2c6ef7', color: '#fff',    initials: 'H' },
+  devto:    { name: 'Dev.to',   bg: '#181818', color: '#e8eaf2', initials: 'D' },
+};
+
+// Populated from GET /api/connections on init
+let PLATFORMS = [];
+
+// ─── App state ───────────────────────────────────────────────────
+const params     = new URLSearchParams(location.search);
+const MODE       = params.get('mode') || 'platform';  // 'platform' | 'upload'
+const RETURN_TO  = params.get('returnTo') || 'overview';
+
+let step             = 1;
+let selectedPlatform = null;  // platform object
+let selectedArticle  = null;  // article object
+let uploadedFile     = null;  // { name, content, title, wordCount }
+let editedTitle      = '';
+let showError        = false;
+let draftSearch      = '';
+let draftFilter      = 'all';
+let platformArticles = {};    // connId → DraftSummary[] | null (null = loading)
+let fetchingBodyForId = null; // article id being body-fetched
+
+// Upload mode: 2 steps; Platform mode: 3 steps
+const totalSteps = MODE === 'upload' ? 2 : 3;
+
+// ─── Step labels ─────────────────────────────────────────────────
+const STEP_LABELS = MODE === 'upload'
+  ? ['Upload file', 'Review']
+  : ['Choose platform', 'Select article', 'Review'];
+
+// ─── Init ────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  renderStepBar();
+  if (MODE === 'platform') {
+    showView('platform-pick');
+    initConnections();
+  } else {
+    showView('upload');
+  }
+  renderActionBar();
+});
+
+async function initConnections() {
+  try {
+    const res = await fetch('/api/connections');
+    const data = await res.json();
+    const blogIds = new Set(['medium', 'hashnode', 'devto']);
+    PLATFORMS = data.connections
+      .filter(c => blogIds.has(c.id))
+      .map(c => ({
+        id: c.id,
+        name: PLATFORM_META[c.id]?.name || c.label,
+        bg:      PLATFORM_META[c.id]?.bg      || '#252a38',
+        color:   PLATFORM_META[c.id]?.color   || '#e8eaf2',
+        initials: PLATFORM_META[c.id]?.initials || c.id[0].toUpperCase(),
+        connected: c.status === 'connected',
+      }));
+  } catch {
+    PLATFORMS = Object.entries(PLATFORM_META).map(([id, m]) => ({ id, ...m, connected: false }));
+  }
+  renderPlatformGrid();
+  renderActionBar();
+}
+
+async function loadDrafts(connId) {
+  if (platformArticles[connId] !== undefined) { renderDraftList(); return; }
+  platformArticles[connId] = null; // mark loading
+  renderDraftList();
+  try {
+    const res = await fetch(`/api/connections/${encodeURIComponent(connId)}/drafts?per_page=100`);
+    if (!res.ok) throw new Error('API error');
+    const data = await res.json();
+    platformArticles[connId] = data.drafts.map(d => ({
+      id:         d.id,
+      title:      d.title,
+      snippet:    d.snippet || '',
+      status:     d.status,
+      wordCount:  d.word_count || 0,
+      age:        _relativeAge(d.updated_at),
+      coverImage: d.cover_image || null,
+      body:       null, // fetched on demand
+    }));
+  } catch {
+    platformArticles[connId] = [];
+  }
+  renderDraftList();
+}
+
+function _relativeAge(iso) {
+  if (!iso) return '';
+  const ms   = Date.now() - new Date(iso).getTime();
+  const days = Math.floor(ms / 86400000);
+  if (days < 1) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 7) return `${days} days ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks} week${weeks > 1 ? 's' : ''} ago`;
+  return `${Math.floor(days / 30)} months ago`;
+}
+
+// ─── Views ───────────────────────────────────────────────────────
+const VIEWS = ['platform-pick', 'draft-list', 'review', 'upload'];
+function showView(id) {
+  VIEWS.forEach(v => {
+    const el = document.getElementById('view-' + v);
+    if (el) el.style.display = v === id ? 'block' : 'none';
+  });
+}
+
+// ─── Step bar ────────────────────────────────────────────────────
+function renderStepBar() {
+  const bar = document.getElementById('step-indicator');
+  bar.innerHTML = '';
+  STEP_LABELS.forEach((label, i) => {
+    const n = i + 1;
+    const state = n < step ? 'done' : n === step ? 'active' : 'future';
+    const circleText = state === 'done' ? '✓' : String(n);
+
+    bar.innerHTML += `<div class="si-item">
+      <div class="si-circle ${state}">${circleText}</div>
+      <span class="si-label ${state}">${label}</span>
+    </div>`;
+
+    if (n < totalSteps) {
+      bar.innerHTML += `<div class="si-conn ${n < step ? 'done' : 'future'}"></div>`;
+    }
+  });
+}
+
+// ─── Action bar ──────────────────────────────────────────────────
+function renderActionBar() {
+  const backBtn    = document.getElementById('back-btn');
+  const primaryBtn = document.getElementById('primary-btn');
+  const dotsEl     = document.getElementById('action-dots');
+
+  // Back visibility
+  backBtn.style.visibility = step > 1 ? 'visible' : 'hidden';
+
+  // Dots
+  dotsEl.innerHTML = '';
+  for (let i = 1; i <= totalSteps; i++) {
+    const active = i === step;
+    dotsEl.innerHTML += `<span class="dot" style="
+      width:${active ? '20px' : '6px'};height:6px;
+      background:${i <= step ? '#6366f1' : '#252a38'};
+    "></span>`;
+  }
+
+  // Primary button label and state
+  const isLastStep = step === totalSteps;
+  primaryBtn.textContent = isLastStep ? 'Import' : 'Next →';
+  primaryBtn.disabled = !canAdvance();
+}
+
+function canAdvance() {
+  if (MODE === 'platform') {
+    if (step === 1) return selectedPlatform !== null;
+    if (step === 2) return selectedArticle !== null;
+    if (step === 3) return editedTitle.trim().length > 0;
+  } else {
+    if (step === 1) return false; // file picker auto-advances
+    if (step === 2) return editedTitle.trim().length > 0;
+  }
+  return false;
+}
+
+// ─── Navigation ──────────────────────────────────────────────────
+function advance() {
+  if (!canAdvance()) return;
+  const isLastStep = step === totalSteps;
+  if (isLastStep) {
+    doImport();
+    return;
+  }
+  step++;
+  renderStepBar();
+
+  if (MODE === 'platform') {
+    if (step === 2) {
+      draftSearch = ''; draftFilter = 'all';
+      const si = document.getElementById('draft-search');
+      if (si) si.value = '';
+      ['all','draft','published'].forEach(k => {
+        const el = document.getElementById('pill-' + k);
+        if (el) el.classList.toggle('active', k === 'all');
+      });
+      showView('draft-list');
+      loadDrafts(selectedPlatform.id);
+    }
+    if (step === 3) { renderReview(); showView('review'); }
+  } else {
+    if (step === 2) { renderReview(); showView('review'); }
+  }
+  renderActionBar();
+}
+
+function goBack() {
+  if (step <= 1) return;
+  step--;
+  renderStepBar();
+
+  if (MODE === 'platform') {
+    if (step === 1) { showView('platform-pick'); }
+    if (step === 2) { renderDraftList(); showView('draft-list'); }
+  } else {
+    if (step === 1) { showView('upload'); }
+  }
+  renderActionBar();
+  hideError();
+}
+
+function doCancel() {
+  const targets = {
+    'overview': '../overview/v3.html',
+    'create-article': '../create-article/v1.html',
+  };
+  window.location.href = targets[RETURN_TO] || '../overview/v3.html';
+}
+
+// ─── Platform picker ─────────────────────────────────────────────
+function renderPlatformGrid() {
+  const connected = PLATFORMS.filter(p => p.connected);
+  const grid = document.getElementById('platform-grid');
+  const noPlat = document.getElementById('no-platforms');
+
+  if (connected.length === 0) {
+    grid.style.display = 'none';
+    noPlat.style.display = 'block';
+    return;
+  }
+
+  grid.innerHTML = PLATFORMS.map(p => `
+    <div class="platform-card ${p.connected ? '' : 'disconnected'} ${selectedPlatform?.id === p.id ? 'selected' : ''}"
+      onclick="${p.connected ? `selectPlatform('${p.id}')` : ''}">
+      <div class="platform-logo" style="background:${p.bg};color:${p.color};">${p.initials}</div>
+      <div>
+        <div style="font-size:13px;font-weight:500;color:#e8eaf2;">${p.name}</div>
+        <div style="font-size:11px;color:#5a6080;">${p.connected ? (platformArticles[p.id]?.length != null ? platformArticles[p.id].length + ' articles' : 'Connected') : 'Not connected'}</div>
+      </div>
+      <div class="platform-check">
+        <svg viewBox="0 0 10 10"><path d="M1.5 5l2.5 2.5 4.5-4.5"/></svg>
+      </div>
+    </div>
+  `).join('');
+}
+
+function selectPlatform(id) {
+  selectedPlatform = PLATFORMS.find(p => p.id === id) || null;
+  selectedArticle = null;
+  renderPlatformGrid();
+  renderActionBar();
+}
+
+// ─── Draft list ──────────────────────────────────────────────────
+let visibleCount = 20;
+function renderDraftList() {
+  if (!selectedPlatform) return;
+  const p = selectedPlatform;
+
+  document.getElementById('platform-list-title').textContent = p.name;
+  const logoSm = document.getElementById('platform-logo-sm');
+  logoSm.style.background = p.bg;
+  logoSm.style.color = p.color;
+  logoSm.textContent = p.initials;
+
+  const rows = document.getElementById('draft-rows');
+  const raw  = platformArticles[p.id];
+
+  // Still loading
+  if (raw === null || raw === undefined) {
+    rows.innerHTML = '<div style="padding:24px;text-align:center;font-size:13px;color:#5a6080;display:flex;align-items:center;justify-content:center;gap:8px;"><span class="spinner" style="width:14px;height:14px;"></span> Loading articles…</div>';
+    document.getElementById('article-count-label').textContent = '';
+    document.getElementById('load-more-wrap').style.display = 'none';
+    return;
+  }
+
+  // Apply status filter and search query
+  let articles = raw;
+  if (draftFilter !== 'all') articles = articles.filter(a => a.status === draftFilter);
+  if (draftSearch) articles = articles.filter(a =>
+    a.title.toLowerCase().includes(draftSearch) ||
+    (a.snippet || '').toLowerCase().includes(draftSearch)
+  );
+
+  document.getElementById('article-count-label').textContent = `${articles.length} article${articles.length !== 1 ? 's' : ''}`;
+
+  const slice = articles.slice(0, visibleCount);
+
+  if (articles.length === 0) {
+    rows.innerHTML = '<div style="padding:24px;text-align:center;font-size:13px;color:#5a6080;">No articles found.</div>';
+    document.getElementById('load-more-wrap').style.display = 'none';
+    return;
+  }
+
+  rows.innerHTML = slice.map(a => {
+    const isSelected  = selectedArticle?.id === a.id;
+    const isFetching  = fetchingBodyForId  === a.id;
+    const loadingCue  = isFetching
+      ? '<span class="spinner" style="width:11px;height:11px;border-width:1.5px;margin-left:6px;"></span>'
+      : '';
+    return `
+    <div class="draft-row ${isSelected ? 'selected' : ''}"
+      onclick="selectArticle('${a.id}')">
+      <div class="draft-row-title" style="display:flex;align-items:center;">${a.title}${loadingCue}</div>
+      <div class="draft-row-snippet">${a.snippet}</div>
+      <div class="draft-row-meta">
+        <span class="draft-badge ${a.status}">${a.status}</span>
+        <span style="font-size:11px;color:#3a3f52;">·</span>
+        <span style="font-size:11px;color:#5a6080;">${(a.wordCount||0).toLocaleString()} words</span>
+        <span style="font-size:11px;color:#3a3f52;">·</span>
+        <span style="font-size:11px;color:#5a6080;">${a.age}</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  const loadWrap = document.getElementById('load-more-wrap');
+  loadWrap.style.display = visibleCount < articles.length ? 'block' : 'none';
+}
+
+async function selectArticle(id) {
+  if (!selectedPlatform) return;
+  const articles = platformArticles[selectedPlatform.id] || [];
+  selectedArticle = articles.find(a => a.id === id) || null;
+  editedTitle = selectedArticle?.title || '';
+  renderDraftList();
+  renderActionBar();
+
+  // Pre-fetch body if not already loaded
+  if (selectedArticle && !selectedArticle.body) {
+    fetchingBodyForId = id;
+    renderDraftList();
+    try {
+      const r = await fetch(`/api/connections/${encodeURIComponent(selectedPlatform.id)}/drafts/${encodeURIComponent(id)}`);
+      if (r.ok) {
+        const d = await r.json();
+        selectedArticle.body = d.body || '';
+      }
+    } catch {}
+    fetchingBodyForId = null;
+    renderDraftList();
+    renderActionBar();
+  }
+}
+
+function loadMore() {
+  visibleCount += 20;
+  renderDraftList();
+}
+
+function setDraftFilter(f) {
+  draftFilter = f;
+  visibleCount = 20;
+  ['all', 'draft', 'published'].forEach(k => {
+    const el = document.getElementById('pill-' + k);
+    if (el) el.classList.toggle('active', k === f);
+  });
+  renderDraftList();
+}
+
+function setDraftSearch(q) {
+  draftSearch = q.toLowerCase();
+  visibleCount = 20;
+  renderDraftList();
+}
+
+// ─── Review pane ─────────────────────────────────────────────────
+function renderReview() {
+  let title = '', meta = '', body = '';
+
+  if (MODE === 'platform' && selectedArticle) {
+    title = selectedArticle.title;
+    const src = selectedPlatform ? selectedPlatform.name : 'Platform';
+    const st  = selectedArticle.status === 'published' ? 'Published on' : 'Draft from';
+    meta  = `${selectedArticle.wordCount.toLocaleString()} words · ${st} ${src}`;
+    body  = selectedArticle.body;
+  } else if (MODE === 'upload' && uploadedFile) {
+    title = uploadedFile.title;
+    meta  = `${uploadedFile.wordCount.toLocaleString()} words · Local file — ${uploadedFile.name}`;
+    body  = uploadedFile.content;
+  }
+
+  editedTitle = title;
+  document.getElementById('title-input').value = title;
+  document.getElementById('review-meta').textContent = meta;
+
+  // Cover image
+  const coverWrap = document.getElementById('cover-image-wrap');
+  const coverImg  = document.getElementById('cover-image');
+  const coverHint = document.getElementById('cover-image-hint');
+  const coverCon  = document.getElementById('cover-image-container');
+  const coverUrl  = (MODE === 'platform' && selectedArticle?.coverImage) ? selectedArticle.coverImage : null;
+  if (coverUrl) {
+    const platClass = selectedPlatform?.id || 'upload';
+    coverCon.className = `cover-img-box ${platClass}`;
+    const hints = { hashnode: 'Hashnode cover — 1600 × 840', devto: 'Dev.to cover — 1000 × 420', medium: 'Medium cover — 16:9', upload: '16:9' };
+    coverHint.textContent = hints[platClass] || '';
+    coverImg.src = coverUrl;
+    coverWrap.style.display = 'block';
+  } else {
+    coverWrap.style.display = 'none';
+  }
+
+  renderMarkdown(body);
+
+  // Warnings (unresolved images etc.)
+  let warningsEl = document.getElementById('review-warnings');
+  const warnings = (MODE === 'upload' && uploadedFile?.warnings?.length) ? uploadedFile.warnings : [];
+  if (warnings.length > 0) {
+    if (!warningsEl) {
+      warningsEl = document.createElement('div');
+      warningsEl.id = 'review-warnings';
+      document.getElementById('view-review').appendChild(warningsEl);
+    }
+    warningsEl.innerHTML = `
+      <div style="margin-top:16px;padding:10px 14px;background:#2a2000;border:1px solid #4a3800;border-radius:6px;">
+        <div style="font-size:12px;font-weight:600;color:#fbbf24;margin-bottom:6px;">Import warnings</div>
+        ${warnings.map(w => `<div style="font-size:12px;color:#d97706;margin-bottom:3px;">· ${w}</div>`).join('')}
+      </div>`;
+  } else if (warningsEl) {
+    warningsEl.innerHTML = '';
+  }
+}
+
+function syncTitle(val) {
+  editedTitle = val;
+  renderActionBar();
+}
+
+function inlineMarkdown(text) {
+  return text
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2" style="max-width:100%;border-radius:4px;margin:4px 0;vertical-align:middle;" />')
+    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color:#6366f1;" target="_blank">$1</a>');
+}
+
+function renderMarkdown(md) {
+  if (!md) { document.getElementById('markdown-preview').innerHTML = ''; return; }
+  const lines  = md.split('\n');
+  const parts  = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // fenced code block
+    if (/^```/.test(line)) {
+      const lang = line.slice(3).trim();
+      const code = [];
+      i++;
+      while (i < lines.length && !/^```/.test(lines[i])) { code.push(lines[i]); i++; }
+      const escaped = code.join('\n').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      parts.push(`<pre><code${lang ? ` class="language-${lang}"` : ''}>${escaped}</code></pre>`);
+      i++; continue;
+    }
+    // ATX headings
+    const hm = line.match(/^(#{1,6})\s+(.+)/);
+    if (hm) {
+      const lvl = hm[1].length;
+      const sz  = [22,18,16,14,13,12][lvl-1];
+      parts.push(`<h${lvl} style="font-size:${sz}px;font-weight:600;color:#e8eaf2;margin-bottom:${lvl<=2?10:6}px;margin-top:${lvl<=2?16:10}px;">${inlineMarkdown(hm[2])}</h${lvl}>`);
+      i++; continue;
+    }
+    // HR
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(line.trim())) {
+      parts.push('<hr />'); i++; continue;
+    }
+    // Block image on its own line
+    const bim = line.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (bim) {
+      parts.push(`<img alt="${bim[1]}" src="${bim[2]}" style="max-width:100%;border-radius:6px;margin:8px 0;display:block;" />`);
+      i++; continue;
+    }
+    // Blockquote
+    if (/^>\s?/.test(line)) {
+      const bqLines = [];
+      while (i < lines.length && /^>\s?/.test(lines[i])) {
+        bqLines.push(inlineMarkdown(lines[i].replace(/^>\s?/, ''))); i++;
+      }
+      parts.push(`<blockquote>${bqLines.join('<br />')}</blockquote>`);
+      continue;
+    }
+    // Unordered list
+    if (/^[\-\*\+]\s/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^[\-\*\+]\s/.test(lines[i])) {
+        items.push(`<li style="margin-bottom:3px;">${inlineMarkdown(lines[i].replace(/^[\-\*\+]\s/, ''))}</li>`); i++;
+      }
+      parts.push(`<ul>${items.join('')}</ul>`);
+      continue;
+    }
+    // Ordered list
+    if (/^\d+\.\s/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\d+\.\s/.test(lines[i])) {
+        items.push(`<li style="margin-bottom:3px;">${inlineMarkdown(lines[i].replace(/^\d+\.\s/, ''))}</li>`); i++;
+      }
+      parts.push(`<ol>${items.join('')}</ol>`);
+      continue;
+    }
+    // Empty line — paragraph break
+    if (line.trim() === '') { i++; continue; }
+    // Paragraph
+    const pLines = [];
+    while (i < lines.length && lines[i].trim() !== '' && !/^[\-\*\+#>`]|^\d+\.|^```/.test(lines[i])) {
+      pLines.push(inlineMarkdown(lines[i])); i++;
+    }
+    if (pLines.length) parts.push(`<p style="margin-bottom:10px;">${pLines.join(' ')}</p>`);
+  }
+  document.getElementById('markdown-preview').innerHTML = parts.join('\n');
+}
+
+// ─── Drop zone ───────────────────────────────────────────────────
+function setDzState(state) {
+  const dz = document.getElementById('drop-zone');
+  document.getElementById('dz-idle').style.display  = state === 'idle'  ? 'flex' : 'none';
+  document.getElementById('dz-hover').style.display = state === 'hover' ? 'flex' : 'none';
+  document.getElementById('dz-error').style.display = state === 'error' ? 'flex' : 'none';
+  dz.classList.toggle('drag-over', state === 'hover');
+  dz.classList.toggle('error',     state === 'error');
+}
+
+function onDragOver(e) {
+  e.preventDefault();
+  const hasFile = e.dataTransfer.items.length > 0;
+  setDzState(hasFile ? 'hover' : 'idle');
+}
+function onDragLeave(e) { setDzState('idle'); }
+
+function onDrop(e) {
+  e.preventDefault();
+  onDragLeave();
+  const files = e.dataTransfer.files;
+  if (files.length) processFiles(files);
+}
+
+function triggerFilePicker() {
+  document.getElementById('file-input').click();
+}
+
+function onFileInput(e) {
+  const files = e.target.files;
+  if (files.length) processFiles(files);
+  e.target.value = '';
+}
+
+// ─── Format helpers ───────────────────────────────────────────────
+function detectFileType(file) {
+  const n = file.name.toLowerCase();
+  if (n.endsWith('.zip'))  return 'zip';
+  if (n.endsWith('.docx')) return 'docx';
+  if (n.endsWith('.html') || n.endsWith('.htm')) return 'html';
+  if (n.endsWith('.md'))   return 'md';
+  return null;
+}
+
+function isImageFile(file) {
+  return /\.(png|jpe?g|gif|webp|svg)$/i.test(file.name);
+}
+
+function extractTitle(content, fallbackName) {
+  const h1 = content.split('\n').find(l => l.startsWith('# '));
+  return h1 ? h1.replace(/^#\s*/, '').trim() : fallbackName.replace(/\.[^.]+$/, '');
+}
+
+function countWords(text) {
+  return text.replace(/[^a-zA-Z\s]/g, ' ').split(/\s+/).filter(Boolean).length;
+}
+
+function findRelativeImageRefs(mdContent) {
+  const refs = [];
+  mdContent.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, _alt, src) => {
+    if (!src.startsWith('data:') && !/^https?:\/\//.test(src)) refs.push(src);
+  });
+  return [...new Set(refs)];
+}
+
+function resolveImages(mdContent, imageMap) {
+  const unresolved = [];
+  const content = mdContent.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, src) => {
+    if (src.startsWith('data:') || /^https?:\/\//.test(src)) return match;
+    const basename = src.split('/').pop().toLowerCase();
+    if (imageMap[basename]) return `![${alt}](${imageMap[basename]})`;
+    unresolved.push(src);
+    return match;
+  });
+  return { content, unresolved };
+}
+
+async function fileToDataUri(file) {
+  return new Promise(resolve => {
+    const r = new FileReader();
+    r.onload = e => resolve(e.target.result);
+    r.readAsDataURL(file);
+  });
+}
+
+function finishUpload(name, content, warnings = []) {
+  const title = extractTitle(content, name);
+  uploadedFile = { name, content, title, wordCount: countWords(content), warnings };
+  editedTitle  = title;
+  step         = totalSteps;
+  renderStepBar();
+  renderReview();
+  showView('review');
+  renderActionBar();
+}
+
+// ─── Format handlers ──────────────────────────────────────────────
+async function handleMd(file) {
+  const content = await file.text();
+  finishUpload(file.name, content);
+}
+
+async function handleZip(file) {
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const mdEntry = Object.values(zip.files).find(f => !f.dir && f.name.toLowerCase().endsWith('.md'));
+  if (!mdEntry) throw new Error('No .md file found inside the zip');
+
+  const mdContent = await mdEntry.async('string');
+  const refs = findRelativeImageRefs(mdContent);
+
+  if (refs.length === 0) {
+    finishUpload(file.name, mdContent);
+    return;
+  }
+
+  const imageMap = {};
+  for (const entry of Object.values(zip.files)) {
+    if (entry.dir) continue;
+    const basename = entry.name.split('/').pop().toLowerCase();
+    const bytes = await entry.async('uint8array');
+    const blob = new Blob([bytes]);
+    const dataUri = await new Promise(res => {
+      const r = new FileReader();
+      r.onload = e => res(e.target.result);
+      r.readAsDataURL(blob);
+    });
+    imageMap[basename] = dataUri;
+  }
+
+  const { content, unresolved } = resolveImages(mdContent, imageMap);
+  const warnings = unresolved.map(r => `Image not found in zip: ${r}`);
+  finishUpload(file.name, content, warnings);
+}
+
+async function handleHtml(file) {
+  const html = await file.text();
+  const td = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' });
+  const md = td.turndown(html);
+  finishUpload(file.name, md);
+}
+
+async function handleDocx(file) {
+  const arrayBuf = await file.arrayBuffer();
+  const result = await mammoth.convertToHtml({ arrayBuffer: arrayBuf });
+  const td = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' });
+  const md = td.turndown(result.value);
+  const warnings = result.messages.map(m => m.message);
+  finishUpload(file.name, md, warnings);
+}
+
+async function processMarkdownWithImages(mdFile, imgFiles) {
+  const mdContent = await mdFile.text();
+  const refs = findRelativeImageRefs(mdContent);
+
+  const imageMap = {};
+  for (const imgFile of imgFiles) {
+    const basename = imgFile.name.toLowerCase();
+    imageMap[basename] = await fileToDataUri(imgFile);
+  }
+
+  const { content, unresolved } = resolveImages(mdContent, imageMap);
+  const warnings = unresolved.map(r => `Image not resolved: ${r}`);
+  finishUpload(mdFile.name, content, warnings);
+}
+
+// ─── Entry point ─────────────────────────────────────────────────
+async function processFiles(files) {
+  files = Array.from(files);
+  const mdFiles  = files.filter(f => f.name.toLowerCase().endsWith('.md'));
+  const imgFiles = files.filter(isImageFile);
+
+  if (files.length === 1) {
+    const type = detectFileType(files[0]);
+    if (!type) {
+      const ext = files[0].name.split('.').pop();
+      document.getElementById('dz-error-msg').textContent = `.${ext} files are not supported`;
+      setDzState('error');
+      return;
+    }
+    try {
+      if (type === 'zip')       await handleZip(files[0]);
+      else if (type === 'docx') await handleDocx(files[0]);
+      else if (type === 'html') await handleHtml(files[0]);
+      else                      await handleMd(files[0]);
+    } catch (err) {
+      document.getElementById('dz-error-msg').textContent = err.message;
+      setDzState('error');
+    }
+    return;
+  }
+
+  if (mdFiles.length === 1 && imgFiles.length > 0 && mdFiles.length + imgFiles.length === files.length) {
+    try {
+      await processMarkdownWithImages(mdFiles[0], imgFiles);
+    } catch (err) {
+      document.getElementById('dz-error-msg').textContent = err.message;
+      setDzState('error');
+    }
+    return;
+  }
+
+  document.getElementById('dz-error-msg').textContent = 'Drop one file, or a .md with its images';
+  setDzState('error');
+}
+
+function resetDropZone(e) {
+  e.stopPropagation();
+  setDzState('idle');
+}
+
+// ─── Import ───────────────────────────────────────────────────────
+async function doImport() {
+  document.getElementById('import-overlay').classList.add('active');
+  document.getElementById('primary-btn').disabled = true;
+  document.getElementById('cancel-link').disabled = true;
+
+  try {
+    let body;
+    if (MODE === 'upload') {
+      body = {
+        source: 'upload',
+        title: editedTitle,
+        filename: uploadedFile.name,
+        content: uploadedFile.content,
+      };
+    } else {
+      body = {
+        source: 'platform',
+        platform: selectedPlatform.id,
+        draft_id: selectedArticle.id,
+        title: editedTitle,
+        content: selectedArticle.body || undefined,
+        status: selectedArticle.status,
+      };
+    }
+
+    const res = await fetch('/api/articles/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Server error ${res.status}`);
+    }
+
+    const { id } = await res.json();
+    window.location.href = `../editor/v2.html?id=${id}`;
+  } catch (err) {
+    document.getElementById('import-overlay').classList.remove('active');
+    showImportError(err.message || 'Import failed');
+    document.getElementById('primary-btn').disabled = false;
+    document.getElementById('cancel-link').disabled = false;
+  }
+}
+
+function showImportError(msg) {
+  const banner = document.getElementById('error-banner');
+  document.getElementById('error-msg').textContent = msg;
+  banner.style.display = 'flex';
+}
+
+function hideError() {
+  document.getElementById('error-banner').style.display = 'none';
+}
+
+function retryImport() {
+  hideError();
+  document.getElementById('primary-btn').disabled = false;
+}
+</script>
+</body>
+</html>

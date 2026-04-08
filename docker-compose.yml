@@ -1,0 +1,26 @@
+services:
+  cli-runner:
+    build: ./cli-runner
+    ports:
+      - "8001:8001"      # runner REST API (BlogHub backend talks here)
+      - "54322:54322"    # claude login loopback callback
+      - "54323:54323"    # openai login loopback callback
+    volumes:
+      - claude-config:/root/.claude
+      - codex-config:/root/.codex
+    environment:
+      - RUNNER_TASK_TIMEOUT=180
+      - RUNNER_LOGIN_TIMEOUT=300
+      - RUNNER_MAX_OUTPUT_BYTES=524288
+      - CLAUDE_CALLBACK_PORT=54322
+      - CLAUDE_CONFIG_DIR=/root/.claude
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  claude-config:
+  codex-config:

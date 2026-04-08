@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BlogHub — Settings</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            surface: '#0f1117', panel: '#181c27', border: '#252a38',
+            'border-hi': '#3a3f52', muted: '#5a6080', text: '#c9cfe0',
+            bright: '#e8eaf2', accent: '#6366f1',
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    body { background: #0f1117; color: #c9cfe0; }
+
+    /* ── SettingsNav D ────────────────────────────────────── */
+    .nav-group-label {
+      font-size: 9px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .10em; color: #3a3f52;
+      padding: 0 14px; margin-bottom: 4px;
+    }
+    .nav-btn {
+      display: block; width: 100%; text-align: left;
+      padding: 7px 14px; font-size: 13px; font-family: inherit;
+      background: transparent; border: none; border-left: 2px solid transparent;
+      cursor: pointer; color: #5a6080; transition: color 100ms;
+    }
+    .nav-btn:hover { color: #c9cfe0; }
+    .nav-btn.active { color: #e8eaf2; font-weight: 500; border-left-color: #6366f1; }
+    .nav-divider { height: 1px; background: #252a38; margin: 8px 0; }
+
+    /* ── PlatformCard B ─────────────────────────────────────── */
+    .plat-card {
+      background: #181c27;
+      border: 1px solid #252a38;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .plat-card.is-expired { border-color: #4a3d1a; }
+    .plat-row {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 16px; padding: 16px 20px;
+    }
+
+    /* ── CliProviderCard C ──────────────────────────────────── */
+    .ai-card {
+      background: #181c27;
+      border: 1px solid #252a38; border-radius: 8px; overflow: hidden;
+    }
+    .ai-top { display: flex; }  /* accent-bar? + icon col + body */
+    .ai-icon-col {
+      width: 64px; flex-shrink: 0;
+      background: #13172a; border-right: 1px solid #252a38;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .ai-body-auth  { flex: 1; padding: 14px 16px; }
+    .ai-body-empty { flex: 1; padding: 14px 16px; display: flex; flex-direction: column; justify-content: space-between; }
+
+    /* ── ApiKeyInput B — inline expand ─────────────────────── */
+    .expand-row {
+      display: none;
+      border-top: 1px solid #252a38;
+      padding: 12px 18px;
+    }
+    .expand-row.open { display: block; }
+
+    /* ── ConnectionTestResult A — icon + colored text ──────── */
+    .test-result { display: none; align-items: center; gap: 5px; font-size: 11px; }
+    .test-result.visible { display: flex; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spin { animation: spin 1s linear infinite; display: inline-block; }
+
+    /* ── ConfirmDialog D — anchored popover ────────────────── */
+    .confirm-anchor { position: relative; }
+    .confirm-pop {
+      display: none;
+      position: absolute; right: 0; top: calc(100% + 6px);
+      background: #1e2335; border: 1px solid #3a3f52;
+      border-radius: 6px; padding: 10px 12px; width: 216px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.55); z-index: 40;
+    }
+    .confirm-pop.open { display: block; }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #252a38; border-radius: 3px; }
+  </style>
+</head>
+<body class="font-sans h-screen flex flex-col overflow-hidden">
+
+  <!-- ── Top nav ───────────────────────────────────────────── -->
+  <nav class="flex items-center justify-between px-5 h-12 border-b shrink-0"
+       style="border-color:#252a38; background:#0f1117;">
+    <div class="flex items-center gap-6">
+      <a href="/screens/overview/v4.html" class="text-bright font-semibold tracking-tight text-sm">BlogHub</a>
+      <div class="flex items-center gap-1 text-xs">
+        <a href="/screens/overview/v4.html" class="px-3 py-1.5 rounded text-muted hover:text-text">Articles</a>
+        <a href="#" class="px-3 py-1.5 rounded text-muted hover:text-text">Queue</a>
+        <a href="/screens/settings/v2.html" class="px-3 py-1.5 rounded text-bright font-medium" style="background:#252a38;">Platforms</a>
+        <a href="#" class="px-3 py-1.5 rounded text-muted hover:text-text">Settings</a>
+      </div>
+    </div>
+    <div class="flex items-center gap-1.5 text-xs text-muted">
+      <span id="count-dot" class="w-1.5 h-1.5 rounded-full inline-block" style="background:#5a6080;"></span>
+      <span id="count-label">— connections</span>
+    </div>
+  </nav>
+
+  <!-- ── Layout: sidebar + content ────────────────────────── -->
+  <div class="flex flex-1 overflow-hidden">
+
+    <!-- SettingsNav D — left sidebar -->
+    <aside class="shrink-0 py-6 overflow-y-auto" style="width:196px; border-right:1px solid #252a38;">
+
+      <div class="nav-group-label">Connections</div>
+      <button class="nav-btn active" data-section="platforms" onclick="showSection('platforms', this)">Platforms</button>
+      <button class="nav-btn"        data-section="ai"        onclick="showSection('ai', this)">AI Providers</button>
+
+      <div class="nav-divider" style="margin:10px 0;"></div>
+
+      <div class="nav-group-label" style="margin-top:2px;">Profile</div>
+      <button class="nav-btn" data-section="account" onclick="showSection('account', this)">Account</button>
+
+    </aside>
+
+    <!-- Content -->
+    <main class="flex-1 overflow-y-auto">
+      <div class="max-w-xl mx-auto px-10 py-10">
+
+        <!-- ── Platforms section ──────────────────────────── -->
+        <div id="section-platforms">
+          <h2 class="text-bright font-semibold text-sm mb-1">Publishing Platforms</h2>
+          <p class="text-xs mb-7" style="color:#5a6080; line-height:1.6;">
+            Connect your blog accounts to enable one-click publishing.<br/>
+            Tokens are stored in memory — reconnect after a server restart.
+          </p>
+          <div id="platform-list" class="flex flex-col gap-2">
+            <div class="text-xs text-muted">Loading…</div>
+          </div>
+        </div>
+
+        <!-- ── AI Providers section ──────────────────────── -->
+        <div id="section-ai" style="display:none;">
+          <h2 class="text-bright font-semibold text-sm mb-1">AI Providers</h2>
+          <p class="text-xs mb-7" style="color:#5a6080; line-height:1.6;">
+            Add API keys to enable AI-assisted drafting, suggestions, and review.
+          </p>
+          <div id="ai-list" class="flex flex-col gap-3">
+            <div class="text-xs text-muted">Loading…</div>
+          </div>
+        </div>
+
+        <!-- ── Account section (placeholder) ─────────────── -->
+        <div id="section-account" style="display:none;">
+          <h2 class="text-bright font-semibold text-sm mb-1">Account</h2>
+          <p class="text-xs" style="color:#5a6080;">Account settings coming soon.</p>
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+<script>
+// ─── Static metadata ───────────────────────────────────────────────────────────
+const CONN_META = {
+  // oauth:true   → supports Authorization Code flow via popup + postMessage
+  //                 (server exchanges code for token; browser never sees the secret)
+  // oauth:false  → API key / PAT only; no browser login available
+  medium:    { label: 'Medium',    tokenLabel: 'Integration token',     helpUrl: 'https://medium.com/me/settings/security',     oauth: true  },
+  hashnode:  { label: 'Hashnode',  tokenLabel: 'Personal Access Token', helpUrl: 'https://hashnode.com/settings/developer',     oauth: false },
+  devto:     { label: 'Dev.to',    tokenLabel: 'API Key',               helpUrl: 'https://dev.to/settings/extensions',          oauth: false },
+  // Anthropic uses loopback OAuth via claude CLI.
+  // OpenAI uses device-code OAuth via codex CLI (user visits URL + enters code).
+  anthropic: { label: 'Anthropic', tokenLabel: 'API Key', helpUrl: 'https://console.anthropic.com/settings/keys', oauth: true },
+  openai:    { label: 'OpenAI',    tokenLabel: 'API Key', helpUrl: 'https://platform.openai.com/api-keys',        oauth: true },
+};
+
+const ICON_STYLE = {
+  medium:    { bg: '#FF671918', color: '#FF6719', letter: 'M' },
+  hashnode:  { bg: '#2563EB18', color: '#2563EB', letter: 'H' },
+  devto:     { bg: '#7C3AED18', color: '#7C3AED', letter: 'D' },
+  // AI providers use unicode marks instead of letter badges (matches designer)
+  anthropic: { bg: '#D9770618', color: '#D97706', letter: 'A', symbol: '✦' },
+  openai:    { bg: '#05966918', color: '#059669', letter: 'O', symbol: '◆' },
+};
+
+let _connections = [];
+
+// ─── Section nav ───────────────────────────────────────────────────────────────
+function showSection(name, btn) {
+  ['platforms', 'ai', 'account'].forEach(s => {
+    document.getElementById('section-' + s).style.display = s === name ? '' : 'none';
+  });
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+}
+
+// ─── Load + render ─────────────────────────────────────────────────────────────
+async function loadConnections() {
+  try {
+    const res  = await fetch('/api/connections');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    _connections = data.connections;
+  } catch (e) {
+    console.warn('API unavailable, using static fallback:', e.message);
+    _connections = buildStaticConns();
+  }
+  renderPlatforms(_connections.filter(c => c.type === 'blog'));
+  renderAI(_connections.filter(c => c.type === 'ai'));
+  updateCount(_connections);
+}
+
+function buildStaticConns() {
+  const MAP = {
+    medium:    'blog', hashnode: 'blog', devto: 'blog',
+    anthropic: 'ai',  openai:   'ai',
+  };
+  return Object.entries(MAP).map(([id, type]) => ({
+    id, type, label: CONN_META[id].label, status: 'disconnected', username: null,
+  }));
+}
+
+function updateCount(conns) {
+  const n = conns.filter(c => c.status === 'connected').length;
+  document.getElementById('count-dot').style.background = n > 0 ? '#4ade80' : '#5a6080';
+  document.getElementById('count-label').textContent    = `${n} connection${n !== 1 ? 's' : ''} active`;
+}
+
+// ─── PlatformCard B ────────────────────────────────────────────────────────────
+function renderPlatforms(conns) {
+  document.getElementById('platform-list').innerHTML = conns.map(platCard).join('');
+}
+
+function platCard(conn) {
+  const ic   = ICON_STYLE[conn.id] || { bg: '#25293840', color: '#5a6080', letter: '?' };
+  const meta = CONN_META[conn.id] || {};
+  const ok   = conn.status === 'connected';
+  const exp  = conn.status === 'error';
+  const none = !ok && !exp;
+
+  // Icon: brand-tinted bg when connected/expired, neutral dark when not connected
+  const iconBg    = none ? '#1e2438' : ic.bg;
+  const iconColor = none ? '#5a6080' : ic.color;
+
+  // Status dot + label inline after platform name (Decision B)
+  const statusBit = ok
+    ? `<span style="width:6px;height:6px;border-radius:50%;background:#4ade80;"></span>
+       <span style="font-size:11px;color:#4ade80;">Connected</span>`
+    : exp
+    ? `<span style="width:6px;height:6px;border-radius:50%;background:#fbbf24;"></span>
+       <span style="font-size:11px;color:#fbbf24;">Expired</span>`
+    : `<span style="width:6px;height:6px;border-radius:50%;background:#5a6080;"></span>
+       <span style="font-size:11px;color:#5a6080;">Not connected</span>`;
+
+  // Sub-line: username when connected, helper text when not connected
+  const subLine = ok && conn.username
+    ? `<div style="font-size:11px;color:#5a6080;font-family:'JetBrains Mono',monospace;margin-top:3px;">${conn.username}</div>`
+    : none
+    ? `<div style="font-size:11px;color:#3a3f52;margin-top:3px;">Requires ${(meta.tokenLabel || 'API key').toLowerCase()}</div>`
+    : '';
+
+  // Right-side actions + test result (Decision A)
+  const testEl = `<div class="test-result" id="test-result-${conn.id}"></div>`;
+
+  let actionBtns = '';
+  if (ok) {
+    actionBtns = `
+      ${testEl}
+      <button id="test-btn-${conn.id}" onclick="testConn('${conn.id}')"
+        style="font-size:11px;padding:4px 10px;border-radius:4px;border:1px solid #252a38;background:transparent;color:#c9cfe0;cursor:pointer;font-family:inherit;">Test</button>
+      <button onclick="expandKey('${conn.id}')"
+        style="font-size:11px;padding:4px 10px;border-radius:4px;border:1px solid #252a38;background:transparent;color:#c9cfe0;cursor:pointer;font-family:inherit;">Update</button>
+      <div class="confirm-anchor">
+        <button onclick="toggleConfirm('${conn.id}')"
+          style="font-size:11px;color:#f87171;background:transparent;border:none;cursor:pointer;font-family:inherit;"
+          onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">Disconnect</button>
+        ${confirmPop(conn.id, conn.label, 'Disconnect')}
+      </div>`;
+  } else if (exp) {
+    actionBtns = `
+      <button onclick="expandKey('${conn.id}')"
+        style="font-size:12px;font-weight:500;padding:5px 14px;border-radius:5px;background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;">Reconnect</button>`;
+  } else {
+    actionBtns = `
+      <button onclick="expandKey('${conn.id}')"
+        style="font-size:12px;font-weight:500;padding:5px 14px;border-radius:5px;background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;">Connect</button>`;
+  }
+
+  // ApiKeyInput B — inline expand (inside card; overflow:hidden clips corners)
+  const oauthLine = meta.oauth
+    ? `<div style="margin-bottom:10px;">
+         <button onclick="doOAuth('${conn.id}')"
+           style="font-size:11px;color:#6366f1;background:transparent;border:none;cursor:pointer;font-family:inherit;padding:0;"
+           onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">Sign in with ${conn.label} →</button>
+         <span style="font-size:10px;color:#3a3f52;margin-left:6px;">or paste a token below</span>
+       </div>`
+    : '';
+
+  const cardStyle = none ? 'opacity:0.7;' : '';
+  const cardClass = `plat-card${exp ? ' is-expired' : ''}`;
+
+  return `
+    <div class="${cardClass}" id="plat-card-${conn.id}" style="${cardStyle}">
+      <div class="plat-row">
+        <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
+          <div style="width:28px;height:28px;border-radius:6px;background:${iconBg};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:${iconColor};flex-shrink:0;">${ic.letter}</div>
+          <div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span style="font-size:14px;font-weight:600;color:#e8eaf2;">${conn.label}</span>
+              ${statusBit}
+            </div>
+            ${subLine}
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">${actionBtns}</div>
+      </div>
+      <div class="expand-row" id="expand-${conn.id}">
+        ${oauthLine}
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input id="key-input-${conn.id}" type="password" autocomplete="off"
+            placeholder="Paste ${meta.tokenLabel || 'API key'}…"
+            style="flex:1;background:#0f1117;border:1px solid #252a38;border-radius:5px;padding:7px 10px;font-size:12px;color:#c9cfe0;font-family:inherit;"
+            onkeydown="if(event.key==='Enter')saveKey('${conn.id}')" />
+          <button onclick="saveKey('${conn.id}')"
+            style="font-size:12px;font-weight:500;padding:7px 14px;border-radius:5px;background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;white-space:nowrap;">Save</button>
+          <button onclick="collapseKey('${conn.id}')"
+            style="font-size:12px;padding:7px 10px;border-radius:5px;border:1px solid #252a38;background:transparent;color:#5a6080;cursor:pointer;font-family:inherit;">Cancel</button>
+        </div>
+        <a href="${meta.helpUrl || '#'}" target="_blank" rel="noopener noreferrer"
+          style="font-size:11px;color:#5a6080;text-decoration:none;display:block;margin-top:6px;"
+          onmouseover="this.style.color='#c9cfe0'" onmouseout="this.style.color='#5a6080'">Get your ${(meta.tokenLabel || 'token').toLowerCase()} →</a>
+      </div>
+    </div>`;
+}
+
+// ─── CliProviderCard C ─────────────────────────────────────────────────────────
+function renderAI(conns) {
+  document.getElementById('ai-list').innerHTML = conns.map(aiCard).join('');
+}
+
+function aiCard(conn) {
+  const ic   = ICON_STYLE[conn.id] || { bg: '#13172a', color: '#5a6080', letter: '?' };
+  const meta = CONN_META[conn.id] || {};
+  const ok   = conn.status === 'connected';
+
+  // Icon col is always dark — visual direction adds a 3px green accent bar when authenticated
+  const accentBar = ok
+    ? `<div style="width:3px;background:#4ade80;flex-shrink:0;"></div>`
+    : '';
+  const iconColor = ok ? ic.color : '#5a6080';
+
+  // Not-configured: whole card at opacity 0.75
+  const cardStyle = ok ? '' : 'opacity:0.75;';
+
+  // Body content differs between authenticated and not-configured (Decision C)
+  let bodyHtml = '';
+  if (ok) {
+    const identityLine = conn.username
+      ? `<div style="font-size:11px;color:#c9cfe0;margin-bottom:1px;">${conn.username}</div>` : '';
+    const testEl = `<div class="test-result" id="test-result-${conn.id}"></div>`;
+    bodyHtml = `
+      <div class="ai-body-auth">
+        <div style="font-size:13px;font-weight:600;color:#e8eaf2;margin-bottom:2px;">${conn.label}</div>
+        <div style="display:flex;align-items:center;gap:4px;margin-bottom:6px;">
+          <span style="width:5px;height:5px;border-radius:50%;background:#4ade80;"></span>
+          <span style="font-size:11px;color:#4ade80;">Connected</span>
+        </div>
+        ${identityLine}
+        <div style="display:flex;gap:6px;margin-top:10px;">
+          ${testEl}
+          <button id="test-btn-${conn.id}" onclick="testConn('${conn.id}')"
+            style="font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid #252a38;background:transparent;color:#c9cfe0;cursor:pointer;font-family:inherit;">Test</button>
+          <button onclick="expandKey('${conn.id}')"
+            style="font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid #252a38;background:transparent;color:#c9cfe0;cursor:pointer;font-family:inherit;">Update key</button>
+          <div class="confirm-anchor">
+            <button onclick="toggleConfirm('${conn.id}')"
+              style="font-size:11px;color:#f87171;background:transparent;border:none;cursor:pointer;font-family:inherit;"
+              onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">Remove</button>
+            ${confirmPop(conn.id, conn.label, 'Remove')}
+          </div>
+        </div>
+      </div>`;
+  } else {
+    // Not-configured: flex-column space-between — description top, button bottom (Decision C)
+    bodyHtml = `
+      <div class="ai-body-empty">
+        <div>
+          <div style="font-size:13px;font-weight:600;color:#e8eaf2;margin-bottom:2px;">${conn.label}</div>
+          <div style="display:flex;align-items:center;gap:4px;margin-bottom:8px;">
+            <span style="width:5px;height:5px;border-radius:50%;background:#5a6080;"></span>
+            <span style="font-size:11px;color:#5a6080;">Not configured</span>
+          </div>
+          <div style="font-size:11px;color:#3a3f52;line-height:1.4;">${meta.tokenLabel || 'API key'} required.</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+          ${meta.oauth ? `<button onclick="doOAuth('${conn.id}')"
+            style="font-size:11px;font-weight:500;padding:4px 12px;border-radius:4px;background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;">Login with browser</button>` : ''}
+          <button onclick="expandKey('${conn.id}')"
+            style="font-size:11px;font-weight:500;padding:4px 12px;border-radius:4px;${meta.oauth ? 'background:transparent;color:#5a6080;border:1px solid #252a38;' : 'background:#6366f1;color:#fff;border:none;'}cursor:pointer;font-family:inherit;">Add API key</button>
+        </div>
+      </div>`;
+  }
+
+  return `
+    <div class="ai-card" id="ai-wrap-${conn.id}" style="${cardStyle}">
+      <div class="ai-top">
+        ${accentBar}
+        <div class="ai-icon-col">
+          <span style="font-size:24px;font-weight:700;color:${iconColor};">${ic.symbol || ic.letter}</span>
+        </div>
+        ${bodyHtml}
+      </div>
+      <div class="expand-row" id="expand-${conn.id}">
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input id="key-input-${conn.id}" type="password" autocomplete="off"
+            placeholder="Paste ${meta.tokenLabel || 'API key'}…"
+            style="flex:1;background:#0f1117;border:1px solid #252a38;border-radius:5px;padding:7px 10px;font-size:12px;color:#c9cfe0;font-family:inherit;"
+            onkeydown="if(event.key==='Enter')saveKey('${conn.id}')" />
+          <button onclick="saveKey('${conn.id}')"
+            style="font-size:12px;font-weight:500;padding:7px 14px;border-radius:5px;background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;white-space:nowrap;">Save</button>
+          <button onclick="collapseKey('${conn.id}')"
+            style="font-size:12px;padding:7px 10px;border-radius:5px;border:1px solid #252a38;background:transparent;color:#5a6080;cursor:pointer;font-family:inherit;">Cancel</button>
+        </div>
+        <a href="${meta.helpUrl || '#'}" target="_blank" rel="noopener noreferrer"
+          style="font-size:11px;color:#5a6080;text-decoration:none;display:block;margin-top:6px;"
+          onmouseover="this.style.color='#c9cfe0'" onmouseout="this.style.color='#5a6080'">Get your ${(meta.tokenLabel || 'API key').toLowerCase()} →</a>
+      </div>
+    </div>`;
+}
+
+// ─── ConfirmDialog D — anchored popover ────────────────────────────────────────
+function confirmPop(id, label, verb) {
+  return `<div class="confirm-pop" id="confirm-${id}">
+    <div style="font-size:11px;color:#c9cfe0;margin-bottom:8px;line-height:1.5;">${verb} ${label}?</div>
+    <div style="display:flex;gap:6px;">
+      <button onclick="doDisconnect('${id}')"
+        style="font-size:11px;font-weight:500;padding:4px 10px;border-radius:4px;background:#f87171;color:#fff;border:none;cursor:pointer;font-family:inherit;">${verb}</button>
+      <button onclick="closeConfirm('${id}')"
+        style="font-size:11px;padding:4px 8px;border-radius:4px;border:1px solid #252a38;background:transparent;color:#5a6080;cursor:pointer;font-family:inherit;">Cancel</button>
+    </div>
+  </div>`;
+}
+
+function toggleConfirm(id) {
+  const pop = document.getElementById('confirm-' + id);
+  if (!pop) return;
+  const wasOpen = pop.classList.contains('open');
+  closeAllConfirm();
+  if (!wasOpen) pop.classList.add('open');
+}
+function closeConfirm(id) {
+  const el = document.getElementById('confirm-' + id);
+  if (el) el.classList.remove('open');
+}
+function closeAllConfirm() {
+  document.querySelectorAll('.confirm-pop.open').forEach(p => p.classList.remove('open'));
+}
+
+// ─── Expand / collapse ApiKeyInput B ──────────────────────────────────────────
+// Cards use overflow:hidden — no border-radius JS needed; content clips naturally.
+function expandKey(id) {
+  closeAllExpand();
+  const row = document.getElementById('expand-' + id);
+  if (!row) return;
+  row.classList.add('open');
+  setTimeout(() => {
+    const inp = document.getElementById('key-input-' + id);
+    if (inp) inp.focus();
+  }, 40);
+}
+
+function collapseKey(id) {
+  const row = document.getElementById('expand-' + id);
+  if (row) row.classList.remove('open');
+  const inp = document.getElementById('key-input-' + id);
+  if (inp) inp.value = '';
+}
+
+function closeAllExpand() {
+  document.querySelectorAll('.expand-row.open').forEach(r => {
+    const id = r.id.replace('expand-', '');
+    collapseKey(id);
+  });
+}
+
+// ─── Save token ────────────────────────────────────────────────────────────────
+async function saveKey(id) {
+  const inp   = document.getElementById('key-input-' + id);
+  const token = inp ? inp.value.trim() : '';
+  if (!token) { if (inp) inp.focus(); return; }
+
+  try {
+    const res = await fetch('/api/connections/' + id, {
+      method:  'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ token }),
+    });
+    if (res.ok) {
+      collapseKey(id);
+      await loadConnections();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      alert(err.detail || 'Save failed');
+    }
+  } catch {
+    alert('Network error — is the server running?');
+  }
+}
+
+// ─── Disconnect ────────────────────────────────────────────────────────────────
+async function doDisconnect(id) {
+  closeConfirm(id);
+  try {
+    await fetch('/api/connections/' + id, { method: 'DELETE' });
+    await loadConnections();
+  } catch {
+    alert('Network error');
+  }
+}
+
+// ─── ConnectionTestResult A — icon + colored text ─────────────────────────────
+async function testConn(id) {
+  const el  = document.getElementById('test-result-' + id);
+  const btn = document.getElementById('test-btn-' + id);
+  if (!el) return;
+
+  el.innerHTML = `<svg class="spin" width="11" height="11" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#5a6080" stroke-width="2.5" stroke-dasharray="16 48"/></svg><span style="color:#5a6080;">Testing…</span>`;
+  el.classList.add('visible');
+  if (btn) btn.disabled = true;
+
+  try {
+    await new Promise(r => setTimeout(r, 800));
+    const conn = _connections.find(c => c.id === id);
+    if (conn && conn.status === 'connected') {
+      el.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#4ade80" stroke-width="2"/><path d="M9 12l2 2 4-4" stroke="#4ade80" stroke-width="2" stroke-linecap="round"/></svg><span style="color:#4ade80;">OK</span>`;
+    } else {
+      el.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#f87171" stroke-width="2"/><path d="M15 9l-6 6M9 9l6 6" stroke="#f87171" stroke-width="2" stroke-linecap="round"/></svg><span style="color:#f87171;">Not connected</span>`;
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+    setTimeout(() => { el.classList.remove('visible'); el.innerHTML = ''; }, 4000);
+  }
+}
+
+// ─── Browser login dispatcher ──────────────────────────────────────────────────
+// Three flows depending on what the server returns:
+//
+//   flow === "cli_browser"  (Anthropic)
+//     Loopback OAuth. Browser opens auth URL, redirect fails, user copies the
+//     full address-bar URL and pastes it back. We forward it to the CLI server.
+//
+//   flow === "device_code"  (OpenAI Codex)
+//     RFC 8628 device auth. Browser opens the URL, user logs in and enters the
+//     one-time code shown in the UI. CLI polls internally — no submit needed.
+//
+//   flow === undefined / "oauth_popup"  (Medium)
+//     Standard Authorization Code popup. Backend handles the code exchange.
+
+async function doOAuth(id) {
+  const meta = CONN_META[id];
+  if (!meta?.oauth) return;
+  try {
+    const res  = await fetch(`/api/connections/${id}/oauth-start`);
+    const data = await res.json();
+    if (!data.available || !data.url) {
+      alert('Browser login not available — paste an API token instead.');
+      expandKey(id);
+      return;
+    }
+    if (data.flow === 'device_code') {
+      _doDeviceCodeLogin(id, data.url, data.device_code);
+    } else if (data.flow === 'cli_browser') {
+      _doCliBrowserLogin(id, data.url);
+    } else {
+      _doOAuthPopup(id, data.url);
+    }
+  } catch (e) {
+    alert('Login error: ' + e.message);
+  }
+}
+
+// Device code login — open URL, show code, poll until CLI completes internally
+function _doDeviceCodeLogin(id, url, deviceCode) {
+  window.open(url, '_blank');
+  collapseKey(id);
+  closeAllExpand();
+  _showDeviceCodeThrobber(id, deviceCode);
+
+  const MAX_POLLS = 150;
+  let polls = 0;
+  const timer = setInterval(async () => {
+    polls++;
+    try {
+      const res  = await fetch(`/api/connections/${id}/cli-login-status`);
+      const data = await res.json();
+      if (data.status === 'connected') {
+        clearInterval(timer);
+        _hideLoginThrobber(id);
+        await loadConnections();
+      } else if (polls >= MAX_POLLS) {
+        // Device code flow: codex polls OpenAI internally regardless of our session,
+        // so keep polling on 'error' until MAX_POLLS — only give up after time is up.
+        clearInterval(timer);
+        _hideLoginThrobber(id);
+        alert('Login timed out — please try again.');
+      }
+    } catch { /* network blip */ }
+  }, 2000);
+}
+
+// CLI browser login — open tab, show throbber, poll until connected
+function _doCliBrowserLogin(id, url) {
+  window.open(url, '_blank');
+  collapseKey(id);        // close API key expand row if open
+  closeAllExpand();
+  _showLoginThrobber(id);
+
+  const MAX_POLLS = 150; // 5 min at 2 s each
+  let polls = 0;
+  const timer = setInterval(async () => {
+    polls++;
+    try {
+      const res  = await fetch(`/api/connections/${id}/cli-login-status`);
+      const data = await res.json();
+      if (data.status === 'connected') {
+        clearInterval(timer);
+        _hideLoginThrobber(id);
+        await loadConnections();
+      } else if (data.status === 'error' || polls >= MAX_POLLS) {
+        clearInterval(timer);
+        _hideLoginThrobber(id);
+        if (data.errorMessage) alert('Login failed: ' + data.errorMessage);
+        else if (polls >= MAX_POLLS) alert('Login timed out — please try again.');
+      }
+    } catch { /* network blip — keep polling */ }
+  }, 2000);
+}
+
+const _SPINNER_SVG = `<svg class="spin" width="13" height="13" viewBox="0 0 24 24" fill="none">
+  <circle cx="12" cy="12" r="10" stroke="#5a6080" stroke-width="2.5" stroke-dasharray="16 48"/>
+</svg>`;
+
+function _showLoginThrobber(id) {
+  const wrap = document.getElementById('ai-wrap-' + id) || document.getElementById('plat-card-' + id);
+  if (!wrap || document.getElementById('throbber-row-' + id)) return;
+  const row = document.createElement('div');
+  row.id = 'throbber-row-' + id;
+  row.style.cssText = 'border-top:1px solid #252a38;padding:10px 16px;';
+  row.innerHTML = `
+    <div id="throbber-status-${id}" style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      ${_SPINNER_SVG}
+      <span id="throbber-msg-${id}" style="font-size:11px;color:#5a6080;">Authorize in the tab that opened. The browser will show a connection error — that is expected. Copy the full URL from the address bar (<code style="font-size:10px;">http://localhost:…/callback?code=…</code>) and paste it below:</span>
+    </div>
+    <div id="code-area-${id}" style="display:flex;gap:6px;">
+      <input id="code-input-${id}" type="text" autocomplete="off" placeholder="http://localhost:…/callback?code=…&state=…"
+        style="flex:1;background:#0f1117;border:1px solid #6366f1;border-radius:5px;
+               padding:6px 10px;font-size:12px;color:#e8eaf2;font-family:'JetBrains Mono',monospace;"
+        onkeydown="if(event.key==='Enter') submitCode('${id}')" />
+      <button onclick="submitCode('${id}')"
+        style="font-size:12px;font-weight:500;padding:6px 14px;border-radius:5px;
+               background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;">Submit</button>
+    </div>`;
+  wrap.appendChild(row);
+  setTimeout(() => document.getElementById('code-input-' + id)?.focus(), 50);
+}
+
+function _hideLoginThrobber(id) {
+  document.getElementById('throbber-row-' + id)?.remove();
+}
+
+function _showDeviceCodeThrobber(id, deviceCode) {
+  const wrap = document.getElementById('ai-wrap-' + id) || document.getElementById('plat-card-' + id);
+  if (!wrap || document.getElementById('throbber-row-' + id)) return;
+  const row = document.createElement('div');
+  row.id = 'throbber-row-' + id;
+  row.style.cssText = 'border-top:1px solid #252a38;padding:10px 16px;';
+  const codeHtml = deviceCode
+    ? `<div style="margin-top:8px;font-size:11px;color:#5a6080;">
+         Enter this code on the page that just opened:
+         <code style="font-size:13px;font-weight:700;color:#e8eaf2;letter-spacing:2px;margin-left:6px;">${deviceCode}</code>
+       </div>`
+    : '';
+  row.innerHTML = `
+    <div id="throbber-status-${id}" style="display:flex;flex-direction:column;gap:4px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        ${_SPINNER_SVG}
+        <span id="throbber-msg-${id}" style="font-size:11px;color:#5a6080;">Sign in on the tab that just opened, then enter the code below.</span>
+      </div>
+      ${codeHtml}
+    </div>`;
+  wrap.appendChild(row);
+}
+
+async function submitCode(id) {
+  const inp  = document.getElementById('code-input-' + id);
+  const code = inp?.value.trim();
+  if (!code) { inp?.focus(); return; }
+
+  inp.disabled = true;
+  const btn = inp.nextElementSibling;
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await fetch(`/api/connections/${id}/submit-code`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ code }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert('Submit failed: ' + (err.detail || res.statusText || res.status));
+      inp.disabled = false;
+      if (btn) btn.disabled = false;
+      return;
+    }
+    // Code accepted: hide code area, update message, keep polling
+    const area = document.getElementById('code-area-' + id);
+    if (area) area.remove();
+    const msg = document.getElementById('throbber-msg-' + id);
+    if (msg) msg.textContent = 'Completing sign-in…';
+  } catch (e) {
+    alert('Submit error: ' + e.message);
+    inp.disabled = false;
+    if (btn) btn.disabled = false;
+  }
+}
+
+// Medium OAuth popup — wait for postMessage from callback page
+function _doOAuthPopup(id, url) {
+  const popup = window.open(url, `${id}_oauth`, 'width=620,height=720,scrollbars=yes');
+  if (!popup) { alert('Popup blocked — allow popups for this page and try again.'); return; }
+  collapseKey(id);
+  const allowedOrigin = window.location.origin;
+  const handler = async (e) => {
+    if (e.origin !== allowedOrigin) return;
+    if (e.data?.type !== 'oauth-complete' || e.data?.platform !== id) return;
+    window.removeEventListener('message', handler);
+    await loadConnections();
+  };
+  window.addEventListener('message', handler);
+}
+
+
+// ─── Close popovers on outside click ──────────────────────────────────────────
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.confirm-anchor')) closeAllConfirm();
+});
+
+// ─── Init ──────────────────────────────────────────────────────────────────────
+loadConnections();
+</script>
+</body>
+</html>

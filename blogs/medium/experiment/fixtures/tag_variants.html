@@ -1,0 +1,62 @@
+<h1>Tag Shape Variants</h1>
+<p>These sections capture the exact top-level code-block tag combinations we tested.</p>
+
+<h2>Variant: tag_pre</h2>
+<pre>def pattern_seven():
+    rows = []
+    for index in range(20):
+        rows.append({
+            "marker": "PATTERN-07-CODE",
+            "index": index,
+            "value": index * 3,
+        })
+    return rows
+
+result = pattern_seven()
+for row in result:
+    print(row["marker"], row["index"], row["value"])</pre>
+
+<h2>Variant: tag_pre_code</h2>
+<pre><code>def pattern_seven():
+    rows = []
+    for index in range(20):
+        rows.append({
+            "marker": "PATTERN-07-CODE",
+            "index": index,
+            "value": index * 3,
+        })
+    return rows
+
+result = pattern_seven()
+for row in result:
+    print(row["marker"], row["index"], row["value"])</code></pre>
+
+<h2>Variant: tag_code</h2>
+<code>def pattern_seven():
+    rows = []
+    for index in range(20):
+        rows.append({
+            "marker": "PATTERN-07-CODE",
+            "index": index,
+            "value": index * 3,
+        })
+    return rows
+
+result = pattern_seven()
+for row in result:
+    print(row["marker"], row["index"], row["value"])</code>
+
+<h2>Variant: tag_plain</h2>
+<p>def pattern_seven():</p>
+<p>    rows = []</p>
+<p>    for index in range(20):</p>
+<p>        rows.append({</p>
+<p>            "marker": "PATTERN-07-CODE",</p>
+<p>            "index": index,</p>
+<p>            "value": index * 3,</p>
+<p>        })</p>
+<p>    return rows</p>
+<p></p>
+<p>result = pattern_seven()</p>
+<p>for row in result:</p>
+<p>    print(row["marker"], row["index"], row["value"])</p>

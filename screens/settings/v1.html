@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BlogHub — Connections</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            surface: '#0f1117',
+            panel:   '#181c27',
+            border:  '#252a38',
+            muted:   '#5a6080',
+            text:    '#c9cfe0',
+            bright:  '#e8eaf2',
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    body { background: #0f1117; color: #c9cfe0; }
+    .conn-card {
+      background: #181c27;
+      border: 1px solid #252a38;
+      border-radius: 8px;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      transition: border-color 120ms;
+    }
+    .conn-card:hover { border-color: #353b52; }
+    .conn-card.is-connected { border-color: #1a3d28; }
+    .conn-card.is-error     { border-color: #4d2a2a; }
+
+    .platform-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    /* Modal */
+    #token-modal { display: none; }
+    #token-modal.open { display: flex; }
+    #token-modal-backdrop { background: rgba(0, 0, 0, 0.65); }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #252a38; border-radius: 3px; }
+  </style>
+</head>
+<body class="font-sans h-screen flex flex-col overflow-hidden">
+
+  <!-- Top nav (same structure as overview; "Platforms" tab active) -->
+  <nav class="flex items-center justify-between px-5 h-12 border-b shrink-0"
+       style="background:#13172000; backdrop-filter:blur(8px); border-color:#252a38;">
+    <div class="flex items-center gap-6">
+      <a href="/screens/overview/v4.html" class="text-bright font-semibold tracking-tight text-sm">BlogHub</a>
+      <div class="flex items-center gap-1 text-xs">
+        <a href="/screens/overview/v4.html"      class="px-3 py-1.5 rounded text-muted hover:text-text">Articles</a>
+        <a href="#"                               class="px-3 py-1.5 rounded text-muted hover:text-text">Queue</a>
+        <a href="/screens/settings/v1.html"       class="px-3 py-1.5 rounded text-bright bg-border font-medium">Platforms</a>
+        <a href="#"                               class="px-3 py-1.5 rounded text-muted hover:text-text">Settings</a>
+      </div>
+    </div>
+    <div id="nav-conn-count" class="flex items-center gap-1.5 text-xs text-muted">
+      <span class="w-1.5 h-1.5 rounded-full bg-muted inline-block" style="background:#5a6080;"></span>
+      <span>— connections</span>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <div class="flex-1 overflow-y-auto">
+    <div class="max-w-2xl mx-auto px-6 py-10">
+
+      <div class="flex items-baseline justify-between mb-1">
+        <h1 class="text-bright font-semibold text-base">Connections</h1>
+      </div>
+      <p class="text-muted text-xs mb-8 leading-relaxed">
+        Connect your publishing platforms and AI providers.<br />
+        Tokens are stored in memory for this session only — reconnect after a server restart.
+      </p>
+
+      <!-- Publishing Platforms -->
+      <section class="mb-10">
+        <div class="text-xs font-medium text-muted uppercase tracking-wider mb-3">Publishing Platforms</div>
+        <div id="blog-cards" class="flex flex-col gap-2">
+          <div class="text-xs text-muted px-1">Loading…</div>
+        </div>
+      </section>
+
+      <!-- AI Providers -->
+      <section>
+        <div class="text-xs font-medium text-muted uppercase tracking-wider mb-3">AI Providers</div>
+        <div id="ai-cards" class="flex flex-col gap-2">
+          <div class="text-xs text-muted px-1">Loading…</div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- Token modal -->
+  <div id="token-modal" class="fixed inset-0 z-50 items-center justify-center">
+    <div id="token-modal-backdrop" class="absolute inset-0" onclick="closeModal()"></div>
+    <div class="relative z-10 w-full max-w-md mx-4"
+         style="background:#181c27; border:1px solid #252a38; border-radius:10px; padding:24px;">
+
+      <!-- OAuth option — shown only for Medium when MEDIUM_CLIENT_ID is configured -->
+      <div id="modal-oauth-row" class="hidden mb-5 pb-5" style="border-bottom:1px solid #252a38;">
+        <button id="modal-oauth-btn" onclick="doOAuth()"
+                class="w-full text-xs font-medium py-2.5 rounded-md text-white"
+                style="background:#6366f1;">
+          Sign in with Medium
+        </button>
+        <div class="text-center text-xs text-muted mt-2">or enter an API token below</div>
+      </div>
+
+      <div class="flex items-center justify-between mb-4">
+        <div class="text-sm font-medium text-bright" id="modal-title">Connect</div>
+        <button onclick="closeModal()" class="text-muted hover:text-text">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="mb-4">
+        <label class="block text-xs text-muted mb-1.5" id="modal-label">API Key</label>
+        <input id="modal-input" type="password" autocomplete="off"
+               class="w-full px-3 py-2 text-xs rounded-md text-text placeholder-muted focus:outline-none focus:ring-1 focus:ring-indigo-500"
+               style="background:#0f1117; border:1px solid #252a38;"
+               placeholder="Paste your token here"
+               oninput="document.getElementById('modal-error').classList.add('hidden')"
+               onkeydown="if(event.key==='Enter') saveToken()" />
+        <a id="modal-help" href="#" target="_blank" rel="noopener noreferrer"
+           class="inline-block mt-1.5 text-xs text-indigo-400 hover:underline">
+          Get your token →
+        </a>
+      </div>
+
+      <div id="modal-error" class="hidden text-xs text-red-400 mb-3 px-1"></div>
+
+      <div class="flex justify-end gap-2">
+        <button onclick="closeModal()"
+                class="text-xs px-3 py-2 rounded-md text-muted hover:text-text"
+                style="border:1px solid #252a38;">
+          Cancel
+        </button>
+        <button id="modal-save-btn" onclick="saveToken()"
+                class="text-xs font-medium px-4 py-2 rounded-md text-white"
+                style="background:#6366f1;">
+          Save
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden state field -->
+  <input type="hidden" id="modal-conn-id" value="" />
+
+<script>
+// ─── Static metadata ──────────────────────────────────────────────────────────
+const CONN_META = {
+  medium:    { label: 'Medium',             type: 'blog', tokenLabel: 'Integration token',     helpUrl: 'https://medium.com/me/settings/security',     oauth: true  },
+  hashnode:  { label: 'Hashnode',           type: 'blog', tokenLabel: 'Personal Access Token', helpUrl: 'https://hashnode.com/settings/developer',     oauth: false },
+  devto:     { label: 'Dev.to',             type: 'blog', tokenLabel: 'API Key',               helpUrl: 'https://dev.to/settings/extensions',          oauth: false },
+  anthropic: { label: 'Claude (Anthropic)', type: 'ai',   tokenLabel: 'API Key',               helpUrl: 'https://console.anthropic.com/settings/keys', oauth: false },
+  openai:    { label: 'OpenAI',             type: 'ai',   tokenLabel: 'API Key',               helpUrl: 'https://platform.openai.com/api-keys',        oauth: false },
+};
+
+// Platform icon colour + letter badge
+const ICON_STYLE = {
+  medium:    { bg: '#FF671920', color: '#FF6719', border: '#FF671940', letter: 'M' },
+  hashnode:  { bg: '#2563EB20', color: '#2563EB', border: '#2563EB40', letter: 'H' },
+  devto:     { bg: '#7C3AED20', color: '#7C3AED', border: '#7C3AED40', letter: 'D' },
+  anthropic: { bg: '#D9770620', color: '#D97706', border: '#D9770640', letter: 'A' },
+  openai:    { bg: '#05966920', color: '#059669', border: '#05966940', letter: 'O' },
+};
+
+// ─── Load + render ────────────────────────────────────────────────────────────
+async function loadConnections() {
+  try {
+    const res  = await fetch('/api/connections');
+    const data = await res.json();
+    renderConnections(data.connections);
+    updateNavCount(data.connections);
+  } catch (e) {
+    console.error('loadConnections failed', e);
+  }
+}
+
+function updateNavCount(connections) {
+  const n   = connections.filter(c => c.status === 'connected').length;
+  const el  = document.getElementById('nav-conn-count');
+  const dot = el.querySelector('span:first-child');
+  el.querySelector('span:last-child').textContent = `${n} connection${n !== 1 ? 's' : ''} active`;
+  dot.style.background = n > 0 ? '#4ade80' : '#5a6080';
+}
+
+function renderConnections(connections) {
+  const blog = connections.filter(c => c.type === 'blog');
+  const ai   = connections.filter(c => c.type === 'ai');
+  document.getElementById('blog-cards').innerHTML = blog.map(renderCard).join('');
+  document.getElementById('ai-cards').innerHTML   = ai.map(renderCard).join('');
+}
+
+function renderCard(conn) {
+  const icon = ICON_STYLE[conn.id] || { bg: '#25293820', color: '#5a6080', border: '#25293840', letter: '?' };
+  const isConnected = conn.status === 'connected';
+  const isError     = conn.status === 'error';
+
+  // Status badge
+  const badge = isConnected
+    ? `<span class="flex items-center gap-1.5 text-xs text-green-400 font-medium">
+        <span class="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0"></span>Connected
+       </span>`
+    : isError
+    ? `<span class="flex items-center gap-1.5 text-xs text-red-400 font-medium">
+        <span class="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0"></span>Error
+       </span>`
+    : `<span class="flex items-center gap-1.5 text-xs text-muted">
+        <span class="w-1.5 h-1.5 rounded-full shrink-0" style="background:#252a38;"></span>Not connected
+       </span>`;
+
+  // Subtitle line under platform name
+  const subtitle = isConnected && conn.username
+    ? `<div class="text-xs font-mono text-muted mt-0.5">${conn.username}</div>`
+    : isError && conn.errorMessage
+    ? `<div class="text-xs text-red-400 mt-0.5">${conn.errorMessage}</div>`
+    : '';
+
+  // Action buttons
+  const actions = isConnected
+    ? `<button onclick="reconnect('${conn.id}')"
+               class="text-xs px-3 py-1.5 rounded-md text-muted hover:text-text"
+               style="border:1px solid #252a38;">
+         Update token
+       </button>
+       <button onclick="disconnect('${conn.id}')"
+               class="text-xs px-3 py-1.5 rounded-md text-red-400 hover:text-red-300"
+               style="border:1px solid #4d2a2a;">
+         Disconnect
+       </button>`
+    : `<button onclick="openModal('${conn.id}')"
+               class="text-xs font-medium px-3 py-1.5 rounded-md text-white"
+               style="background:#6366f1;">
+         Connect
+       </button>`;
+
+  const cardClass = isConnected ? 'conn-card is-connected' : isError ? 'conn-card is-error' : 'conn-card';
+
+  return `
+    <div class="${cardClass}">
+      <div class="platform-icon"
+           style="background:${icon.bg}; color:${icon.color}; border:1px solid ${icon.border};">
+        ${icon.letter}
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-medium text-bright">${conn.label}</div>
+        ${subtitle}
+      </div>
+      <div class="flex items-center gap-3 shrink-0">
+        ${badge}
+        <div class="flex items-center gap-2">${actions}</div>
+      </div>
+    </div>`;
+}
+
+// ─── Modal ────────────────────────────────────────────────────────────────────
+function openModal(connId) {
+  const meta = CONN_META[connId] || {};
+  document.getElementById('modal-conn-id').value       = connId;
+  document.getElementById('modal-title').textContent   = `Connect ${meta.label || connId}`;
+  document.getElementById('modal-label').textContent   = meta.tokenLabel || 'API Key';
+  document.getElementById('modal-help').href           = meta.helpUrl || '#';
+  document.getElementById('modal-help').textContent    = `Get your ${(meta.tokenLabel || 'token').toLowerCase()} →`;
+  document.getElementById('modal-input').value         = '';
+  document.getElementById('modal-error').classList.add('hidden');
+
+  // Show OAuth button for Medium — check if it's actually configured
+  const oauthRow = document.getElementById('modal-oauth-row');
+  if (meta.oauth) {
+    checkOAuthAvailable(connId);
+    oauthRow.classList.remove('hidden');
+  } else {
+    oauthRow.classList.add('hidden');
+  }
+
+  document.getElementById('token-modal').classList.add('open');
+  setTimeout(() => document.getElementById('modal-input').focus(), 50);
+}
+
+function reconnect(connId) {
+  openModal(connId);
+}
+
+function closeModal() {
+  document.getElementById('token-modal').classList.remove('open');
+  document.getElementById('modal-conn-id').value = '';
+}
+
+async function checkOAuthAvailable(connId) {
+  if (connId !== 'medium') return;
+  try {
+    const res  = await fetch('/api/connections/medium/oauth-start');
+    const data = await res.json();
+    const btn  = document.getElementById('modal-oauth-btn');
+    if (!data.available) {
+      btn.textContent = 'OAuth not configured (set MEDIUM_CLIENT_ID)';
+      btn.disabled    = true;
+      btn.style.opacity = '0.5';
+    } else {
+      btn.textContent = 'Sign in with Medium';
+      btn.disabled    = false;
+      btn.style.opacity = '1';
+    }
+  } catch { /* non-critical */ }
+}
+
+async function saveToken() {
+  const connId = document.getElementById('modal-conn-id').value;
+  const token  = document.getElementById('modal-input').value.trim();
+  if (!token) {
+    showModalError('Please paste your token.');
+    return;
+  }
+
+  const btn       = document.getElementById('modal-save-btn');
+  btn.textContent = 'Saving…';
+  btn.disabled    = true;
+
+  try {
+    const res = await fetch(`/api/connections/${connId}`, {
+      method:  'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ token }),
+    });
+    if (res.ok) {
+      closeModal();
+      await loadConnections();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      showModalError(data.detail || 'Save failed');
+    }
+  } catch {
+    showModalError('Network error — is the server running?');
+  } finally {
+    btn.textContent = 'Save';
+    btn.disabled    = false;
+  }
+}
+
+function showModalError(msg) {
+  const el = document.getElementById('modal-error');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+// ─── OAuth popup flow ─────────────────────────────────────────────────────────
+async function doOAuth() {
+  const connId = document.getElementById('modal-conn-id').value;
+  if (connId !== 'medium') return;
+
+  try {
+    const res  = await fetch('/api/connections/medium/oauth-start');
+    const data = await res.json();
+
+    if (!data.available || !data.url) {
+      showModalError('OAuth not configured. Paste an API token instead.');
+      return;
+    }
+
+    const popup = window.open(
+      data.url,
+      'medium_oauth',
+      'width=620,height=720,scrollbars=yes,resizable=yes',
+    );
+    if (!popup) {
+      showModalError('Popup was blocked — allow popups for this page and try again.');
+      return;
+    }
+
+    closeModal();
+
+    function handleOAuthMessage(e) {
+      if (e.origin !== location.origin) return;
+      if (!e.data || e.data.type !== 'oauth-complete' || e.data.platform !== 'medium') return;
+      window.removeEventListener('message', handleOAuthMessage);
+      popup.close();
+      loadConnections();
+    }
+    window.addEventListener('message', handleOAuthMessage);
+
+  } catch {
+    showModalError('Could not start the OAuth flow.');
+  }
+}
+
+// ─── Disconnect ───────────────────────────────────────────────────────────────
+async function disconnect(connId) {
+  try {
+    await fetch(`/api/connections/${connId}`, { method: 'DELETE' });
+    await loadConnections();
+  } catch (e) {
+    console.error('disconnect failed', e);
+  }
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+loadConnections();
+</script>
+</body>
+</html>

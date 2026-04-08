@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BlogHub — Editor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            surface: '#0f1117', panel: '#181c27', border: '#252a38',
+            'border-hi': '#3a3f52', muted: '#5a6080', text: '#c9cfe0',
+            bright: '#e8eaf2', accent: '#6366f1',
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+        },
+      },
+    }
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { margin: 0; background: #0f1117; color: #c9cfe0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-thumb { background: #252a38; border-radius: 3px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+
+    /* Unsaved indicator */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spin { animation: spin 1s linear infinite; display: inline-block; }
+
+    /* Toolbar buttons */
+    .icon-btn {
+      width: 30px; height: 28px; border-radius: 5px; border: 1px solid transparent;
+      background: transparent; color: #c9cfe0; display: inline-flex; align-items: center;
+      justify-content: center; cursor: pointer; transition: background 100ms, border-color 100ms;
+      font-family: 'Inter', sans-serif;
+    }
+    .icon-btn:hover { background: #1c2132; border-color: #252a38; }
+    .icon-btn.pressed { background: #1a1f38; border-color: #6366f1; color: #a5b4fc; }
+
+    .ai-btn {
+      display: inline-flex; align-items: center; gap: 4px; font-size: 11px;
+      padding: 3px 9px; border-radius: 5px; border: 1px solid #252a38;
+      background: transparent; color: #c9cfe0; cursor: pointer;
+      transition: background 100ms, border-color 100ms; font-family: 'Inter', sans-serif;
+    }
+    .ai-btn:hover { background: #1c2132; border-color: #3a3f52; }
+    .ai-btn.primary { border-color: #2a2e50; background: #1a1f38; color: #a5b4fc; }
+    .ai-btn.primary:hover { border-color: #6366f1; background: #20264a; }
+
+    /* Mode toggle */
+    .mode-toggle { display: inline-flex; border: 1px solid #252a38; border-radius: 6px; overflow: hidden; }
+    .mode-toggle button {
+      font-size: 12px; padding: 4px 13px; border: none; background: transparent;
+      color: #5a6080; cursor: pointer; font-family: 'Inter', sans-serif;
+      transition: background 100ms, color 100ms;
+    }
+    .mode-toggle button.active { background: #1a1f38; color: #e8eaf2; }
+
+    /* Nav button */
+    .nav-btn {
+      font-size: 12px; padding: 5px 12px; border-radius: 6px; border: 1px solid #252a38;
+      background: transparent; color: #c9cfe0; cursor: pointer; font-family: 'Inter', sans-serif;
+      transition: background 100ms;
+    }
+    .nav-btn:hover { background: #1c2132; }
+
+    /* Raw editor (write mode) */
+    #raw-editor {
+      flex: 1; width: 100%; padding: 22px 24px 60px; background: transparent;
+      border: none; outline: none; resize: none; font-family: 'JetBrains Mono', monospace;
+      font-size: 12.5px; line-height: 1.8; color: #c9cfe0; overflow-y: auto;
+    }
+
+    /* Prose editor (review mode) */
+    .prose-editor { font-size: 15px; line-height: 1.75; color: #c9cfe0; }
+    .prose-editor h1 { font-size: 24px; font-weight: 700; color: #e8eaf2; margin: 0 0 20px; line-height: 1.25; }
+    .prose-editor h2 { font-size: 20px; font-weight: 600; color: #e8eaf2; margin: 32px 0 14px; line-height: 1.3; }
+    .prose-editor p  { margin: 0 0 18px; }
+    .prose-editor blockquote {
+      margin: 0 0 18px; padding: 10px 16px; border-left: 3px solid #fbbf24;
+      background: #1e1b0e; border-radius: 0 5px 5px 0; color: #c9cfe0;
+    }
+    .prose-editor pre {
+      position: relative; background: #161a24; border-radius: 7px; padding: 16px 18px;
+      margin: 0 0 18px; overflow-x: auto;
+    }
+    .prose-editor pre code { font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.55; color: #c9cfe0; }
+    .prose-editor .lang-tag { position: absolute; top: 8px; right: 10px; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #5a6080; text-transform: uppercase; letter-spacing: .06em; }
+    .prose-editor .copy-btn {
+      position: absolute; top: 7px; right: 44px; font-size: 10px; padding: 2px 7px;
+      border-radius: 4px; border: 1px solid #252a38; background: #0f1117; color: #5a6080;
+      cursor: pointer; display: none; font-family: 'Inter', sans-serif;
+    }
+    .prose-editor pre:hover .copy-btn { display: block; }
+    pre code .kw { color: #a5b4fc; } pre code .cm { color: #5a6080; }
+    pre code .st { color: #fbbf24; }
+
+    /* Comment anchors */
+    .comment-anchor {
+      text-decoration: underline; text-decoration-color: #fbbf24;
+      text-decoration-thickness: 1px; text-underline-offset: 2px; cursor: pointer;
+      transition: background 120ms; border-radius: 2px; padding: 0 1px;
+    }
+    .comment-anchor.highlight { background: #2c230a; }
+
+    /* Diff highlights */
+    .diff-removed { background: #2d1a1a; border-radius: 2px; }
+    .diff-added   { background: #0e2d22; border-radius: 2px; }
+
+    /* Rendered preview */
+    .rendered-preview { font-family: 'Inter', sans-serif; font-size: 13px; line-height: 1.7; color: #c9cfe0; }
+    .rendered-preview h1 { font-size: 17px; font-weight: 700; color: #e8eaf2; margin: 0 0 12px; }
+    .rendered-preview h2 { font-size: 14px; font-weight: 600; color: #e8eaf2; margin: 18px 0 8px; }
+    .rendered-preview p  { margin: 0 0 10px; }
+    .rendered-preview blockquote { margin: 0 0 10px; padding: 7px 12px; border-left: 2px solid #fbbf24; background: #1e1b0e; border-radius: 0 4px 4px 0; font-size: 12px; }
+    .rendered-preview pre { background: #161a24; border-radius: 5px; padding: 10px 12px; margin: 0 0 10px; overflow: hidden; }
+    .rendered-preview code { font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.5; color: #c9cfe0; }
+
+    /* Pill */
+    .pill { display: inline-flex; align-items: center; font-family: 'JetBrains Mono', monospace; font-size: 11px; border-radius: 9999px; padding: 2px 9px; border: 1px solid; white-space: nowrap; }
+    .s-draft     { color: #6ea8fe; background: #1e2a4a; border-color: #2a3d6a; }
+    .s-error     { color: #f87171; background: #2d1a1a; border-color: #4d2a2a; }
+    .s-none      { color: #5a6080; background: #1a1e2a; border-color: #252a38; }
+    .s-published { color: #a78bfa; background: #1e1a3a; border-color: #2e266a; }
+
+    /* Margin tab */
+    .m-tab {
+      font-size: 12px; padding: 8px 12px; border: none; background: transparent;
+      color: #5a6080; cursor: pointer; border-bottom: 2px solid transparent;
+      font-family: 'Inter', sans-serif; transition: color 100ms, border-color 100ms;
+      white-space: nowrap;
+    }
+    .m-tab.active { color: #e8eaf2; border-bottom-color: #6366f1; }
+
+    /* Timeline */
+    .tl-dot-open     { width: 8px; height: 8px; border-radius: 50%; background: #fbbf24; flex-shrink: 0; margin-top: 3px; }
+    .tl-dot-active   { width: 8px; height: 8px; border-radius: 50%; background: #6366f1; flex-shrink: 0; margin-top: 3px; }
+    .tl-dot-resolved { width: 8px; height: 8px; border-radius: 50%; background: #3a3f52; flex-shrink: 0; margin-top: 3px; }
+    .tl-line         { width: 2px; background: #252a38; flex: 1; min-height: 16px; }
+
+    /* Conflict banner */
+    #conflict-banner { display: none; background: #2a1a0a; border-bottom: 1px solid #6b3a1a; padding: 8px 20px; font-size: 12px; color: #fbbf24; flex-shrink: 0; align-items: center; gap: 12px; }
+
+    /* Demo pill */
+    .demo-tag { font-size: 9px; padding: 1px 6px; border-radius: 4px; background: #1a1f38; border: 1px solid #2a2e50; color: #6366f1; letter-spacing: .04em; text-transform: uppercase; }
+  </style>
+</head>
+<body class="font-sans">
+
+  <!-- Generation overlay (shown via demo trigger) -->
+  <div id="gen-overlay" style="display:none;position:fixed;inset:0;z-index:100;background:rgba(15,17,23,0.88);backdrop-filter:blur(5px);align-items:center;justify-content:center;">
+    <div style="background:#181c27;border:1px solid #3a3f52;border-radius:12px;padding:26px 28px;min-width:300px;max-width:360px;box-shadow:0 16px 48px #00000077;">
+      <div style="display:flex;align-items:center;gap:10px;color:#e8eaf2;font-weight:500;font-size:14px;margin-bottom:18px;">
+        <svg id="gen-spinner" class="spin" width="15" height="15" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="10" stroke="#6366f144" stroke-width="3"/>
+          <path d="M12 2a10 10 0 0 1 10 10" stroke="#6366f1" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+        Generating your article
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px;font-size:13px;margin-bottom:20px;">
+        <div style="display:flex;align-items:center;gap:9px;">
+          <span style="width:7px;height:7px;border-radius:50%;background:#4ade80;flex-shrink:0;"></span>
+          <span style="color:#4ade80;">Outlining complete</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:9px;">
+          <svg class="spin" width="11" height="11" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;">
+            <circle cx="12" cy="12" r="10" stroke="#6366f144" stroke-width="3"/>
+            <path d="M12 2a10 10 0 0 1 10 10" stroke="#6366f1" stroke-width="3" stroke-linecap="round"/>
+          </svg>
+          <span style="color:#e8eaf2;">Writing — section 3 of 6</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:9px;">
+          <span style="width:7px;height:7px;border-radius:50%;background:#252a38;flex-shrink:0;"></span>
+          <span style="color:#5a6080;">Reviewing queued</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button onclick="hideGenOverlay()" style="font-size:12px;padding:6px 14px;border-radius:6px;background:#0f1117;border:1px solid #252a38;color:#c9cfe0;cursor:pointer;font-family:'Inter',sans-serif;">Continue editing</button>
+        <button onclick="hideGenOverlay()" style="font-size:12px;padding:6px 14px;border-radius:6px;background:transparent;border:1px solid #4d2a2a;color:#f87171;cursor:pointer;font-family:'Inter',sans-serif;">Cancel</button>
+      </div>
+      <div style="margin-top:14px;font-size:11px;color:#3a3f52;">Navigating away will prompt a confirmation.</div>
+    </div>
+  </div>
+
+  <!-- Conflict banner -->
+  <div id="conflict-banner">
+    <span>This article was modified in another session at 14:04.</span>
+    <button onclick="document.getElementById('conflict-banner').style.display='none'" style="font-size:11px;padding:3px 9px;border-radius:5px;border:1px solid #6b3a1a;background:transparent;color:#fbbf24;cursor:pointer;font-family:'Inter',sans-serif;">Keep mine</button>
+    <button onclick="document.getElementById('conflict-banner').style.display='none'" style="font-size:11px;padding:3px 9px;border-radius:5px;border:1px solid #252a38;background:transparent;color:#c9cfe0;cursor:pointer;font-family:'Inter',sans-serif;">Discard and reload</button>
+  </div>
+
+  <!-- Zone A: Top nav -->
+  <div id="nav" style="height:48px;background:#0f1117;border-bottom:1px solid #252a38;display:flex;align-items:center;padding:0 16px;gap:10px;flex-shrink:0;z-index:30;">
+    <button class="icon-btn" title="Back to overview" style="color:#5a6080;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+    </button>
+    <!-- title + unsaved dot -->
+    <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
+      <span id="article-title" contenteditable="true" oninput="onTitleInput()"
+        style="font-size:14px;font-weight:500;color:#e8eaf2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:480px;outline:none;border-bottom:1px solid transparent;cursor:text;"
+        onfocus="this.style.borderBottomColor='#252a38'" onblur="this.style.borderBottomColor='transparent'">Zero-downtime Postgres Migration</span>
+      <!-- Unsaved indicator A: dot/spinner/text -->
+      <div id="unsaved-indicator" style="display:flex;align-items:center;flex-shrink:0;">
+        <span id="unsaved-dot" style="width:7px;height:7px;border-radius:50%;background:#fbbf24;display:block;"></span>
+      </div>
+    </div>
+    <!-- right controls -->
+    <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+      <div class="mode-toggle">
+        <button id="btn-write" class="active" onclick="setMode('write')">Write</button>
+        <button id="btn-review" onclick="setMode('review')">Review</button>
+      </div>
+      <button class="nav-btn" onclick="alert('Navigates to /inspect/' + ARTICLE.id)">Inspect</button>
+      <button id="publish-btn" style="font-size:12px;padding:5px 14px;border-radius:6px;border:none;background:#6366f1;color:#fff;cursor:pointer;font-weight:500;font-family:'Inter',sans-serif;">Publish</button>
+    </div>
+  </div>
+
+  <!-- Zone B: Toolbar -->
+  <div id="toolbar" style="border-bottom:1px solid #252a38;flex-shrink:0;">
+    <!-- AI strip (Toolbar D — shown when content exists) -->
+    <div id="ai-strip" style="background:#16192a;border-bottom:1px solid #2a2e50;padding:4px 14px;display:flex;align-items:center;gap:5px;">
+      <span style="font-size:9px;color:#6366f1;font-weight:600;letter-spacing:.09em;text-transform:uppercase;margin-right:3px;">AI</span>
+      <button class="ai-btn primary" onclick="showGenOverlay()">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        Regenerate
+      </button>
+      <button class="ai-btn">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        View Diff
+      </button>
+      <button class="ai-btn">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+        Revert
+      </button>
+      <button class="ai-btn">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        Chat
+      </button>
+      <button class="ai-btn">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+        Rules
+      </button>
+    </div>
+    <!-- Format row -->
+    <div id="format-row" style="background:#0f1117;padding:4px 14px;display:flex;align-items:center;gap:2px;">
+      <!-- Write tools -->
+      <div id="write-tools" style="display:flex;align-items:center;gap:2px;">
+        <button class="icon-btn" title="Bold"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 4h8a4 4 0 0 1 0 8H6z"/><path d="M6 12h9a4 4 0 0 1 0 8H6z"/></svg></button>
+        <button class="icon-btn" title="Italic"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg></button>
+        <button class="icon-btn" title="Inline code"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></button>
+        <button class="icon-btn" title="H2" style="font-size:10px;font-weight:700;width:34px;">H2</button>
+        <button class="icon-btn" title="H3" style="font-size:10px;font-weight:700;width:34px;">H3</button>
+        <button class="icon-btn" title="Blockquote"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/></svg></button>
+        <button class="icon-btn" title="Link"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
+        <button class="icon-btn" title="Image"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button>
+      </div>
+      <!-- Review tools (hidden in write mode) -->
+      <div id="review-tools" style="display:none;align-items:center;gap:5px;">
+        <div style="width:1px;height:16px;background:#252a38;margin:0 5px;"></div>
+        <button class="ai-btn" id="btn-add-comment" style="color:#fbbf24;border-color:#4a3d1a;background:#1e1b0e;" onclick="toggleAddComment()">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          Add Comment
+        </button>
+        <button class="ai-btn" style="color:#5a6080;" onclick="clearResolved()">Clear Resolved</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Zone C + D: Main area -->
+  <div id="main" style="flex:1;display:flex;overflow:hidden;min-height:0;">
+
+    <!-- Zone C: Editor zone -->
+    <div id="editor-zone" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;">
+
+      <!-- Write mode view: raw MD (55%) + preview (45%) -->
+      <div id="write-view" style="display:flex;flex:1;overflow:hidden;">
+
+        <!-- Raw markdown pane -->
+        <div id="raw-pane" style="flex:0 0 55%;display:flex;flex-direction:column;overflow:hidden;border-right:1px solid #252a38;">
+          <div style="padding:5px 14px;border-bottom:1px solid #252a38;display:flex;align-items:center;justify-content:space-between;background:#0d1019;flex-shrink:0;">
+            <span style="font-size:10px;color:#5a6080;font-family:'JetBrains Mono',monospace;">postgres-migration.md</span>
+            <span style="font-size:10px;color:#3a3f52;">1 844 words</span>
+          </div>
+          <textarea id="raw-editor" oninput="onEditorInput()" spellcheck="false"
+># Zero-downtime Postgres Migration
+
+Migrating a production Postgres database without downtime requires careful coordination between schema changes, application deployments, and traffic routing. This guide walks through the three-phase approach used to migrate the primary `orders` database at 40k requests per minute.
+
+## Phase 1 — Baseline and snapshot
+
+Before touching any schema, capture a full logical backup and establish your rollback threshold: the maximum time your team can tolerate for a full restore. At 40k RPM, a five-minute restore window requires a pre-staged replica that is already caught up.
+
+> A dry run in staging is mandatory before any production step. Skipping this has caused three incidents in our post-mortem history.
+
+## Phase 2 — Schema expansion
+
+Add columns with defaults before deploying application code that reads them. Postgres acquires a brief ACCESS EXCLUSIVE lock when adding a column without a default, but with a default it rewrites the table — use NOT NULL with a server-side default instead.
+
+```sql
+-- Safe: add nullable column first
+ALTER TABLE orders ADD COLUMN retry_count INTEGER;
+
+-- Backfill in batches
+UPDATE orders SET retry_count = 0 WHERE retry_count IS NULL;
+
+-- Enforce NOT NULL
+ALTER TABLE orders ALTER COLUMN retry_count SET NOT NULL;
+```
+
+## Phase 3 — Cutover
+
+Use a blue-green deployment where the new application version reads from both old and new columns simultaneously. Once all traffic has shifted and the old column is no longer written to, a final migration drops it.
+
+Health checks must run before and after each migration step. Lock timeout should be set to 5 seconds to prevent a hung migration from cascading into a queue backup.
+
+```sql
+CREATE INDEX CONCURRENTLY idx_orders_retry ON orders(retry_count);
+```
+
+Running this during low-traffic hours further reduces the load impact.</textarea>
+        </div>
+
+        <!-- Preview pane -->
+        <div id="preview-pane" style="flex:1;display:flex;flex-direction:column;overflow:hidden;background:#0d1019;">
+          <div style="padding:5px 10px;border-bottom:1px solid #252a38;display:flex;align-items:center;justify-content:space-between;background:#13161f;flex-shrink:0;">
+            <select id="preview-select" onchange="renderPreview()" style="font-size:11px;background:#0f1117;border:1px solid #3a3f52;border-radius:4px;color:#a5b4fc;padding:2px 6px;outline:none;font-family:'Inter',sans-serif;cursor:pointer;">
+              <option value="rendered" selected>Rendered MD</option>
+              <option value="medium">Medium</option>
+              <option value="hashnode">Hashnode</option>
+              <option value="devto">Dev.to</option>
+            </select>
+            <button id="collapse-btn" onclick="togglePreview()" title="Collapse preview" style="font-size:14px;color:#5a6080;border:none;background:none;cursor:pointer;padding:2px 4px;line-height:1;">&#x203A;</button>
+          </div>
+          <div id="preview-body" style="flex:1;overflow-y:auto;padding:16px 14px 40px;"></div>
+        </div>
+
+      </div>
+
+      <!-- Review mode view: prose with anchors -->
+      <div id="review-view" style="display:none;flex:1;overflow-y:auto;padding:36px 32px 60px;">
+        <div id="prose-content" class="prose-editor" style="max-width:720px;margin:0 auto;"></div>
+      </div>
+
+    </div>
+
+    <!-- Zone D: Margin panel (review mode only) -->
+    <div id="margin-panel" style="width:320px;flex-shrink:0;border-left:1px solid #252a38;background:#181c27;display:none;flex-direction:column;overflow:hidden;">
+      <div style="border-bottom:1px solid #252a38;display:flex;flex-shrink:0;padding:0 4px;">
+        <button class="m-tab active" id="tab-comments" onclick="setMarginTab('comments')">Comments</button>
+        <button class="m-tab" id="tab-patches" onclick="setMarginTab('patches')">
+          Patches
+          <span id="patch-badge" style="font-size:10px;background:#2a2e50;color:#a5b4fc;border-radius:9999px;padding:1px 6px;margin-left:4px;font-family:'JetBrains Mono',monospace;">1</span>
+        </button>
+        <button class="m-tab" id="tab-destinations" onclick="setMarginTab('destinations')">Destinations</button>
+      </div>
+      <div id="margin-body" style="flex:1;overflow-y:auto;padding:16px;"></div>
+    </div>
+
+  </div>
+
+  <script>
+    // ── Mock data ─────────────────────────────────────────────────────────────────
+
+    const ARTICLE = {
+      id: 'art_7g2kf',
+      title: 'Zero-downtime Postgres Migration',
+      word_count: 1844,
+      gate: { result: 'pass' }
+    };
+
+    const DESTINATIONS = [
+      { id: 'medium',   platform: 'Medium',   status: 'draft', label: 'Draft v2', url: 'medium.com/p/ab3f9c2', error: null },
+      { id: 'hashnode', platform: 'Hashnode', status: 'error', label: 'Error',    url: null, error: 'Auth token expired' },
+      { id: 'devto',    platform: 'Dev.to',   status: 'none',  label: 'Not linked', url: null, error: null },
+    ];
+
+    const COMMENTS = [
+      {
+        id: 'c1', author: 'Mina', time: '31 min ago',
+        text: 'Good note about dry runs — worth linking to the post-mortem. Readers will find the context helpful.',
+        anchor: null, resolved: true, hasPatch: false,
+      },
+      {
+        id: 'c2', author: 'Dana', time: '14 min ago',
+        text: 'Mention why the lock timeout is 5 seconds specifically. Is that based on our SLO for replica lag?',
+        anchor: 'c2-anchor', resolved: false, hasPatch: false,
+      },
+      {
+        id: 'c3', author: 'Ravi', time: '6 min ago',
+        text: 'This claim about health checks needs a reference to the benchmark. I can source the numbers from Q1.',
+        anchor: 'c3-anchor', resolved: false, hasPatch: true,
+      },
+    ];
+
+    const PATCHES_DATA = [
+      {
+        id: 'p1', commentId: 'c3', label: 'Health check detail',
+        removed: 'Health checks must run before and after each migration step.',
+        added: 'Health checks must run before, during, and after each migration step — verify replica lag under 200 ms and lock count below threshold before proceeding.',
+      },
+    ];
+
+    // ── App state ─────────────────────────────────────────────────────────────────
+
+    let appMode = 'write';
+    let previewCollapsed = false;
+    let activeCommentId = null;
+    let marginTab = 'comments';
+    let addingComment = false;
+    let unsavedState = 'unsaved';
+    let patchStates = {};          // id -> 'pending' | 'accepted' | 'rejected'
+    PATCHES_DATA.forEach(p => patchStates[p.id] = 'pending');
+
+    // ── Unsaved indicator (Decision A: dot/spinner/"saved" text) ─────────────────
+
+    let _saveTimer = null;
+
+    function setUnsavedState(s) {
+      unsavedState = s;
+      const el = document.getElementById('unsaved-indicator');
+      const dot = document.getElementById('unsaved-dot');
+      if (s === 'unsaved') {
+        dot.style.display = 'block';
+        dot.style.width = '7px'; dot.style.height = '7px';
+        dot.style.borderRadius = '50%'; dot.style.background = '#fbbf24';
+        dot.innerHTML = '';
+        el.title = 'Unsaved changes';
+      } else if (s === 'saving') {
+        dot.style.display = 'block';
+        dot.style.width = 'auto'; dot.style.height = 'auto';
+        dot.style.borderRadius = '0'; dot.style.background = 'transparent';
+        dot.innerHTML = `<svg class="spin" width="12" height="12" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#fbbf2440" stroke-width="3"/><path d="M12 2a10 10 0 0 1 10 10" stroke="#fbbf24" stroke-width="3" stroke-linecap="round"/></svg>`;
+        el.title = 'Saving';
+      } else {
+        dot.style.display = 'block';
+        dot.style.width = 'auto'; dot.style.height = 'auto';
+        dot.style.borderRadius = '0'; dot.style.background = 'transparent';
+        dot.innerHTML = `<span style="font-size:10px;color:#5a6080;font-family:'JetBrains Mono',monospace;">saved</span>`;
+        el.title = 'All changes saved';
+      }
+    }
+
+    function onEditorInput() {
+      setUnsavedState('unsaved');
+      clearTimeout(_saveTimer);
+      _saveTimer = setTimeout(() => {
+        setUnsavedState('saving');
+        setTimeout(() => setUnsavedState('saved'), 900);
+      }, 2000);
+    }
+
+    function onTitleInput() {
+      onEditorInput();
+    }
+
+    // ── Mode toggle ───────────────────────────────────────────────────────────────
+
+    function setMode(m) {
+      appMode = m;
+      document.getElementById('btn-write').classList.toggle('active', m === 'write');
+      document.getElementById('btn-review').classList.toggle('active', m === 'review');
+
+      document.getElementById('write-view').style.display = m === 'write' ? 'flex' : 'none';
+      document.getElementById('review-view').style.display = m === 'review' ? 'flex' : 'none';
+      document.getElementById('margin-panel').style.display = m === 'review' ? 'flex' : 'none';
+
+      document.getElementById('write-tools').style.display = m === 'write' ? 'flex' : 'none';
+      document.getElementById('review-tools').style.display = m === 'review' ? 'flex' : 'none';
+
+      if (m === 'review') {
+        renderProseEditor();
+        renderMarginContent();
+      }
+    }
+
+    // ── Preview pane (write mode) ─────────────────────────────────────────────────
+
+    function togglePreview() {
+      previewCollapsed = !previewCollapsed;
+      const pane      = document.getElementById('preview-pane');
+      const rawPane   = document.getElementById('raw-pane');
+      const btn       = document.getElementById('collapse-btn');
+      if (previewCollapsed) {
+        pane.style.flex = '0 0 0px'; pane.style.overflow = 'hidden';
+        rawPane.style.flex = '1';
+        btn.innerHTML = '&#x2039;';
+        btn.title = 'Expand preview';
+      } else {
+        pane.style.flex = '1';
+        rawPane.style.flex = '0 0 55%';
+        btn.innerHTML = '&#x203A;';
+        btn.title = 'Collapse preview';
+      }
+    }
+
+    function renderPreview() {
+      const body     = document.getElementById('preview-body');
+      const platform = document.getElementById('preview-select').value;
+
+      const renderedHTML = `<div class="rendered-preview">
+        <h1>Zero-downtime Postgres Migration</h1>
+        <p>Migrating a production Postgres database without downtime requires careful coordination between schema changes, application deployments, and traffic routing.</p>
+        <h2>Phase 1 — Baseline and snapshot</h2>
+        <p>Before touching any schema, capture a full logical backup and establish your rollback threshold.</p>
+        <blockquote><p>A dry run in staging is mandatory before any production step. Skipping this has caused three incidents in our post-mortem history.</p></blockquote>
+        <h2>Phase 2 — Schema expansion</h2>
+        <p>Add columns with defaults before deploying application code that reads them.</p>
+        <pre><code><span class="cm">-- Safe: add nullable column first</span>
+<span class="kw">ALTER TABLE</span> orders <span class="kw">ADD COLUMN</span> retry_count <span class="kw">INTEGER</span>;
+
+<span class="kw">UPDATE</span> orders <span class="kw">SET</span> retry_count = 0 <span class="kw">WHERE</span> retry_count <span class="kw">IS NULL</span>;</code></pre>
+        <h2>Phase 3 — Cutover</h2>
+        <p>Use a blue-green deployment where the new application version reads from both old and new columns simultaneously.</p>
+        <p>Health checks must run before and after each migration step. Lock timeout should be set to 5 seconds to prevent a hung migration from cascading.</p>
+        <pre><code><span class="kw">CREATE INDEX CONCURRENTLY</span> idx_orders_retry <span class="kw">ON</span> orders(retry_count);</code></pre>
+      </div>`;
+
+      if (platform === 'rendered') {
+        body.innerHTML = renderedHTML;
+      } else {
+        const labels = { medium: 'Medium', hashnode: 'Hashnode', devto: 'Dev.to' };
+        body.innerHTML = `
+          <div style="font-size:10px;color:#5a6080;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+            <span style="width:6px;height:6px;border-radius:50%;background:#6366f1;"></span>
+            ${labels[platform]} preview
+          </div>
+          <div style="background:#13161f;border:1px solid #252a38;border-radius:8px;padding:14px;">
+            ${renderedHTML}
+          </div>
+          <div style="margin-top:12px;font-size:11px;color:#5a6080;">
+            Draft is synced · last pushed 3 min ago
+          </div>`;
+      }
+    }
+
+    // ── Prose editor (review mode) ────────────────────────────────────────────────
+
+    function renderProseEditor() {
+      document.getElementById('prose-content').innerHTML = `
+        <h1>Zero-downtime Postgres Migration</h1>
+
+        <p>Migrating a production Postgres database without downtime requires careful coordination between schema changes, application deployments, and traffic routing. This guide walks through the three-phase approach used to migrate the primary <code style="font-family:'JetBrains Mono',monospace;font-size:13px;background:#161a24;padding:1px 5px;border-radius:3px;">orders</code> database at 40k requests per minute.</p>
+
+        <h2>Phase 1 — Baseline and snapshot</h2>
+
+        <p>Before touching any schema, capture a full logical backup and establish your rollback threshold: the maximum time your team can tolerate for a full restore. At 40k RPM, a five-minute restore window requires a pre-staged replica that is already caught up.</p>
+
+        <blockquote>A dry run in staging is mandatory before any production step. Skipping this has caused three incidents in our post-mortem history.</blockquote>
+
+        <h2>Phase 2 — Schema expansion</h2>
+
+        <p>Add columns with defaults before deploying application code that reads them. Postgres acquires a brief ACCESS EXCLUSIVE lock when adding a column without a default, but with a default it rewrites the table.</p>
+
+        <pre><div class="lang-tag">sql</div><button class="copy-btn" onclick="this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1800)">Copy</button><code><span class="cm">-- Safe: add nullable column first</span>
+<span class="kw">ALTER TABLE</span> orders <span class="kw">ADD COLUMN</span> retry_count <span class="kw">INTEGER</span>;
+
+<span class="cm">-- Backfill in batches</span>
+<span class="kw">UPDATE</span> orders <span class="kw">SET</span> retry_count = 0 <span class="kw">WHERE</span> retry_count <span class="kw">IS NULL</span>;
+
+<span class="cm">-- Enforce NOT NULL</span>
+<span class="kw">ALTER TABLE</span> orders <span class="kw">ALTER COLUMN</span> retry_count <span class="kw">SET NOT NULL</span>;</code></pre>
+
+        <h2>Phase 3 — Cutover</h2>
+
+        <p>Use a blue-green deployment where the new application version reads from both old and new columns simultaneously. Once all traffic has shifted and the old column is no longer written to, a final migration drops it.</p>
+
+        <p><span class="comment-anchor" id="c3-anchor" data-comment="c3" onclick="activateComment('c3')">Health checks must run before and after each migration step.</span> <span class="comment-anchor" id="c2-anchor" data-comment="c2" onclick="activateComment('c2')">Lock timeout should be set to 5 seconds</span> to prevent a hung migration from cascading into a queue backup.</p>
+
+        <pre><div class="lang-tag">sql</div><button class="copy-btn" onclick="this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1800)">Copy</button><code><span class="kw">CREATE INDEX CONCURRENTLY</span> idx_orders_retry <span class="kw">ON</span> orders(retry_count);</code></pre>
+
+        <p>Running this during low-traffic hours further reduces the load impact.</p>
+      `;
+    }
+
+    function activateComment(id) {
+      const prev = activeCommentId;
+      activeCommentId = (activeCommentId === id) ? null : id;
+
+      // clear all anchors
+      document.querySelectorAll('.comment-anchor').forEach(el => el.classList.remove('highlight'));
+      // highlight active
+      if (activeCommentId) {
+        document.querySelectorAll(`[data-comment="${activeCommentId}"]`).forEach(el => el.classList.add('highlight'));
+      }
+      // switch to comments tab and scroll to matching comment
+      if (marginTab !== 'comments') setMarginTab('comments');
+      else renderMarginContent();
+    }
+
+    // ── Margin panel ──────────────────────────────────────────────────────────────
+
+    function setMarginTab(t) {
+      marginTab = t;
+      ['comments', 'patches', 'destinations'].forEach(id => {
+        document.getElementById('tab-' + id).classList.toggle('active', id === t);
+      });
+      renderMarginContent();
+    }
+
+    function renderMarginContent() {
+      const el = document.getElementById('margin-body');
+      if (marginTab === 'comments')      el.innerHTML = buildComments();
+      else if (marginTab === 'patches')  el.innerHTML = buildPatches();
+      else                               el.innerHTML = buildDestinations();
+      updatePatchBadge();
+    }
+
+    function buildComments() {
+      return COMMENTS.map((c, i) => {
+        const isLast   = i === COMMENTS.length - 1;
+        const isActive = activeCommentId === c.id;
+        let dotClass   = c.resolved ? 'tl-dot-resolved' : (isActive ? 'tl-dot-active' : 'tl-dot-open');
+
+        return `
+          <div style="display:flex;gap:10px;${isLast ? '' : 'margin-bottom:6px;'}">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:0;">
+              <div class="${dotClass}"></div>
+              ${!isLast ? `<div class="tl-line"></div>` : ''}
+            </div>
+            <div style="flex:1;padding-bottom:${isLast ? 0 : 18}px;padding-top:1px;">
+              <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:3px;">
+                <span style="font-size:12px;font-weight:500;color:#e8eaf2;">${c.author}</span>
+                <span style="font-size:10px;color:#5a6080;">${c.time}</span>
+              </div>
+              ${c.resolved
+                ? `<div style="font-size:12px;color:#5a6080;line-height:1.5;">${c.text}</div>
+                   <div style="margin-top:5px;font-size:11px;color:#3a3f52;">Resolved &middot; <span onclick="" style="cursor:pointer;color:#5a6080;text-decoration:underline;">Reopen</span></div>`
+                : `<div style="font-size:12px;color:#c9cfe0;line-height:1.5;margin-bottom:8px;">${c.text}</div>
+                   ${c.hasPatch ? `<div style="font-size:11px;color:#4ade80;margin-bottom:7px;display:flex;align-items:center;gap:5px;"><span style="width:6px;height:6px;border-radius:50%;background:#4ade80;flex-shrink:0;"></span> Patch ready &mdash; review in Patches tab</div>` : ''}
+                   <div style="display:flex;gap:5px;">
+                     ${!c.hasPatch ? `<button onclick="" style="font-size:11px;padding:3px 8px;border-radius:5px;background:#1a1f38;border:1px solid #2a2e50;color:#a5b4fc;cursor:pointer;font-family:'Inter',sans-serif;">Fix with AI</button>` : ''}
+                     <button onclick="" style="font-size:11px;padding:3px 8px;border-radius:5px;background:#0f1117;border:1px solid #252a38;color:#c9cfe0;cursor:pointer;font-family:'Inter',sans-serif;">Resolve</button>
+                     <button onclick="" style="font-size:11px;padding:3px 8px;border-radius:5px;background:transparent;border:none;color:#5a6080;cursor:pointer;font-family:'Inter',sans-serif;">Reply</button>
+                   </div>`
+              }
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    function buildPatches() {
+      const rendered = PATCHES_DATA.map(p => {
+        const state = patchStates[p.id];
+        if (state === 'accepted') return `
+          <div style="font-size:12px;color:#4ade80;padding:10px 12px;border:1px solid #1a4d35;border-radius:7px;background:#0e2d22;display:flex;align-items:center;gap:7px;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Accepted: ${p.label}
+          </div>`;
+        if (state === 'rejected') return `
+          <div style="font-size:12px;color:#5a6080;padding:10px 12px;border:1px solid #252a38;border-radius:7px;display:flex;align-items:center;gap:7px;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            Rejected: ${p.label}
+          </div>`;
+        return `
+          <div style="margin-bottom:4px;">
+            <div style="font-size:11px;color:#5a6080;margin-bottom:7px;font-family:'JetBrains Mono',monospace;">${p.label}</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.6;border-radius:6px;overflow:hidden;margin-bottom:9px;">
+              <div style="background:#2d1a1a;color:#f87171;padding:9px 11px;">&#x2212; ${p.removed}</div>
+              <div style="background:#0e2d22;color:#4ade80;padding:9px 11px;">+ ${p.added}</div>
+            </div>
+            <div style="display:flex;gap:7px;">
+              <button onclick="acceptPatch('${p.id}')" style="font-size:12px;padding:5px 14px;border-radius:6px;background:#6366f1;border:none;color:#fff;cursor:pointer;font-family:'Inter',sans-serif;">Accept</button>
+              <button onclick="rejectPatch('${p.id}')" style="font-size:12px;padding:5px 12px;border-radius:6px;background:#0f1117;border:1px solid #252a38;color:#c9cfe0;cursor:pointer;font-family:'Inter',sans-serif;">Reject</button>
+            </div>
+          </div>`;
+      }).join('');
+
+      const pending = PATCHES_DATA.filter(p => patchStates[p.id] === 'pending').length;
+      const note = pending === 0 ? `<div style="font-size:12px;color:#5a6080;margin-top:10px;">All patches resolved.</div>` : '';
+      return rendered + note;
+    }
+
+    function buildDestinations() {
+      const rows = DESTINATIONS.map((d, i) => `
+        <div style="${i > 0 ? 'border-top:1px solid #252a38;' : ''}padding:10px 0;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${d.url || d.error ? 5 : 0}px;">
+            <span style="font-size:13px;color:#e8eaf2;">${d.platform}</span>
+            <span class="pill ${d.status === 'draft' ? 's-draft' : d.status === 'error' ? 's-error' : 's-none'}">${d.label}</span>
+          </div>
+          ${d.url ? `<a href="#" style="font-size:11px;color:#6366f1;text-decoration:none;" onclick="return false;">${d.url} ↗</a>` : ''}
+          ${d.error ? `
+            <div style="margin-top:6px;background:#2d1a1a;border:1px solid #4d2a2a;border-radius:5px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+              <span style="font-size:11px;color:#f87171;flex:1;">${d.error}</span>
+              <button onclick="" style="font-size:11px;padding:2px 9px;border-radius:4px;background:#0f1117;border:1px solid #4d2a2a;color:#f87171;cursor:pointer;flex-shrink:0;font-family:'Inter',sans-serif;">Retry</button>
+            </div>` : ''}
+        </div>`).join('');
+
+      return `
+        <div>${rows}</div>
+        <div style="border-top:1px solid #252a38;padding-top:12px;margin-top:2px;">
+          <button onclick="alert('Navigates to /inspect/${ARTICLE.id}')" style="width:100%;font-size:12px;padding:8px 10px;border-radius:6px;border:1px solid #252a38;background:transparent;color:#c9cfe0;cursor:pointer;text-align:left;display:flex;align-items:center;gap:7px;font-family:'Inter',sans-serif;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            Run inspection
+          </button>
+        </div>`;
+    }
+
+    function acceptPatch(id) {
+      patchStates[id] = 'accepted';
+      renderMarginContent();
+    }
+
+    function rejectPatch(id) {
+      patchStates[id] = 'rejected';
+      renderMarginContent();
+    }
+
+    function updatePatchBadge() {
+      const pending = PATCHES_DATA.filter(p => patchStates[p.id] === 'pending').length;
+      const badge = document.getElementById('patch-badge');
+      badge.style.display = pending > 0 ? 'inline' : 'none';
+      badge.textContent = pending;
+    }
+
+    // ── Generation overlay ────────────────────────────────────────────────────────
+
+    function showGenOverlay() {
+      document.getElementById('gen-overlay').style.display = 'flex';
+    }
+
+    function hideGenOverlay() {
+      document.getElementById('gen-overlay').style.display = 'none';
+    }
+
+    // ── Add comment mode ──────────────────────────────────────────────────────────
+
+    function toggleAddComment() {
+      addingComment = !addingComment;
+      document.getElementById('btn-add-comment').classList.toggle('pressed', addingComment);
+    }
+
+    function clearResolved() {
+      // stub — would remove resolved comments from the list
+      alert('Resolved comments cleared.');
+    }
+
+    // ── Publish gate ──────────────────────────────────────────────────────────────
+
+    function checkPublishGate() {
+      const noDestinations = DESTINATIONS.every(d => d.status === 'none');
+      const hasError = DESTINATIONS.some(d => d.status === 'error');
+      const btn = document.getElementById('publish-btn');
+      if (noDestinations) {
+        btn.disabled = true; btn.style.opacity = '0.4'; btn.style.cursor = 'not-allowed';
+        btn.title = 'No destinations configured';
+      }
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────────────
+
+    renderPreview();
+    checkPublishGate();
+    setUnsavedState('unsaved');
+  </script>
+</body>
+</html>

@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BlogHub — Overview</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            surface:     '#0f1117',
+            panel:       '#181c27',
+            border:      '#252a38',
+            'border-hi': '#3a3f52',
+            muted:       '#5a6080',
+            text:        '#c9cfe0',
+            bright:      '#e8eaf2',
+            accent:      '#6366f1',
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; }
+    body { background: #0f1117; color: #c9cfe0; margin: 0; }
+
+    /* Shimmer */
+    @keyframes shimmer {
+      0%   { background-position: -600px 0; }
+      100% { background-position: 600px 0; }
+    }
+    .shimmer {
+      background: linear-gradient(90deg, #1a1f2e 25%, #21273d 50%, #1a1f2e 75%);
+      background-size: 1200px 100%;
+      animation: shimmer 1.8s infinite linear;
+      border-radius: 4px;
+    }
+
+    /* Card */
+    .article-card {
+      background: #181c27;
+      border: 1px solid #252a38;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: border-color 120ms, background 120ms;
+      display: flex;
+      overflow: hidden;
+    }
+    .article-card:hover {
+      border-color: #3a3f52;
+      background: #1b2030;
+    }
+    .article-card.selected {
+      border-color: #6366f1;
+      background: #1a1f30;
+    }
+
+    /* Accent bar */
+    .accent-bar {
+      width: 3px;
+      flex-shrink: 0;
+    }
+
+    /* Status dots */
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .dot-draft     { background: #6ea8fe; }
+    .dot-ready     { background: #4ade80; }
+    .dot-published { background: #38bdf8; }
+    .dot-pending   { background: #fbbf24; }
+    .dot-error     { background: #f87171; }
+    .dot-none      { background: #252a38; }
+
+    /* Filter pills */
+    .pill-filter {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 100ms, color 100ms;
+      color: #5a6080;
+      background: transparent;
+      border: none;
+      font-family: inherit;
+    }
+    .pill-filter:hover  { color: #c9cfe0; }
+    .pill-filter.active { color: #e8eaf2; background: #252a38; font-weight: 500; }
+
+    .pill-platform {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      border: 1px solid #252a38;
+      background: transparent;
+      color: #5a6080;
+      font-family: inherit;
+      transition: border-color 100ms, color 100ms, background 100ms;
+    }
+    .pill-platform:hover  { color: #c9cfe0; border-color: #3a3f52; }
+    .pill-platform.active { color: #e8eaf2; background: #1e2230; border-color: #3a3f52; }
+
+    /* Side panel */
+    #side-panel {
+      width: 288px;
+      flex-shrink: 0;
+      border-left: 1px solid #252a38;
+      background: #13172a;
+      display: flex;
+      flex-direction: column;
+      transition: opacity 160ms, transform 160ms;
+      transform: translateX(0);
+    }
+    #side-panel.hidden {
+      opacity: 0;
+      pointer-events: none;
+      transform: translateX(16px);
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #252a38; border-radius: 3px; }
+
+    /* Context menu */
+    .ctx-menu {
+      position: absolute;
+      top: 100%;
+      right: 0;
+      background: #1e2335;
+      border: 1px solid #3a3f52;
+      border-radius: 6px;
+      padding: 4px;
+      z-index: 50;
+      min-width: 140px;
+      box-shadow: 0 8px 24px #00000060;
+    }
+    .ctx-item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 6px 10px;
+      font-size: 12px;
+      border-radius: 4px;
+      color: #c9cfe0;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .ctx-item:hover { background: #252a38; }
+    .ctx-item.danger { color: #f87171; }
+    .ctx-item.danger:hover { background: #2d1a1a; }
+  </style>
+</head>
+<body class="font-sans" style="height:100vh;display:flex;flex-direction:column;overflow:hidden;">
+
+<!-- ═══════════════════════════════════════════
+     ZONE A: Top nav (fixed 48px)
+════════════════════════════════════════════════ -->
+<nav style="height:48px;background:#0f1117;border-bottom:1px solid #252a38;flex-shrink:0;display:flex;align-items:center;padding:0 32px;gap:0;position:relative;z-index:40;">
+  <!-- Left: logo + links -->
+  <div style="display:flex;align-items:center;gap:24px;">
+    <!-- Logo mark + wordmark -->
+    <div style="display:flex;align-items:center;gap:8px;">
+      <div style="width:22px;height:22px;border-radius:5px;background:#6366f1;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <path d="M2 2h8M2 6h5M2 10h7" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <span style="color:#e8eaf2;font-weight:600;font-size:14px;letter-spacing:-0.02em;">BlogHub</span>
+    </div>
+    <!-- Nav links: underline tab style -->
+    <div style="display:flex;align-items:stretch;height:48px;">
+      <button onclick="setView('articles')" id="nav-articles" class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid #6366f1;color:#e8eaf2;font-weight:500;">Articles</button>
+      <button onclick="setView('queue')"    id="nav-queue"    class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid transparent;color:#5a6080;">Queue</button>
+      <button onclick="setView('platforms')" id="nav-platforms" class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid transparent;color:#5a6080;">Platforms</button>
+      <button onclick="setView('settings')" id="nav-settings"  class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid transparent;color:#5a6080;">Settings</button>
+    </div>
+  </div>
+  <!-- Right: health + new article -->
+  <div style="margin-left:auto;display:flex;align-items:center;gap:14px;">
+    <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#5a6080;">
+      <span style="width:6px;height:6px;border-radius:50%;background:#4ade80;display:inline-block;"></span>
+      3 platforms connected
+    </div>
+    <button onclick="alert('→ /create')" style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;padding:6px 12px;border-radius:6px;background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>
+      New article
+    </button>
+  </div>
+</nav>
+
+<!-- Body: filter bar + card grid + side panel -->
+<div style="flex:1;display:flex;overflow:hidden;">
+
+  <!-- Left: filter + grid -->
+  <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;">
+
+    <!-- ═══════════════════════════════════════════
+         ZONE B: Filter bar (sticky, two-row)
+    ════════════════════════════════════════════════ -->
+    <div id="filterbar" style="flex-shrink:0;border-bottom:1px solid #252a38;background:#0f1117;">
+      <!-- Row 1: search + count -->
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 32px 0;">
+        <div style="position:relative;">
+          <svg style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:#5a6080;" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path stroke-linecap="round" d="m21 21-4.35-4.35"/></svg>
+          <input id="search-input" type="text" placeholder="Search articles…" oninput="applyFilters()"
+            style="padding:6px 10px 6px 30px;font-size:12px;border-radius:6px;border:1px solid #252a38;background:#181c27;color:#c9cfe0;width:220px;font-family:inherit;outline:none;"
+            onfocus="this.style.borderColor='#6366f1'" onblur="this.style.borderColor='#252a38'" />
+        </div>
+        <span id="article-count" style="font-size:12px;color:#5a6080;font-family:'JetBrains Mono',monospace;">— articles</span>
+      </div>
+      <!-- Row 2: status pills + platform pills -->
+      <div style="display:flex;align-items:center;padding:6px 32px 8px;gap:0;">
+        <!-- Status -->
+        <div style="display:flex;align-items:center;gap:2px;">
+          <button class="pill-filter active" id="sf-all"       onclick="setStatusFilter('all',this)">All</button>
+          <button class="pill-filter"        id="sf-drafting"  onclick="setStatusFilter('drafting',this)">Drafting</button>
+          <button class="pill-filter"        id="sf-ready"     onclick="setStatusFilter('ready',this)">Ready</button>
+          <button class="pill-filter"        id="sf-error"     onclick="setStatusFilter('error',this)">Error</button>
+          <button class="pill-filter"        id="sf-published" onclick="setStatusFilter('published',this)">Published</button>
+        </div>
+        <div style="width:1px;height:14px;background:#252a38;margin:0 12px;"></div>
+        <!-- Platforms -->
+        <div style="display:flex;align-items:center;gap:4px;">
+          <button class="pill-platform" id="pf-medium"   onclick="togglePlatform('medium',this)">Medium</button>
+          <button class="pill-platform" id="pf-hashnode" onclick="togglePlatform('hashnode',this)">Hashnode</button>
+          <button class="pill-platform" id="pf-devto"    onclick="togglePlatform('devto',this)">Dev.to</button>
+        </div>
+        <!-- Dev toggle -->
+        <div style="margin-left:auto;display:flex;gap:6px;">
+          <button onclick="toggleSkeleton()" style="font-size:11px;padding:3px 8px;border-radius:4px;border:1px solid #252a38;background:transparent;color:#5a6080;cursor:pointer;font-family:inherit;">Toggle skeleton</button>
+          <button onclick="toggleEmpty()" style="font-size:11px;padding:3px 8px;border-radius:4px;border:1px solid #252a38;background:transparent;color:#5a6080;cursor:pointer;font-family:inherit;">Toggle empty</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════
+         ZONE C: Card grid
+    ════════════════════════════════════════════════ -->
+    <div id="grid-area" style="flex:1;overflow-y:auto;padding:24px 32px;">
+      <div id="card-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;"></div>
+      <!-- Empty state -->
+      <div id="empty-state" style="display:none;flex-direction:column;align-items:center;justify-content:center;min-height:360px;text-align:center;">
+        <div style="font-size:40px;color:#252a38;margin-bottom:16px;line-height:1;">✦</div>
+        <div style="color:#e8eaf2;font-weight:600;font-size:15px;margin-bottom:6px;">Nothing here yet</div>
+        <div style="color:#5a6080;font-size:13px;margin-bottom:20px;max-width:280px;line-height:1.6;">Draft an article once, push to Medium, Hashnode, and Dev.to from one screen.</div>
+        <button onclick="alert('→ /create')" style="font-size:12px;font-weight:500;padding:8px 16px;border-radius:6px;background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;">+ New article</button>
+      </div>
+      <!-- No results -->
+      <div id="no-results" style="display:none;flex-direction:column;align-items:center;justify-content:center;min-height:360px;text-align:center;">
+        <div style="font-size:40px;color:#252a38;margin-bottom:16px;line-height:1;">✦</div>
+        <div style="color:#e8eaf2;font-weight:600;font-size:15px;margin-bottom:6px;">No articles match</div>
+        <div style="color:#5a6080;font-size:13px;margin-bottom:16px;">Try different filters or search terms.</div>
+        <button onclick="clearFilters()" style="font-size:12px;font-weight:500;color:#6366f1;background:transparent;border:none;cursor:pointer;font-family:inherit;">Clear filters →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       Side panel
+  ════════════════════════════════════════════════ -->
+  <div id="side-panel" class="hidden">
+    <!-- Header -->
+    <div style="padding:14px 16px;border-bottom:1px solid #252a38;display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
+      <span id="panel-title" style="color:#e8eaf2;font-size:13px;font-weight:500;line-height:1.4;"></span>
+      <button onclick="closePanel()" style="color:#5a6080;background:none;border:none;cursor:pointer;padding:2px;flex-shrink:0;margin-top:1px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <!-- Destinations -->
+    <div style="padding:12px 16px;border-bottom:1px solid #252a38;">
+      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#5a6080;margin-bottom:10px;">Destinations</div>
+      <div id="panel-destinations" style="display:flex;flex-direction:column;gap:8px;"></div>
+    </div>
+    <!-- Timeline -->
+    <div style="padding:12px 16px;flex:1;overflow-y:auto;">
+      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#5a6080;margin-bottom:10px;">Timeline</div>
+      <div id="panel-timeline" style="display:flex;flex-direction:column;gap:8px;"></div>
+    </div>
+    <!-- Actions -->
+    <div style="padding:12px 16px;border-top:1px solid #252a38;display:flex;flex-direction:column;gap:6px;">
+      <button id="panel-primary-btn" style="font-size:12px;font-weight:500;padding:8px;border-radius:6px;background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;width:100%;">—</button>
+      <div style="display:flex;gap:6px;">
+        <button style="flex:1;font-size:12px;padding:6px;border-radius:6px;background:transparent;color:#c9cfe0;border:1px solid #252a38;cursor:pointer;font-family:inherit;">Edit</button>
+        <button style="flex:1;font-size:12px;padding:6px;border-radius:6px;background:transparent;color:#c9cfe0;border:1px solid #252a38;cursor:pointer;font-family:inherit;">Inspect</button>
+        <button style="flex:1;font-size:12px;padding:6px;border-radius:6px;background:transparent;color:#c9cfe0;border:1px solid #252a38;cursor:pointer;font-family:inherit;">Schedule</button>
+      </div>
+    </div>
+  </div>
+</div><!-- /body -->
+
+<script>
+// ─── Data ──────────────────────────────────────────────────────────
+const ARTICLES = [
+  {
+    id: 1, urgency: 1,
+    title: 'Embedding Models Compared: OpenAI vs Cohere vs BGE',
+    updated: '3h ago', words: 2100,
+    destinations: {
+      medium:   { status: 'error',     label: 'Error' },
+      hashnode: { status: 'draft',     label: 'Draft v1' },
+      devto:    { status: 'none',      label: 'No draft' },
+    },
+    gate: 'fail',
+    action: { label: 'Inspect →', color: '#f87171', bg: '#2d1a1a', border: '#4d2a2a' },
+    timeline: [
+      { time: '10:14', event: 'Medium push failed — auth expired' },
+      { time: '10:14', event: 'Gate check: FAIL — missing tail section' },
+      { time: '09:55', event: 'Draft created on Hashnode' },
+    ]
+  },
+  {
+    id: 2, urgency: 2,
+    title: 'RAG Pipeline with Neo4j and LangChain',
+    updated: '1d ago', words: 1950,
+    destinations: {
+      medium:   { status: 'review',  label: 'Needs review' },
+      hashnode: { status: 'draft',   label: 'Draft v1' },
+      devto:    { status: 'error',   label: 'Error' },
+    },
+    gate: 'warn',
+    action: { label: 'Inspect →', color: '#fbbf24', bg: '#2a2510', border: '#4a3d1a' },
+    timeline: [
+      { time: 'Apr 1', event: 'Drafts pushed to Medium and Hashnode' },
+      { time: 'Apr 1', event: 'Dev.to push failed — code block split' },
+      { time: 'Apr 1', event: 'Gate: WARN — 1 image missing on Hashnode' },
+    ]
+  },
+  {
+    id: 3, urgency: 3,
+    title: 'Building a Vector DB from Scratch with pgvector',
+    updated: '2h ago', words: 1800,
+    destinations: {
+      medium:   { status: 'draft',   label: 'Draft v2' },
+      hashnode: { status: 'pending', label: 'Pending' },
+      devto:    { status: 'draft',   label: 'Draft v1' },
+    },
+    gate: 'pass',
+    action: { label: 'Schedule →', color: '#fff', bg: '#6366f1', border: '#6366f1' },
+    timeline: [
+      { time: '14:02', event: 'Draft v2 pushed to Medium' },
+      { time: '14:05', event: 'Gate: PASS — all checks clear' },
+      { time: '15:30', event: 'Hashnode queued for 09:00 tomorrow' },
+    ]
+  },
+  {
+    id: 4, urgency: 3,
+    title: 'Graph Neural Networks: A Practical Introduction',
+    updated: '5d ago', words: 3200,
+    destinations: {
+      medium:   { status: 'draft', label: 'Draft v1' },
+      hashnode: { status: 'none',  label: 'No draft' },
+      devto:    { status: 'none',  label: 'No draft' },
+    },
+    gate: 'pass',
+    action: { label: 'Push drafts →', color: '#fff', bg: '#6366f1', border: '#6366f1' },
+    timeline: [
+      { time: 'Mar 28', event: 'Article created' },
+      { time: 'Mar 28', event: 'Draft pushed to Medium' },
+      { time: 'Mar 29', event: 'Gate: PASS' },
+    ]
+  },
+  {
+    id: 5, urgency: 4,
+    title: 'Zero-downtime Postgres Migrations',
+    updated: '1w ago', words: 2400,
+    destinations: {
+      medium:   { status: 'ready', label: 'Ready' },
+      hashnode: { status: 'ready', label: 'Ready' },
+      devto:    { status: 'ready', label: 'Ready' },
+    },
+    gate: 'pass',
+    action: { label: 'Schedule →', color: '#fff', bg: '#6366f1', border: '#6366f1' },
+    timeline: [
+      { time: 'Mar 25', event: 'All drafts validated' },
+      { time: 'Mar 25', event: 'Scheduled: Apr 6, 09:00' },
+    ]
+  },
+  {
+    id: 6, urgency: 5,
+    title: 'Dockerised Postgres: Production Checklist',
+    updated: '3d ago', words: 1600,
+    destinations: {
+      medium:   { status: 'published', label: 'Published' },
+      hashnode: { status: 'published', label: 'Published' },
+      devto:    { status: 'published', label: 'Published' },
+    },
+    gate: 'pass',
+    action: { label: 'View live ↗', color: '#38bdf8', bg: '#0d2830', border: '#1a3d4a' },
+    timeline: [
+      { time: 'Mar 30', event: 'Published to Medium' },
+      { time: 'Mar 30', event: 'Published to Hashnode' },
+      { time: 'Mar 31', event: 'Published to Dev.to' },
+    ]
+  },
+  {
+    id: 7, urgency: 5,
+    title: 'Async Python Patterns for Data Engineers',
+    updated: '2w ago', words: 2050,
+    destinations: {
+      medium:   { status: 'published', label: 'Published' },
+      hashnode: { status: 'published', label: 'Published' },
+      devto:    { status: 'published', label: 'Published' },
+    },
+    gate: 'pass',
+    action: { label: 'View live ↗', color: '#38bdf8', bg: '#0d2830', border: '#1a3d4a' },
+    timeline: [
+      { time: 'Mar 18', event: 'Published to all platforms' },
+    ]
+  },
+];
+
+// ─── State ─────────────────────────────────────────────────────────
+let selectedId   = null;
+let statusFilter = 'all';
+let platformFilter = new Set();
+let showSkeleton = false;
+let showEmpty    = false;
+let openMenuId   = null;
+
+// ─── Helpers ───────────────────────────────────────────────────────
+const DOT_CLASS = {
+  draft: 'dot-draft', ready: 'dot-ready', published: 'dot-published',
+  pending: 'dot-pending', error: 'dot-error', none: 'dot-none', review: 'dot-pending',
+};
+const DOT_COLOR = {
+  draft: '#6ea8fe', ready: '#4ade80', published: '#38bdf8',
+  pending: '#fbbf24', error: '#f87171', none: '#252a38', review: '#fbbf24',
+};
+const GATE_COLOR = { pass: '#4ade80', warn: '#fbbf24', fail: '#f87171', pending: '#5a6080' };
+const GATE_LABEL = { pass: '✓ Pass', warn: '⚠ Warn', fail: '✗ Fail', pending: '—' };
+const ACCENT_COLOR = {
+  fail: '#f87171', warn: '#fbbf24',
+  pass: '#6366f1', pending: '#6366f1',
+};
+const PLATFORM_LABEL = { medium: 'Medium', hashnode: 'Hashnode', devto: 'Dev.to' };
+
+function accentForArticle(a) {
+  if (a.gate === 'fail') return '#f87171';
+  if (a.gate === 'warn') return '#fbbf24';
+  if (Object.values(a.destinations).every(d => d.status === 'published')) return '#38bdf8';
+  return '#6366f1';
+}
+
+function matchesFilters(a) {
+  const q = document.getElementById('search-input').value.toLowerCase();
+  if (q && !a.title.toLowerCase().includes(q)) return false;
+  if (statusFilter !== 'all') {
+    const statuses = Object.values(a.destinations).map(d => d.status);
+    if (statusFilter === 'error'     && !statuses.includes('error'))     return false;
+    if (statusFilter === 'ready'     && !statuses.includes('ready'))     return false;
+    if (statusFilter === 'published' && !statuses.every(d => d === 'published')) return false;
+    if (statusFilter === 'drafting'  && !statuses.some(d => ['draft','pending','review'].includes(d))) return false;
+  }
+  if (platformFilter.size > 0) {
+    const hasPlatform = [...platformFilter].some(p => a.destinations[p] && a.destinations[p].status !== 'none');
+    if (!hasPlatform) return false;
+  }
+  return true;
+}
+
+// ─── Render ────────────────────────────────────────────────────────
+function renderCard(a) {
+  const accent = accentForArticle(a);
+  const isSelected = selectedId === a.id;
+
+  const card = document.createElement('div');
+  card.className = 'article-card' + (isSelected ? ' selected' : '');
+  card.dataset.id = a.id;
+  card.onclick = (e) => { if (!e.target.closest('.ctx-trigger')) selectCard(a.id); };
+
+  // Accent bar
+  const bar = document.createElement('div');
+  bar.className = 'accent-bar';
+  bar.style.background = accent;
+  card.appendChild(bar);
+
+  // Content
+  const content = document.createElement('div');
+  content.style.cssText = 'flex:1;padding:14px 14px 12px;min-width:0;display:flex;flex-direction:column;gap:0;';
+
+  // Title row
+  const titleRow = document.createElement('div');
+  titleRow.style.cssText = 'display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:3px;';
+
+  const title = document.createElement('span');
+  title.style.cssText = 'color:#e8eaf2;font-weight:500;font-size:13px;line-height:1.4;';
+  title.textContent = a.title;
+  titleRow.appendChild(title);
+
+  // Context menu trigger
+  const ctxWrap = document.createElement('div');
+  ctxWrap.style.cssText = 'position:relative;flex-shrink:0;';
+  const ctxBtn = document.createElement('button');
+  ctxBtn.className = 'ctx-trigger';
+  ctxBtn.style.cssText = 'background:none;border:none;color:#5a6080;cursor:pointer;padding:0 2px;font-size:15px;line-height:1;font-family:inherit;';
+  ctxBtn.textContent = '···';
+  ctxBtn.onclick = (e) => { e.stopPropagation(); toggleMenu(a.id, ctxWrap); };
+  ctxWrap.appendChild(ctxBtn);
+  titleRow.appendChild(ctxWrap);
+  content.appendChild(titleRow);
+
+  // Meta
+  const meta = document.createElement('div');
+  meta.style.cssText = 'color:#5a6080;font-family:"JetBrains Mono",monospace;font-size:11px;margin-bottom:10px;';
+  meta.textContent = `${a.updated} · ${a.words.toLocaleString()} words`;
+  content.appendChild(meta);
+
+  // Divider 1
+  const div1 = document.createElement('div');
+  div1.style.cssText = 'height:1px;background:#252a38;margin-bottom:10px;';
+  content.appendChild(div1);
+
+  // Destination rows (dot + platform + status label)
+  const dests = document.createElement('div');
+  dests.style.cssText = 'display:flex;flex-direction:column;gap:5px;margin-bottom:10px;';
+  ['medium', 'hashnode', 'devto'].forEach(p => {
+    const d = a.destinations[p];
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:7px;';
+
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+    dot.style.background = DOT_COLOR[d.status] || '#252a38';
+    row.appendChild(dot);
+
+    const pname = document.createElement('span');
+    pname.style.cssText = 'color:#5a6080;font-size:12px;width:62px;flex-shrink:0;';
+    pname.textContent = PLATFORM_LABEL[p];
+    row.appendChild(pname);
+
+    const lbl = document.createElement('span');
+    lbl.style.cssText = `color:${DOT_COLOR[d.status] || '#5a6080'};font-family:"JetBrains Mono",monospace;font-size:11px;`;
+    lbl.textContent = d.label;
+    row.appendChild(lbl);
+
+    dests.appendChild(row);
+  });
+  content.appendChild(dests);
+
+  // Divider 2
+  const div2 = document.createElement('div');
+  div2.style.cssText = 'height:1px;background:#252a38;margin-bottom:10px;';
+  content.appendChild(div2);
+
+  // Gate + action
+  const footer = document.createElement('div');
+  footer.style.cssText = 'display:flex;align-items:center;justify-content:space-between;';
+
+  const gate = document.createElement('span');
+  gate.style.cssText = `color:${GATE_COLOR[a.gate]};font-family:"JetBrains Mono",monospace;font-size:11px;`;
+  gate.textContent = GATE_LABEL[a.gate];
+  footer.appendChild(gate);
+
+  const btn = document.createElement('button');
+  btn.style.cssText = `font-size:11px;font-weight:500;padding:5px 10px;border-radius:5px;background:${a.action.bg};color:${a.action.color};border:1px solid ${a.action.border};cursor:pointer;font-family:inherit;white-space:nowrap;`;
+  btn.textContent = a.action.label;
+  btn.onclick = (e) => { e.stopPropagation(); alert(`→ action: ${a.action.label} for "${a.title}"`); };
+  footer.appendChild(btn);
+
+  content.appendChild(footer);
+  card.appendChild(content);
+  return card;
+}
+
+function renderSkeleton() {
+  const card = document.createElement('div');
+  card.style.cssText = 'background:#181c27;border:1px solid #252a38;border-radius:8px;display:flex;overflow:hidden;';
+  card.innerHTML = `
+    <div style="width:3px;background:#252a38;flex-shrink:0;"></div>
+    <div style="flex:1;padding:14px 14px 12px;display:flex;flex-direction:column;gap:0;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px;">
+        <div class="shimmer" style="height:14px;width:75%;"></div>
+        <div class="shimmer" style="height:14px;width:16px;margin-left:8px;"></div>
+      </div>
+      <div class="shimmer" style="height:11px;width:35%;margin-bottom:10px;"></div>
+      <div style="height:1px;background:#252a38;margin-bottom:10px;"></div>
+      <div style="display:flex;flex-direction:column;gap:5px;margin-bottom:10px;">
+        ${['62%','50%','58%'].map(w => `
+          <div style="display:flex;align-items:center;gap:7px;">
+            <div style="width:8px;height:8px;border-radius:50%;background:#252a38;"></div>
+            <div class="shimmer" style="height:11px;width:${w};"></div>
+          </div>`).join('')}
+      </div>
+      <div style="height:1px;background:#252a38;margin-bottom:10px;"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div class="shimmer" style="height:11px;width:48px;"></div>
+        <div class="shimmer" style="height:26px;width:80px;border-radius:5px;"></div>
+      </div>
+    </div>`;
+  return card;
+}
+
+function render() {
+  const grid = document.getElementById('card-grid');
+  const emptyEl = document.getElementById('empty-state');
+  const noResults = document.getElementById('no-results');
+  grid.innerHTML = '';
+  emptyEl.style.display = 'none';
+  noResults.style.display = 'none';
+
+  if (showEmpty) { emptyEl.style.display = 'flex'; document.getElementById('article-count').textContent = '0 articles'; return; }
+
+  if (showSkeleton) {
+    for (let i = 0; i < 6; i++) grid.appendChild(renderSkeleton());
+    document.getElementById('article-count').textContent = '— articles';
+    return;
+  }
+
+  const filtered = ARTICLES.filter(matchesFilters).sort((a,b) => a.urgency - b.urgency);
+  document.getElementById('article-count').textContent = `${filtered.length} article${filtered.length !== 1 ? 's' : ''}`;
+
+  if (filtered.length === 0) {
+    noResults.style.display = 'flex';
+    return;
+  }
+
+  filtered.forEach(a => grid.appendChild(renderCard(a)));
+}
+
+// ─── Interactions ──────────────────────────────────────────────────
+function selectCard(id) {
+  closeMenus();
+  selectedId = id === selectedId ? null : id;
+  render();
+  const panel = document.getElementById('side-panel');
+  if (!selectedId) { panel.classList.add('hidden'); return; }
+  panel.classList.remove('hidden');
+  const a = ARTICLES.find(x => x.id === selectedId);
+  document.getElementById('panel-title').textContent = a.title;
+
+  const destEl = document.getElementById('panel-destinations');
+  destEl.innerHTML = ['medium','hashnode','devto'].map(p => {
+    const d = a.destinations[p];
+    return `<div style="display:flex;align-items:center;justify-content:space-between;">
+      <span style="color:#c9cfe0;font-size:12px;">${PLATFORM_LABEL[p]}</span>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <span style="width:7px;height:7px;border-radius:50%;background:${DOT_COLOR[d.status]||'#252a38'};display:inline-block;"></span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:${DOT_COLOR[d.status]||'#5a6080'}">${d.label}</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('panel-timeline').innerHTML = a.timeline.map(t =>
+    `<div style="display:flex;gap:8px;">
+      <span style="color:#5a6080;font-family:'JetBrains Mono',monospace;font-size:10px;width:48px;flex-shrink:0;padding-top:1px;">${t.time}</span>
+      <span style="color:#c9cfe0;font-size:12px;line-height:1.5;">${t.event}</span>
+    </div>`
+  ).join('');
+
+  const pb = document.getElementById('panel-primary-btn');
+  pb.textContent = a.action.label;
+  pb.style.background = a.action.bg;
+  pb.style.color = a.action.color;
+  pb.style.border = `1px solid ${a.action.border}`;
+}
+
+function closePanel() { selectedId = null; render(); document.getElementById('side-panel').classList.add('hidden'); }
+
+function setStatusFilter(val, el) {
+  statusFilter = val;
+  document.querySelectorAll('.pill-filter').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  applyFilters();
+}
+
+function togglePlatform(p, el) {
+  platformFilter.has(p) ? platformFilter.delete(p) : platformFilter.add(p);
+  el.classList.toggle('active');
+  applyFilters();
+}
+
+function applyFilters() { render(); }
+function clearFilters() {
+  document.getElementById('search-input').value = '';
+  statusFilter = 'all';
+  platformFilter.clear();
+  document.querySelectorAll('.pill-filter').forEach(b => b.classList.remove('active'));
+  document.getElementById('sf-all').classList.add('active');
+  document.querySelectorAll('.pill-platform').forEach(b => b.classList.remove('active'));
+  render();
+}
+
+function toggleSkeleton() { showSkeleton = !showSkeleton; showEmpty = false; render(); }
+function toggleEmpty()    { showEmpty = !showEmpty; showSkeleton = false; render(); }
+
+function setView(v) {
+  document.querySelectorAll('.nav-tab').forEach(t => {
+    t.style.borderBottomColor = 'transparent';
+    t.style.color = '#5a6080';
+    t.style.fontWeight = '400';
+  });
+  const el = document.getElementById('nav-' + v);
+  if (el) { el.style.borderBottomColor = '#6366f1'; el.style.color = '#e8eaf2'; el.style.fontWeight = '500'; }
+}
+
+// Context menus
+function toggleMenu(id, wrap) {
+  if (openMenuId === id) { closeMenus(); return; }
+  closeMenus();
+  openMenuId = id;
+  const menu = document.createElement('div');
+  menu.className = 'ctx-menu';
+  menu.innerHTML = `
+    <button class="ctx-item" onclick="alert('Edit ${id}');closeMenus()">Edit</button>
+    <button class="ctx-item" onclick="alert('Duplicate ${id}');closeMenus()">Duplicate</button>
+    <button class="ctx-item" onclick="alert('Archive ${id}');closeMenus()">Archive</button>
+    <button class="ctx-item danger" onclick="alert('Delete ${id}');closeMenus()">Delete</button>`;
+  wrap.appendChild(menu);
+  setTimeout(() => document.addEventListener('click', closeMenus, { once: true }), 0);
+}
+function closeMenus() {
+  document.querySelectorAll('.ctx-menu').forEach(m => m.remove());
+  openMenuId = null;
+}
+
+// ─── Init ──────────────────────────────────────────────────────────
+render();
+</script>
+</body>
+</html>
