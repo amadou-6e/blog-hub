@@ -1,0 +1,29 @@
+[
+  {
+    "variant": "lang_none",
+    "telegraph_url": "https://telegra.ph/Medium-Telegraph-Breaking-Patterns-lang-none-04-05",
+    "draft_url": "https://medium.com/p/aa80b133986e/edit",
+    "dump_dir": "C:\\Users\\acisse\\Documents\\CodeWorkspace\\py-dockerdb\\blog-hub\\blogs\\medium\\tests\\fixtures\\medium_editor_dump\\telegraph_patterns_lang_none_20260405T123405",
+    "pattern_report": "C:\\Users\\acisse\\Documents\\CodeWorkspace\\py-dockerdb\\blog-hub\\blogs\\medium\\tests\\fixtures\\medium_editor_dump\\telegraph_patterns_lang_none_20260405T123405\\pattern_report.json",
+    "total_pre_blocks": 26,
+    "patterns_with_all_code_markers": 8
+  },
+  {
+    "variant": "lang_label_plain",
+    "telegraph_url": "https://telegra.ph/Medium-Telegraph-Breaking-Patterns-lang-label-plain-04-05",
+    "draft_url": "https://medium.com/p/83599695786a/edit",
+    "dump_dir": "C:\\Users\\acisse\\Documents\\CodeWorkspace\\py-dockerdb\\blog-hub\\blogs\\medium\\tests\\fixtures\\medium_editor_dump\\telegraph_patterns_lang_label_plain_20260405T123430",
+    "pattern_report": "C:\\Users\\acisse\\Documents\\CodeWorkspace\\py-dockerdb\\blog-hub\\blogs\\medium\\tests\\fixtures\\medium_editor_dump\\telegraph_patterns_lang_label_plain_20260405T123430\\pattern_report.json",
+    "total_pre_blocks": 26,
+    "patterns_with_all_code_markers": 8
+  },
+  {
+    "variant": "lang_label_code",
+    "telegraph_url": "https://telegra.ph/Medium-Telegraph-Breaking-Patterns-lang-label-code-04-05",
+    "draft_url": "https://medium.com/p/b96e0a4ee29f/edit",
+    "dump_dir": "C:\\Users\\acisse\\Documents\\CodeWorkspace\\py-dockerdb\\blog-hub\\blogs\\medium\\tests\\fixtures\\medium_editor_dump\\telegraph_patterns_lang_label_code_20260405T123455",
+    "pattern_report": "C:\\Users\\acisse\\Documents\\CodeWorkspace\\py-dockerdb\\blog-hub\\blogs\\medium\\tests\\fixtures\\medium_editor_dump\\telegraph_patterns_lang_label_code_20260405T123455\\pattern_report.json",
+    "total_pre_blocks": 26,
+    "patterns_with_all_code_markers": 8
+  }
+]

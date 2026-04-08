@@ -1,0 +1,59 @@
+{
+  "push_response": {
+    "jobId": "job_e95677d5",
+    "status": "done"
+  },
+  "job": {
+    "jobId": "job_e95677d5",
+    "type": "push",
+    "status": "done",
+    "articleId": "art_9a403724",
+    "result": {
+      "devto": {
+        "status": "draft",
+        "label": "Draft",
+        "url": "https://dev.to/amadou6e/backend-devto-live-chain-devto-backend-1775337031-2pmm-temp-slug-1918067",
+        "error": null,
+        "draft_id": "3454865"
+      }
+    },
+    "error": null
+  },
+  "article": {
+    "id": "art_9a403724",
+    "title": "Backend DEV.to live chain",
+    "updatedAt": "2026-04-04T21:10:32.681911Z",
+    "wordCount": 15,
+    "gate": "pending",
+    "destinations": {
+      "medium": {
+        "status": "none",
+        "label": "\u2014",
+        "url": null,
+        "error": null
+      },
+      "hashnode": {
+        "status": "none",
+        "label": "\u2014",
+        "url": null,
+        "error": null
+      },
+      "devto": {
+        "status": "draft",
+        "label": "Draft",
+        "url": "https://dev.to/amadou6e/backend-devto-live-chain-devto-backend-1775337031-2pmm-temp-slug-1918067",
+        "error": null
+      }
+    },
+    "recentTimeline": [
+      {
+        "timestamp": "2026-04-04T21:10:32.681902Z",
+        "event": "Draft pushed to Devto"
+      },
+      {
+        "timestamp": "2026-04-04T21:10:31.412784Z",
+        "event": "Article created"
+      }
+    ]
+  }
+}

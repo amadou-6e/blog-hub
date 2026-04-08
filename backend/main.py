@@ -4,7 +4,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.routers import agent, articles, connections, dev, jobs, platforms
+from backend.routers import agent, articles, comments, connections, dev, jobs, patches, platforms
+from backend.routers import auth as auth_router
+from backend.middleware.auth import AuthMiddleware
+import backend.store as store
 
 app = FastAPI(
     title="BlogHub API",
@@ -12,15 +15,37 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# CORS: default to localhost only (any port, for dev with dynamic port selection).
+# In production set BLOGHUB_ALLOWED_ORIGINS to a comma-separated list of exact origins,
+# e.g. "https://bloghub.example.com" — this disables the localhost regex.
+_env_origins = os.environ.get("BLOGHUB_ALLOWED_ORIGINS", "")
+if _env_origins:
+    _allowed_origins = [o.strip() for o in _env_origins.split(",") if o.strip()]
+    _origin_regex = None
+else:
+    _allowed_origins = []
+    _origin_regex = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten in production
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_allowed_origins,
+    allow_origin_regex=_origin_regex,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
+app.add_middleware(AuthMiddleware)
 
+
+@app.on_event("startup")
+def startup_cleanup():
+    store.delete_expired_sessions()
+
+
+app.include_router(auth_router.router)
 app.include_router(agent.router)
 app.include_router(articles.router)
+app.include_router(comments.router)
+app.include_router(patches.router)
 app.include_router(connections.router)
 app.include_router(jobs.router)
 app.include_router(platforms.router)

@@ -8,7 +8,7 @@ Endpoints:
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -82,9 +82,10 @@ def _connection_status_to_platform_status(conn_status: str) -> str:
 
 
 @router.get("/providers", response_model=ProvidersResponse)
-def get_providers() -> ProvidersResponse:
+def get_providers(request: Request) -> ProvidersResponse:
     """Return configured AI providers. Used by the provider toggle in step 2."""
-    connections = {c["id"]: c for c in store.list_connections()}
+    user_id: str = request.state.user_id
+    connections = {c["id"]: c for c in store.list_connections(user_id)}
     providers = []
     for conn_id in ("anthropic", "openai"):
         meta = connections.get(conn_id, {})
@@ -98,9 +99,10 @@ def get_providers() -> ProvidersResponse:
 
 
 @router.get("/platforms", response_model=PlatformsResponse)
-def get_platforms() -> PlatformsResponse:
+def get_platforms(request: Request) -> PlatformsResponse:
     """Return blog platform connectivity. Used by the destinations step."""
-    connections = {c["id"]: c for c in store.list_connections()}
+    user_id: str = request.state.user_id
+    connections = {c["id"]: c for c in store.list_connections(user_id)}
     platforms = []
     for pid in ("medium", "hashnode", "devto"):
         conn = connections.get(pid, {})
@@ -117,6 +119,7 @@ def get_platforms() -> PlatformsResponse:
 
 @router.post("/generate", status_code=202)
 def generate_article(
+    request: Request,
     body: GenerateRequest,
     background_tasks: BackgroundTasks,
 ) -> JSONResponse:
@@ -133,9 +136,11 @@ def generate_article(
             detail=f"Unknown provider '{body.provider}'. Must be 'claude' or 'codex'.",
         )
 
+    user_id: str = request.state.user_id
+
     # Check that the selected provider has a configured connection
     runner_provider_id = _PROVIDER_RUNNER[body.provider]
-    connections = {c["id"]: c for c in store.list_connections()}
+    connections = {c["id"]: c for c in store.list_connections(user_id)}
     provider_conn = connections.get(runner_provider_id, {})
     if provider_conn.get("status") != "connected":
         raise HTTPException(
@@ -145,11 +150,12 @@ def generate_article(
         )
 
     # Create the article record (title filled in by background task)
-    article = store.create_article(title="Draft")
-    job = store.create_job("generate", article["id"])
+    article = store.create_article(user_id, title="Draft")
+    job = store.create_job(user_id, "generate", article["id"])
 
     background_tasks.add_task(
         agent_service.run_generation,
+        user_id=user_id,
         job_id=job["job_id"],
         article_id=article["id"],
         brief=body.brief,

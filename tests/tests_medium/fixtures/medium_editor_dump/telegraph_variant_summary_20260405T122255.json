@@ -1,0 +1,38 @@
+[
+  {
+    "variant": "pre_br_nbsp",
+    "telegraph_url": "https://telegra.ph/Medium-Telegraph-Breaking-Patterns-pre-br-nbsp-04-05",
+    "draft_url": "https://medium.com/p/7423d7b23a49/edit",
+    "dump_dir": "C:\\Users\\acisse\\Documents\\CodeWorkspace\\py-dockerdb\\blog-hub\\blogs\\medium\\tests\\fixtures\\medium_editor_dump\\telegraph_patterns_pre_br_nbsp_20260405T122117",
+    "pattern_report": "C:\\Users\\acisse\\Documents\\CodeWorkspace\\py-dockerdb\\blog-hub\\blogs\\medium\\tests\\fixtures\\medium_editor_dump\\telegraph_patterns_pre_br_nbsp_20260405T122117\\pattern_report.json",
+    "total_pre_blocks": 22,
+    "patterns_with_all_code_markers": 7
+  },
+  {
+    "variant": "pre_br_empty",
+    "telegraph_url": "https://telegra.ph/Medium-Telegraph-Breaking-Patterns-pre-br-empty-04-05",
+    "draft_url": "https://medium.com/p/d1039b8c493d/edit",
+    "dump_dir": "C:\\Users\\acisse\\Documents\\CodeWorkspace\\py-dockerdb\\blog-hub\\blogs\\medium\\tests\\fixtures\\medium_editor_dump\\telegraph_patterns_pre_br_empty_20260405T122141",
+    "pattern_report": "C:\\Users\\acisse\\Documents\\CodeWorkspace\\py-dockerdb\\blog-hub\\blogs\\medium\\tests\\fixtures\\medium_editor_dump\\telegraph_patterns_pre_br_empty_20260405T122141\\pattern_report.json",
+    "total_pre_blocks": 24,
+    "patterns_with_all_code_markers": 7
+  },
+  {
+    "variant": "pre_newline_nbsp",
+    "telegraph_url": "https://telegra.ph/Medium-Telegraph-Breaking-Patterns-pre-newline-nbsp-04-05",
+    "draft_url": "https://medium.com/p/5336610b7a75/edit",
+    "dump_dir": "C:\\Users\\acisse\\Documents\\CodeWorkspace\\py-dockerdb\\blog-hub\\blogs\\medium\\tests\\fixtures\\medium_editor_dump\\telegraph_patterns_pre_newline_nbsp_20260405T122208",
+    "pattern_report": "C:\\Users\\acisse\\Documents\\CodeWorkspace\\py-dockerdb\\blog-hub\\blogs\\medium\\tests\\fixtures\\medium_editor_dump\\telegraph_patterns_pre_newline_nbsp_20260405T122208\\pattern_report.json",
+    "total_pre_blocks": 26,
+    "patterns_with_all_code_markers": 8
+  },
+  {
+    "variant": "pre_newline_empty",
+    "telegraph_url": "https://telegra.ph/Medium-Telegraph-Breaking-Patterns-pre-newline-empty-04-05",
+    "draft_url": "https://medium.com/p/1ca96e55a9ee/edit",
+    "dump_dir": "C:\\Users\\acisse\\Documents\\CodeWorkspace\\py-dockerdb\\blog-hub\\blogs\\medium\\tests\\fixtures\\medium_editor_dump\\telegraph_patterns_pre_newline_empty_20260405T122233",
+    "pattern_report": "C:\\Users\\acisse\\Documents\\CodeWorkspace\\py-dockerdb\\blog-hub\\blogs\\medium\\tests\\fixtures\\medium_editor_dump\\telegraph_patterns_pre_newline_empty_20260405T122233\\pattern_report.json",
+    "total_pre_blocks": 26,
+    "patterns_with_all_code_markers": 8
+  }
+]

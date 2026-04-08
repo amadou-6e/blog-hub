@@ -1,0 +1,26 @@
+{
+  "created": {
+    "draft_id": "69d170f92eb605151014c07a",
+    "canonical_url": "https://example.com/bloghub/hashnode/1775333624",
+    "cover_image_url": "https://cdn.example.com/bloghub/hashnode/1775333624/cover.png"
+  },
+  "expected": {
+    "title": "BlogHub Hashnode integration test 1775333624",
+    "subtitle": "This draft verifies that the live Hashnode integration can create a draft and return stored content through the authenticated drafts query.",
+    "content_markdown": "This draft verifies that the live Hashnode integration can create a draft and\nreturn stored content through the authenticated drafts query.\n\n## What this checks\n\n- the title survives round-trip\n- the body markdown is still present in the retrieved draft content\n- the subtitle and cover image survive round-trip\n\n```python\nprint(\"hashnode integration\")\n```\n",
+    "cover_image_url": "https://cdn.example.com/bloghub/hashnode/1775333624/cover.png"
+  },
+  "actual": {
+    "id": "69d170f92eb605151014c07a",
+    "title": "BlogHub Hashnode integration test 1775333624",
+    "subtitle": "This draft verifies that the live Hashnode integration can create a draft and return stored content through the authenticated drafts query.",
+    "coverImage": {
+      "url": "https://cdn.example.com/bloghub/hashnode/1775333624/cover.png"
+    },
+    "content": {
+      "markdown": "This draft verifies that the live Hashnode integration can create a draft and\nreturn stored content through the authenticated drafts query.\n\n## What this checks\n\n- the title survives round-trip\n- the body markdown is still present in the retrieved draft content\n- the subtitle and cover image survive round-trip\n\n```python\nprint(\"hashnode integration\")\n```\n",
+      "html": "<p>This draft verifies that the live Hashnode integration can create a draft and\nreturn stored content through the authenticated drafts query.</p>\n<h2 id=\"heading-what-this-checks\">What this checks</h2>\n<ul>\n<li>the title survives round-trip</li>\n<li>the body markdown is still present in the retrieved draft content</li>\n<li>the subtitle and cover image survive round-trip</li>\n</ul>\n<pre><code class=\"lang-python\">print(<span class=\"hljs-string\">\"hashnode integration\"</span>)\n</code></pre>\n",
+      "text": "This draft verifies that the live Hashnode integration can create a draft and\nreturn stored content through the authenticated drafts query.\n\n## What this checks\n\n- the title survives round-trip\n- the body markdown is still present in the retrieved draft content\n- the subtitle and cover image survive round-trip\n\n```python\nprint(\"hashnode integration\")\n```\n"
+    }
+  }
+}

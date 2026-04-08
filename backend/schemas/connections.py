@@ -24,9 +24,9 @@ class _CamelModel(BaseModel):
 class ConnectionInfo(_CamelModel):
     id: str
     label: str
-    type: str           # "blog" | "ai"
-    auth_method: str    # "token" | "oauth_or_token"
-    status: str         # "disconnected" | "connected" | "error"
+    type: str  # "blog" | "ai"
+    auth_method: str  # "token" | "oauth_or_token"
+    status: str  # "disconnected" | "connected" | "error"
     username: Optional[str] = None
     connected_at: Optional[datetime] = None
     error_message: Optional[str] = None
@@ -50,8 +50,8 @@ class SaveTokenResponse(_CamelModel):
 class OAuthStartResponse(BaseModel):
     available: bool
     url: Optional[str] = None
-    flow: Optional[str] = None         # "oauth_popup" | "cli_browser" | "device_code"
-    poll_url: Optional[str] = None     # set when flow == "cli_browser" or "device_code"
+    flow: Optional[str] = None  # "oauth_popup" | "cli_browser" | "device_code"
+    poll_url: Optional[str] = None  # set when flow == "cli_browser" or "device_code"
     device_code: Optional[str] = None  # set when flow == "device_code"
 
 
@@ -62,6 +62,7 @@ class TestConnectionResponse(BaseModel):
 
 # ── Draft / import schemas ────────────────────────────────────────────────────
 
+
 class DraftSummary(BaseModel):
     id: str
     title: str
@@ -69,6 +70,7 @@ class DraftSummary(BaseModel):
     updated_at: str
     status: str  # "draft" | "published"
     snippet: str = ""
+    cover_image: Optional[str] = None
 
 
 class DraftListResponse(BaseModel):
@@ -88,3 +90,4 @@ class DraftContent(BaseModel):
     status: str
     body: str
     canonical_url: Optional[str] = None
+    cover_image: Optional[str] = None

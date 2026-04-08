@@ -103,12 +103,16 @@ def run_task(
     article_md: str,
     context_md: Optional[str] = None,
     extra_args: Optional[list[str]] = None,
+    api_key: Optional[str] = None,
 ) -> dict:
     """
     Execute a CLI task against article content.
 
     Returns { exit_code, stdout, stderr, truncated }.
     Raises RunnerUnavailable on network error or 503 from runner.
+
+    api_key: when provided, injected as the provider credential in the
+    cli-runner subprocess env. Never logged or written to disk.
     """
     payload: dict = {
         "provider":   provider,
@@ -118,6 +122,8 @@ def run_task(
     }
     if context_md is not None:
         payload["context_md"] = context_md
+    if api_key is not None:
+        payload["api_key"] = api_key
 
     try:
         with _client() as c:

@@ -1,0 +1,10 @@
+{
+  "method": "telegraph_pattern_import",
+  "variant": "tag_code_html_fixture",
+  "telegraph_url": "https://telegra.ph/Medium-Telegraph-Breaking-Patterns-tag-code-04-05",
+  "draft_url": "https://medium.com/p/ed3b2c2ea62c/edit",
+  "timestamp": "20260405T215228",
+  "session_file": "C:\\Users\\acisse\\Documents\\CodeWorkspace\\medium-mcp-server\\medium-session.json",
+  "editor_html_bytes": 9116,
+  "full_page_html_bytes": 68789
+}
