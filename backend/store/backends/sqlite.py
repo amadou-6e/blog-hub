@@ -686,7 +686,30 @@ class SQLiteStore:
     def get_connection_token(self, conn_id: str) -> str | None:
         row = self._con.execute("SELECT token FROM connections WHERE platform=?",
                                 (conn_id,)).fetchone()
-        return row["token"] if row else None
+        if row and row["token"]:
+            return row["token"]
+        # Fall back to env var / .env file (for dev connections not saved in DB)
+        env_name = {
+            "devto": "DEVTO_API_KEY",
+            "hashnode": "HASHNODE_PAT",
+            "medium": "MEDIUM_TOKEN",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "openai": "OPENAI_API_KEY",
+        }.get(conn_id)
+        if not env_name:
+            return None
+        val = os.environ.get(env_name, "").strip()
+        if val:
+            return val
+        env_path = Path(Path(__file__).resolve().parents[4], ".env")
+        if env_path.exists():
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                if key.strip() == env_name and value.strip():
+                    return value.strip()
+        return None
 
     def count_connected(self) -> int:
         return sum(1 for c in self.list_connections() if c["status"] == "connected")

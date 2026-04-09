@@ -236,7 +236,12 @@
             <div id="codex-warning" style="display:none;align-items:center;gap:8px;font-size:12px;padding:8px 12px;border-radius:6px;background:#2a2510;border:1px solid #4a3d1a;">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2" flex-shrink="0"><path stroke-linecap="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
               <span style="color:#fbbf24;">Codex key not configured.</span>
-              <a href="#" style="color:#6366f1;text-decoration:none;margin-left:2px;">Add in Settings →</a>
+              <a href="../settings/v2.html?tab=ai" style="color:#6366f1;text-decoration:none;margin-left:2px;">Add in Settings →</a>
+            </div>
+            <div id="claude-warning" style="display:none;align-items:center;gap:8px;font-size:12px;padding:8px 12px;border-radius:6px;background:#2a2510;border:1px solid #4a3d1a;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2" flex-shrink="0"><path stroke-linecap="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+              <span style="color:#fbbf24;">Claude not configured.</span>
+              <a href="../settings/v2.html?tab=ai" style="color:#6366f1;text-decoration:none;margin-left:2px;">Add in Settings →</a>
             </div>
           </div>
 
@@ -456,8 +461,8 @@ function renderProviders(providers) {
       if (warn) warn.style.display = (!p.configured && selectedProvider === 'codex') ? 'flex' : 'none';
     }
     if (p.id === 'claude') {
-      // If Claude not configured and currently selected, show a warning (re-use codex-warning pattern)
-      // For now just reflect in summary — Claude warning handled by disabled Generate state
+      const warn = document.getElementById('claude-warning');
+      if (warn) warn.style.display = (!p.configured && selectedProvider === 'claude') ? 'flex' : 'none';
     }
   });
   updateGenerateEnabled();
@@ -470,10 +475,12 @@ function setProvider(p) {
   document.getElementById('provider-claude').style.color      = isCodex ? '#5a6080' : '#fff';
   document.getElementById('provider-codex').style.background  = isCodex ? '#6366f1' : 'transparent';
   document.getElementById('provider-codex').style.color       = isCodex ? '#fff' : '#5a6080';
-  // Codex-specific warning
   const codexProvider = _providersData.find(pr => pr.id === 'codex');
-  const codexWarning = document.getElementById('codex-warning');
-  if (codexWarning) codexWarning.style.display = (isCodex && codexProvider && !codexProvider.configured) ? 'flex' : 'none';
+  const claudeProvider = _providersData.find(pr => pr.id === 'claude');
+  const codexWarning  = document.getElementById('codex-warning');
+  const claudeWarning = document.getElementById('claude-warning');
+  if (codexWarning)  codexWarning.style.display  = (!isCodex || !codexProvider  || codexProvider.configured)  ? 'none' : 'flex';
+  if (claudeWarning) claudeWarning.style.display = (isCodex  || !claudeProvider || claudeProvider.configured) ? 'none' : 'flex';
   updateGenerateEnabled();
   renderSummary();
   _saveCreateState();

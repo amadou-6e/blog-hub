@@ -337,20 +337,29 @@
 
     <!-- REVIEW PANE ─────────────────────────────────────────────── -->
     <div id="view-review" style="display:none;">
-      <div id="cover-image-wrap" style="display:none;margin-bottom:20px;">
-        <div style="font-size:11px;font-weight:500;color:#5a6080;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Cover image</div>
-        <div id="cover-image-container" class="cover-img-box">
-          <img id="cover-image" src="" alt="Cover" class="cover-img"
-            onerror="document.getElementById('cover-image-wrap').style.display='none'" />
+      <!-- Multi-article review (platform mode) -->
+      <div id="review-multi" style="display:none;">
+        <div style="font-size:14px;font-weight:600;color:#e8eaf2;margin-bottom:4px;" id="review-multi-heading"></div>
+        <div style="font-size:12px;color:#5a6080;margin-bottom:16px;" id="review-multi-sub"></div>
+        <div id="review-article-list"></div>
+      </div>
+      <!-- Single-article review (upload mode or single platform selection) -->
+      <div id="review-single">
+        <div id="cover-image-wrap" style="display:none;margin-bottom:20px;">
+          <div style="font-size:11px;font-weight:500;color:#5a6080;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Cover image</div>
+          <div id="cover-image-container" class="cover-img-box">
+            <img id="cover-image" src="" alt="Cover" class="cover-img"
+              onerror="document.getElementById('cover-image-wrap').style.display='none'" />
+          </div>
+          <div id="cover-image-hint" style="font-size:11px;color:#3a3f52;margin-top:6px;"></div>
         </div>
-        <div id="cover-image-hint" style="font-size:11px;color:#3a3f52;margin-top:6px;"></div>
+        <div style="margin-bottom:20px;">
+          <input id="title-input" type="text" placeholder="Article title" oninput="syncTitle(this.value)" />
+          <div id="review-meta" style="font-size:12px;color:#5a6080;margin-top:6px;"></div>
+        </div>
+        <div style="height:1px;background:#252a38;margin-bottom:20px;"></div>
+        <div id="markdown-preview"></div>
       </div>
-      <div style="margin-bottom:20px;">
-        <input id="title-input" type="text" placeholder="Article title" oninput="syncTitle(this.value)" />
-        <div id="review-meta" style="font-size:12px;color:#5a6080;margin-top:6px;"></div>
-      </div>
-      <div style="height:1px;background:#252a38;margin-bottom:20px;"></div>
-      <div id="markdown-preview"></div>
     </div>
 
     <!-- UPLOAD MODE ─────────────────────────────────────────────── -->
@@ -443,16 +452,16 @@ const params     = new URLSearchParams(location.search);
 const MODE       = params.get('mode') || 'platform';  // 'platform' | 'upload'
 const RETURN_TO  = params.get('returnTo') || 'overview';
 
-let step             = 1;
-let selectedPlatform = null;  // platform object
-let selectedArticle  = null;  // article object
-let uploadedFile     = null;  // { name, content, title, wordCount }
-let editedTitle      = '';
-let showError        = false;
-let draftSearch      = '';
-let draftFilter      = 'all';
-let platformArticles = {};    // connId → DraftSummary[] | null (null = loading)
-let fetchingBodyForId = null; // article id being body-fetched
+let step              = 1;
+let selectedPlatform  = null;  // platform object
+let selectedArticles  = [];    // array of article objects (multi-select)
+let uploadedFile      = null;  // { name, content, title, wordCount }
+let editedTitle       = '';
+let showError         = false;
+let draftSearch       = '';
+let draftFilter       = 'all';
+let platformArticles  = {};    // connId → DraftSummary[] | null (null = loading)
+let fetchingBodyForId = null;  // article id being body-fetched
 
 // ─── Session persistence (5-min TTL) ────────────────────────────
 const _SS_KEY_IA = 'bh_import_v1';
@@ -464,16 +473,11 @@ function _saveImportState() {
     sessionStorage.setItem(_SS_KEY_IA, JSON.stringify({
       ts: Date.now(), mode: MODE, step,
       selectedPlatformId: selectedPlatform?.id || null,
-      selectedArticle: selectedArticle ? {
-        id: selectedArticle.id,
-        title: selectedArticle.title,
-        snippet: selectedArticle.snippet,
-        status: selectedArticle.status,
-        wordCount: selectedArticle.wordCount,
-        age: selectedArticle.age,
-        coverImage: selectedArticle.coverImage || null,
-        body: selectedArticle.body || null,
-      } : null,
+      selectedArticles: selectedArticles.map(a => ({
+        id: a.id, title: a.title, snippet: a.snippet,
+        status: a.status, wordCount: a.wordCount, age: a.age,
+        coverImage: a.coverImage || null, body: a.body || null,
+      })),
       editedTitle, draftSearch, draftFilter,
     }));
   } catch {}
@@ -486,12 +490,12 @@ function _restoreImportState() {
     const s = JSON.parse(raw);
     if (!s || Date.now() - s.ts > _SS_TTL_IA) { sessionStorage.removeItem(_SS_KEY_IA); return false; }
     if (s.mode !== MODE) return false;
-    step            = typeof s.step === 'number' ? s.step : 1;
+    step               = typeof s.step === 'number' ? s.step : 1;
     _pendingPlatformId = s.selectedPlatformId || null;
-    if (s.selectedArticle) selectedArticle = s.selectedArticle;
-    editedTitle   = s.editedTitle   || '';
-    draftSearch   = s.draftSearch   || '';
-    draftFilter   = s.draftFilter   || 'all';
+    selectedArticles   = Array.isArray(s.selectedArticles) ? s.selectedArticles : [];
+    editedTitle        = s.editedTitle || '';
+    draftSearch        = s.draftSearch || '';
+    draftFilter        = s.draftFilter || 'all';
     return true;
   } catch { return false; }
 }
@@ -502,7 +506,7 @@ const totalSteps = MODE === 'upload' ? 2 : 3;
 // ─── Step labels ─────────────────────────────────────────────────
 const STEP_LABELS = MODE === 'upload'
   ? ['Upload file', 'Review']
-  : ['Choose platform', 'Select article', 'Review'];
+  : ['Choose platform', 'Select articles', 'Review'];
 
 // ─── Init ────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -650,15 +654,20 @@ function renderActionBar() {
 
   // Primary button label and state
   const isLastStep = step === totalSteps;
-  primaryBtn.textContent = isLastStep ? 'Import' : 'Next →';
+  const importLabel = selectedArticles.length > 1
+    ? `Import ${selectedArticles.length} articles`
+    : 'Import';
+  primaryBtn.textContent = isLastStep ? importLabel : 'Next →';
   primaryBtn.disabled = !canAdvance();
 }
 
 function canAdvance() {
   if (MODE === 'platform') {
     if (step === 1) return selectedPlatform !== null;
-    if (step === 2) return selectedArticle !== null;
-    if (step === 3) return editedTitle.trim().length > 0;
+    if (step === 2) return selectedArticles.length > 0;
+    if (step === 3) return selectedArticles.length === 1
+      ? editedTitle.trim().length > 0
+      : true;  // multi: no edit, just confirm
   } else {
     if (step === 1) return false; // file picker auto-advances
     if (step === 2) return editedTitle.trim().length > 0;
@@ -750,7 +759,7 @@ function renderPlatformGrid() {
 
 function selectPlatform(id) {
   selectedPlatform = PLATFORMS.find(p => p.id === id) || null;
-  selectedArticle = null;
+  selectedArticles = [];
   renderPlatformGrid();
   renderActionBar();
   _saveImportState();
@@ -797,18 +806,28 @@ function renderDraftList() {
     return;
   }
 
+  const selCount = selectedArticles.length;
+  document.getElementById('article-count-label').textContent =
+    `${articles.length} article${articles.length !== 1 ? 's' : ''}` +
+    (selCount > 0 ? ` · ${selCount} selected` : '');
+
   rows.innerHTML = slice.map(a => {
-    const isSelected  = selectedArticle?.id === a.id;
-    const isFetching  = fetchingBodyForId  === a.id;
+    const isSelected  = selectedArticles.some(s => s.id === a.id);
+    const isFetching  = fetchingBodyForId === a.id;
     const loadingCue  = isFetching
       ? '<span class="spinner" style="width:11px;height:11px;border-width:1.5px;margin-left:6px;"></span>'
       : '';
+    const check = isSelected
+      ? `<span style="flex-shrink:0;width:16px;height:16px;border-radius:4px;background:#6366f1;border:1px solid #6366f1;display:inline-flex;align-items:center;justify-content:center;margin-right:8px;">
+           <svg viewBox="0 0 10 10" width="10" height="10" fill="none" stroke="#fff" stroke-width="1.5"><path d="M1.5 5l2.5 2.5 4.5-4.5"/></svg>
+         </span>`
+      : `<span style="flex-shrink:0;width:16px;height:16px;border-radius:4px;border:1px solid #252a38;display:inline-block;margin-right:8px;"></span>`;
     return `
     <div class="draft-row ${isSelected ? 'selected' : ''}"
       onclick="selectArticle('${a.id}')">
-      <div class="draft-row-title" style="display:flex;align-items:center;">${a.title}${loadingCue}</div>
-      <div class="draft-row-snippet">${a.snippet}</div>
-      <div class="draft-row-meta">
+      <div class="draft-row-title" style="display:flex;align-items:center;">${check}${a.title}${loadingCue}</div>
+      <div class="draft-row-snippet" style="padding-left:24px;">${a.snippet}</div>
+      <div class="draft-row-meta" style="padding-left:24px;">
         <span class="draft-badge ${a.status}">${a.status}</span>
         <span style="font-size:11px;color:#3a3f52;">·</span>
         <span style="font-size:11px;color:#5a6080;">${(a.wordCount||0).toLocaleString()} words</span>
@@ -824,22 +843,37 @@ function renderDraftList() {
 
 async function selectArticle(id) {
   if (!selectedPlatform) return;
-  const articles = platformArticles[selectedPlatform.id] || [];
-  selectedArticle = articles.find(a => a.id === id) || null;
-  editedTitle = selectedArticle?.title || '';
+  const allArticles = platformArticles[selectedPlatform.id] || [];
+  const article = allArticles.find(a => a.id === id);
+  if (!article) return;
+
+  const idx = selectedArticles.findIndex(a => a.id === id);
+  if (idx >= 0) {
+    // Deselect
+    selectedArticles.splice(idx, 1);
+  } else {
+    // Select — add a copy so we can mutate body independently
+    selectedArticles.push(Object.assign({}, article));
+  }
+
+  // For single selection, keep editedTitle in sync
+  if (selectedArticles.length === 1) editedTitle = selectedArticles[0].title;
+
   renderDraftList();
   renderActionBar();
   _saveImportState();
 
-  // Pre-fetch body if not already loaded
-  if (selectedArticle && !selectedArticle.body) {
+  // Pre-fetch body for newly selected article
+  const sel = selectedArticles.find(a => a.id === id);
+  if (sel && !sel.body) {
     fetchingBodyForId = id;
     renderDraftList();
     try {
       const r = await fetch(`/api/connections/${encodeURIComponent(selectedPlatform.id)}/drafts/${encodeURIComponent(id)}`);
       if (r.ok) {
         const d = await r.json();
-        selectedArticle.body = d.body || '';
+        sel.body = d.body || '';
+        if (!sel.coverImage && d.cover_image) sel.coverImage = d.cover_image;
       }
     } catch {}
     fetchingBodyForId = null;
@@ -873,14 +907,42 @@ function setDraftSearch(q) {
 
 // ─── Review pane ─────────────────────────────────────────────────
 function renderReview() {
-  let title = '', meta = '', body = '';
+  const multiEl  = document.getElementById('review-multi');
+  const singleEl = document.getElementById('review-single');
 
-  if (MODE === 'platform' && selectedArticle) {
-    title = selectedArticle.title;
+  // Platform mode with multiple selections: show list review
+  if (MODE === 'platform' && selectedArticles.length > 1) {
+    multiEl.style.display  = 'block';
+    singleEl.style.display = 'none';
+    const src = selectedPlatform?.name || 'Platform';
+    document.getElementById('review-multi-heading').textContent =
+      `Import ${selectedArticles.length} articles from ${src}`;
+    document.getElementById('review-multi-sub').textContent =
+      'Each article will be created as a separate draft in BlogHub.';
+    document.getElementById('review-article-list').innerHTML = selectedArticles.map(a => `
+      <div style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;background:#181c27;border:1px solid #252a38;border-radius:6px;margin-bottom:8px;">
+        <span class="draft-badge ${a.status}" style="flex-shrink:0;margin-top:2px;">${a.status}</span>
+        <div style="min-width:0;">
+          <div style="font-size:13px;font-weight:500;color:#e8eaf2;margin-bottom:2px;">${a.title}</div>
+          <div style="font-size:11px;color:#5a6080;">${(a.wordCount||0).toLocaleString()} words</div>
+        </div>
+      </div>`).join('');
+    return;
+  }
+
+  // Single article (platform) or upload
+  multiEl.style.display  = 'none';
+  singleEl.style.display = 'block';
+
+  let title = '', meta = '', body = '';
+  const singleArticle = selectedArticles[0] || null;
+
+  if (MODE === 'platform' && singleArticle) {
+    title = singleArticle.title;
     const src = selectedPlatform ? selectedPlatform.name : 'Platform';
-    const st  = selectedArticle.status === 'published' ? 'Published on' : 'Draft from';
-    meta  = `${selectedArticle.wordCount.toLocaleString()} words · ${st} ${src}`;
-    body  = selectedArticle.body;
+    const st  = singleArticle.status === 'published' ? 'Published on' : 'Draft from';
+    meta  = `${(singleArticle.wordCount||0).toLocaleString()} words · ${st} ${src}`;
+    body  = singleArticle.body;
   } else if (MODE === 'upload' && uploadedFile) {
     title = uploadedFile.title;
     meta  = `${uploadedFile.wordCount.toLocaleString()} words · Local file — ${uploadedFile.name}`;
@@ -896,7 +958,7 @@ function renderReview() {
   const coverImg  = document.getElementById('cover-image');
   const coverHint = document.getElementById('cover-image-hint');
   const coverCon  = document.getElementById('cover-image-container');
-  const coverUrl  = (MODE === 'platform' && selectedArticle?.coverImage) ? selectedArticle.coverImage : null;
+  const coverUrl  = (MODE === 'platform' && singleArticle?.coverImage) ? singleArticle.coverImage : null;
   if (coverUrl) {
     const platClass = selectedPlatform?.id || 'upload';
     coverCon.className = `cover-img-box ${platClass}`;
@@ -1236,39 +1298,57 @@ async function doImport() {
   document.getElementById('cancel-link').disabled = true;
 
   try {
-    let body;
     if (MODE === 'upload') {
-      body = {
+      const body = {
         source: 'upload',
         title: editedTitle,
         filename: uploadedFile.name,
         content: uploadedFile.content,
       };
-    } else {
-      body = {
+      const res = await fetch('/api/articles/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Server error ${res.status}`);
+      }
+      const { id } = await res.json();
+      sessionStorage.removeItem(_SS_KEY_IA);
+      window.location.href = `../editor/v2.html?id=${id}`;
+      return;
+    }
+
+    // Platform mode — import each selected article
+    const results = [];
+    for (const article of selectedArticles) {
+      const body = {
         source: 'platform',
         platform: selectedPlatform.id,
-        draft_id: selectedArticle.id,
-        title: editedTitle,
-        content: selectedArticle.body || undefined,
-        status: selectedArticle.status,
+        draft_id: article.id,
+        title: selectedArticles.length === 1 ? editedTitle : article.title,
+        content: article.body || undefined,
+        status: article.status,
       };
+      const res = await fetch('/api/articles/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(`"${article.title}": ${err.detail || `Server error ${res.status}`}`);
+      }
+      results.push(await res.json());
     }
 
-    const res = await fetch('/api/articles/import', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || `Server error ${res.status}`);
-    }
-
-    const { id } = await res.json();
     sessionStorage.removeItem(_SS_KEY_IA);
-    window.location.href = `../editor/v2.html?id=${id}`;
+    if (results.length === 1) {
+      window.location.href = `../editor/v2.html?id=${results[0].id}`;
+    } else {
+      window.location.href = `../overview/v3.html`;
+    }
   } catch (err) {
     document.getElementById('import-overlay').classList.remove('active');
     showImportError(err.message || 'Import failed');
@@ -1296,7 +1376,7 @@ function doStartOver() {
   sessionStorage.removeItem(_SS_KEY_IA);
   step = 1;
   selectedPlatform = null;
-  selectedArticle = null;
+  selectedArticles = [];
   uploadedFile = null;
   editedTitle = '';
   draftSearch = '';
