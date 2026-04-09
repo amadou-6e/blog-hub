@@ -105,7 +105,10 @@
   <nav class="flex items-center justify-between px-5 h-12 border-b shrink-0"
        style="border-color:#252a38; background:#0f1117;">
     <div class="flex items-center gap-6">
-      <a href="/screens/overview/v4.html" class="text-bright font-semibold tracking-tight text-sm">BlogHub</a>
+      <a href="/screens/overview/v3.html" class="text-bright font-semibold tracking-tight text-sm">BlogHub</a>
+      <div id="back-link-wrap" style="display:none;">
+        <a id="back-link" href="#" style="font-size:12px;color:#5a6080;text-decoration:none;display:flex;align-items:center;gap:4px;" onmouseover="this.style.color='#c9cfe0'" onmouseout="this.style.color='#5a6080'">← Back</a>
+      </div>
       <div class="flex items-center gap-1 text-xs">
         <a href="/screens/overview/v4.html" class="px-3 py-1.5 rounded text-muted hover:text-text">Articles</a>
         <a href="#" class="px-3 py-1.5 rounded text-muted hover:text-text">Queue</a>
@@ -197,7 +200,7 @@ const ICON_STYLE = {
   openai:    { bg: '#05966918', color: '#059669', letter: 'O', symbol: '◆' },
 };
 
-let _connections = [];
+let _connections = [];\n\n// ─── returnTo back link ───────────────────────────────────────────\n(function() {\n  const returnTo = new URLSearchParams(location.search).get('returnTo');\n  const targets = {\n    'create-article': '../create-article/v1.html',\n    'import-article': '../import-article/v1.html',\n    'overview': '../overview/v3.html',\n  };\n  const href = targets[returnTo];\n  if (href) {\n    const wrap = document.getElementById('back-link-wrap');\n    const link = document.getElementById('back-link');\n    if (wrap && link) { link.href = href; wrap.style.display = 'block'; }\n  }\n})();
 
 // ─── Section nav ───────────────────────────────────────────────────────────────
 function showSection(name, btn) {

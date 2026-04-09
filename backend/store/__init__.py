@@ -9,10 +9,12 @@ To switch backends, change _backend below and nothing else.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from backend.store.backends.sqlite import SQLiteStore
 
-_DB_PATH = os.environ.get("BLOGHUB_DB_PATH", "data/bloghub.db")
+_DEFAULT_DB = Path(__file__).parent.parent.parent / "data" / "bloghub.db"
+_DB_PATH = os.environ.get("BLOGHUB_DB_PATH", str(_DEFAULT_DB))
 _backend = SQLiteStore(_DB_PATH)
 
 # ── Articles ──────────────────────────────────────────────────────────────────
@@ -124,3 +126,52 @@ def complete_job(*a, **kw):
 
 def reset(*a, **kw):
     return _backend.reset(*a, **kw)
+
+
+# ── Comments ──────────────────────────────────────────────────────────────────
+
+
+def list_comments(*a, **kw):
+    return _backend.list_comments(*a, **kw)
+
+
+def add_comment(*a, **kw):
+    return _backend.add_comment(*a, **kw)
+
+
+def update_comment(*a, **kw):
+    return _backend.update_comment(*a, **kw)
+
+
+def delete_comment(*a, **kw):
+    return _backend.delete_comment(*a, **kw)
+
+
+# ── Patches ───────────────────────────────────────────────────────────────────
+
+
+def list_patches(*a, **kw):
+    return _backend.list_patches(*a, **kw)
+
+
+def add_patch(*a, **kw):
+    return _backend.add_patch(*a, **kw)
+
+
+def set_patch_state(*a, **kw):
+    return _backend.set_patch_state(*a, **kw)
+
+
+def delete_patches(*a, **kw):
+    return _backend.delete_patches(*a, **kw)
+
+
+# ── Chat log ──────────────────────────────────────────────────────────────────
+
+
+def list_chat(*a, **kw):
+    return _backend.list_chat(*a, **kw)
+
+
+def add_chat_message(*a, **kw):
+    return _backend.add_chat_message(*a, **kw)

@@ -118,6 +118,36 @@ CREATE TABLE IF NOT EXISTS jobs (
     created_at   TEXT NOT NULL,
     completed_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS article_comments (
+    id          TEXT PRIMARY KEY,
+    article_id  TEXT NOT NULL,
+    author      TEXT NOT NULL DEFAULT 'anonymous',
+    text        TEXT NOT NULL,
+    anchor      TEXT,
+    resolved    INTEGER NOT NULL DEFAULT 0,
+    has_patch   INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS article_patches (
+    id          TEXT PRIMARY KEY,
+    article_id  TEXT NOT NULL,
+    comment_id  TEXT,
+    label       TEXT NOT NULL,
+    removed     TEXT NOT NULL DEFAULT '',
+    added       TEXT NOT NULL DEFAULT '',
+    state       TEXT NOT NULL DEFAULT 'pending',
+    created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS article_chat_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    article_id  TEXT NOT NULL,
+    role        TEXT NOT NULL,
+    text        TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
 """
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -257,11 +287,15 @@ class SQLiteStore:
         self._con.execute("PRAGMA foreign_keys=ON")
         self._con.executescript(_DDL)
         # Migrate existing DBs that pre-date the error column
-        try:
-            self._con.execute("ALTER TABLE jobs ADD COLUMN error TEXT")
-            self._con.commit()
-        except Exception:
-            pass  # column already exists
+        for migration_sql in [
+            "ALTER TABLE jobs ADD COLUMN error TEXT",
+            "ALTER TABLE article_comments ADD COLUMN anchor TEXT",
+        ]:
+            try:
+                self._con.execute(migration_sql)
+                self._con.commit()
+            except Exception:
+                pass  # column already exists
         self._con.commit()
         self._seed_if_empty()
         # Ephemeral — no need to persist across restarts
@@ -626,11 +660,9 @@ class SQLiteStore:
             raise KeyError(f"Unknown connection: {conn_id}")
         now_s = _ts(_now())
         self._con.execute(
-            """INSERT INTO connections (platform, token, status, username, connected_at, error_message)
-               VALUES (?,?,?,?,?,?)
-               ON CONFLICT(platform) DO UPDATE SET
-               token=excluded.token, status=excluded.status, username=excluded.username,
-               connected_at=excluded.connected_at, error_message=excluded.error_message""",
+            """INSERT OR REPLACE INTO connections
+               (platform, token, status, username, connected_at, error_message)
+               VALUES (?,?,?,?,?,?)""",
             (conn_id, token, status, username, now_s, error),
         )
         self._con.commit()
@@ -751,14 +783,175 @@ class SQLiteStore:
     def reset(self) -> None:
         """Drop all data and re-seed. Used by the /api/dev/reset endpoint in tests."""
         self._con.executescript("""
+            DELETE FROM article_chat_log;
+            DELETE FROM article_patches;
+            DELETE FROM article_comments;
             DELETE FROM article_timeline;
             DELETE FROM article_destinations;
             DELETE FROM articles;
             DELETE FROM jobs;
+            DELETE FROM connections;
         """)
         self._con.commit()
         self._seed_if_empty()
         self._oauth_pending.clear()
+
+    # ── Comments ──────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _comment_row(row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "article_id": row["article_id"],
+            "author": row["author"],
+            "text": row["text"],
+            "anchor": row["anchor"],
+            "resolved": bool(row["resolved"]),
+            "has_patch": bool(row["has_patch"]),
+            "created_at": row["created_at"],
+        }
+
+    def list_comments(self, article_id: str) -> list[dict]:
+        rows = self._con.execute(
+            "SELECT * FROM article_comments WHERE article_id = ? ORDER BY created_at",
+            (article_id,),
+        ).fetchall()
+        return [self._comment_row(r) for r in rows]
+
+    def add_comment(self, article_id: str, *, text: str, author: str = "anonymous", anchor: str = "") -> dict:
+        import uuid
+        cid = "cmt_" + uuid.uuid4().hex[:12]
+        now = _ts(_now())
+        self._con.execute(
+            "INSERT INTO article_comments (id, article_id, author, text, anchor, resolved, has_patch, created_at) "
+            "VALUES (?, ?, ?, ?, ?, 0, 0, ?)",
+            (cid, article_id, author, text, anchor or None, now),
+        )
+        self._con.commit()
+        return self._comment_row(
+            self._con.execute("SELECT * FROM article_comments WHERE id = ?", (cid,)).fetchone()
+        )
+
+    def update_comment(self, article_id: str, comment_id: str, **fields) -> dict | None:
+        row = self._con.execute(
+            "SELECT * FROM article_comments WHERE id = ? AND article_id = ?",
+            (comment_id, article_id),
+        ).fetchone()
+        if row is None:
+            return None
+        updates = {k: v for k, v in fields.items()
+                   if k in ("text", "resolved", "anchor") and v is not None}
+        for col, val in updates.items():
+            self._con.execute(
+                f"UPDATE article_comments SET {col} = ? WHERE id = ?", (val, comment_id)
+            )
+        self._con.commit()
+        return self._comment_row(
+            self._con.execute("SELECT * FROM article_comments WHERE id = ?", (comment_id,)).fetchone()
+        )
+
+    def delete_comment(self, article_id: str, comment_id: str) -> bool:
+        row = self._con.execute(
+            "SELECT id FROM article_comments WHERE id = ? AND article_id = ?",
+            (comment_id, article_id),
+        ).fetchone()
+        if row is None:
+            return False
+        self._con.execute("DELETE FROM article_comments WHERE id = ?", (comment_id,))
+        self._con.commit()
+        return True
+
+    # ── Patches ───────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _patch_row(row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "article_id": row["article_id"],
+            "comment_id": row["comment_id"],
+            "label": row["label"],
+            "removed": row["removed"],
+            "added": row["added"],
+            "state": row["state"],
+            "created_at": row["created_at"],
+        }
+
+    def list_patches(self, article_id: str) -> list[dict]:
+        rows = self._con.execute(
+            "SELECT * FROM article_patches WHERE article_id = ? ORDER BY created_at",
+            (article_id,),
+        ).fetchall()
+        return [self._patch_row(r) for r in rows]
+
+    def add_patch(self, article_id: str, *, label: str, removed: str = "", added: str = "",
+                  comment_id: str | None = None) -> dict:
+        import uuid
+        pid = "pat_" + uuid.uuid4().hex[:12]
+        now = _ts(_now())
+        self._con.execute(
+            "INSERT INTO article_patches (id, article_id, comment_id, label, removed, added, state, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)",
+            (pid, article_id, comment_id, label, removed, added, now),
+        )
+        if comment_id:
+            self._con.execute(
+                "UPDATE article_comments SET has_patch = 1 WHERE id = ?", (comment_id,)
+            )
+        self._con.commit()
+        return self._patch_row(
+            self._con.execute("SELECT * FROM article_patches WHERE id = ?", (pid,)).fetchone()
+        )
+
+    def set_patch_state(self, article_id: str, patch_id: str, state: str) -> dict | None:
+        row = self._con.execute(
+            "SELECT * FROM article_patches WHERE id = ? AND article_id = ?",
+            (patch_id, article_id),
+        ).fetchone()
+        if row is None:
+            return None
+        self._con.execute(
+            "UPDATE article_patches SET state = ? WHERE id = ?", (state, patch_id)
+        )
+        self._con.commit()
+        return self._patch_row(
+            self._con.execute("SELECT * FROM article_patches WHERE id = ?", (patch_id,)).fetchone()
+        )
+
+    def delete_patches(self, article_id: str) -> None:
+        self._con.execute(
+            "DELETE FROM article_patches WHERE article_id = ?", (article_id,)
+        )
+        self._con.commit()
+
+    # ── Chat log ──────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _chat_row(row: sqlite3.Row) -> dict:
+        return {
+            "id": str(row["id"]),
+            "article_id": row["article_id"],
+            "role": row["role"],
+            "text": row["text"],
+            "created_at": row["created_at"],
+        }
+
+    def list_chat(self, article_id: str) -> list[dict]:
+        rows = self._con.execute(
+            "SELECT * FROM article_chat_log WHERE article_id = ? ORDER BY created_at",
+            (article_id,),
+        ).fetchall()
+        return [self._chat_row(r) for r in rows]
+
+    def add_chat_message(self, article_id: str, *, role: str, text: str) -> dict:
+        now = _ts(_now())
+        cur = self._con.execute(
+            "INSERT INTO article_chat_log (article_id, role, text, created_at) VALUES (?, ?, ?, ?)",
+            (article_id, role, text, now),
+        )
+        self._con.commit()
+        return self._chat_row(
+            self._con.execute("SELECT * FROM article_chat_log WHERE id = ?", (cur.lastrowid,)).fetchone()
+        )
 
     # ── Internal helpers ─────────────────────────────────────────────────────
 

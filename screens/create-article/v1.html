@@ -104,6 +104,7 @@
     </div>
   </div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:14px;">
+    <button onclick="doResetWizard()" title="Reset wizard" style="font-size:12px;color:#3a3f52;background:transparent;border:none;cursor:pointer;font-family:inherit;padding:4px 8px;border-radius:4px;transition:color 100ms;" onmouseover="this.style.color='#c9cfe0'" onmouseout="this.style.color='#3a3f52'">↺ Reset</button>
     <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#5a6080;">
       <span style="width:6px;height:6px;border-radius:50%;background:#4ade80;display:inline-block;"></span>
       3 platforms connected
@@ -330,11 +331,54 @@ let currentStep      = 1;               // start at step 1
 let selectedSkill    = 'deep-dive';
 let selectedProvider = 'claude';
 let wordCount        = 1500;
-let destinations     = { medium: true };  // fallback until initView() resolves
+let destinations     = {};                 // populated from API in initView()
 let promptText       = '';
 let uploadedFile     = null;
 let _providersData   = [];             // [{id, label, configured}]
+// ─── Session persistence (5-min TTL) ────────────────────────────
+const _SS_KEY_CA = 'bh_create_v1';
+const _SS_TTL_CA = 5 * 60 * 1000;
 
+function _saveCreateState() {
+  try {
+    sessionStorage.setItem(_SS_KEY_CA, JSON.stringify({
+      ts: Date.now(),
+      currentStep, selectedSkill, selectedProvider, wordCount,
+      destinations, promptText,
+    }));
+  } catch {}
+}
+
+function _restoreCreateState() {
+  try {
+    const raw = sessionStorage.getItem(_SS_KEY_CA);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (!s || Date.now() - s.ts > _SS_TTL_CA) { sessionStorage.removeItem(_SS_KEY_CA); return; }
+    currentStep      = s.currentStep      || 1;
+    selectedSkill    = s.selectedSkill    || 'deep-dive';
+    selectedProvider = s.selectedProvider || 'claude';
+    wordCount        = s.wordCount        || 1500;
+    if (s.destinations) destinations = s.destinations;
+    promptText       = s.promptText       || '';
+  } catch {}
+}
+
+function doResetWizard() {
+  sessionStorage.removeItem(_SS_KEY_CA);
+  currentStep = 1; selectedSkill = 'deep-dive'; selectedProvider = 'claude';
+  wordCount = 1500; destinations = {}; promptText = '';
+  const ta = document.getElementById('prompt-text');
+  if (ta) ta.value = '';
+  const pc = document.getElementById('prompt-count');
+  if (pc) pc.textContent = '0';
+  const wcSlider = document.querySelector('input[type=range]');
+  if (wcSlider) { wcSlider.value = 1500; updateWordCount(1500); }
+  setProvider('claude');
+  renderSkills();
+  renderStep();
+  renderSummary();
+}
 const SKILLS = [
   { id: 'deep-dive',  label: 'Technical deep-dive', desc: 'In-depth exploration with code examples' },
   { id: 'tutorial',   label: 'Tutorial / how-to',   desc: 'Step-by-step walkthrough for readers' },
@@ -348,9 +392,17 @@ const TEMPLATES = {
 };
 
 // ─── Init ───────────────────────────────────────────────────────
+_restoreCreateState();
 renderSkills();
 renderSummary();
 renderStep();
+// Restore prompt textarea from saved state
+if (promptText) {
+  const ta = document.getElementById('prompt-text');
+  if (ta) { ta.value = promptText; document.getElementById('prompt-count').textContent = promptText.length; }
+}
+// Restore provider button state
+setProvider(selectedProvider);
 initView();
 
 // ─── initView — load live data from API ─────────────────────────
@@ -365,7 +417,7 @@ async function initView() {
     renderDestinations(platRes.platforms || []);
     renderSummary();
   } catch (e) {
-    // Server not reachable (static file mode) — keep hardcoded fallback state
+    // API unreachable — destinations stays {}, renderDestinations() will show nothing
   }
 }
 
@@ -392,6 +444,7 @@ function selectSkill(id) {
   selectedSkill = id;
   renderSkills();
   renderSummary();
+  _saveCreateState();
 }
 
 // ─── Provider ───────────────────────────────────────────────────
@@ -423,6 +476,7 @@ function setProvider(p) {
   if (codexWarning) codexWarning.style.display = (isCodex && codexProvider && !codexProvider.configured) ? 'flex' : 'none';
   updateGenerateEnabled();
   renderSummary();
+  _saveCreateState();
 }
 
 function updateGenerateEnabled() {
@@ -443,6 +497,7 @@ function updateWordCount(v) {
   const label = wordCount >= 1000 ? `~${(wordCount/1000).toFixed(wordCount % 1000 === 0 ? 0 : 1)}k words` : `~${wordCount} words`;
   document.getElementById('word-count-label').textContent = label;
   renderSummary();
+  _saveCreateState();
 }
 
 // ─── Prompt ─────────────────────────────────────────────────────
@@ -450,6 +505,7 @@ function onPromptInput() {
   promptText = document.getElementById('prompt-text').value;
   document.getElementById('prompt-count').textContent = promptText.length;
   renderSummary();
+  _saveCreateState();
 }
 
 function loadTemplate(type) {
@@ -519,6 +575,7 @@ function toggleDest(platform) {
     if (thumb) thumb.style.left       = on ? '16px' : '2px';
     updateGenerateEnabled();
     renderSummary();
+    _saveCreateState();
   }
 }
 
@@ -657,6 +714,7 @@ function nextStep() {
     currentStep++;
     renderStep();
     renderSummary();
+    _saveCreateState();
   } else {
     startGeneration();
   }
@@ -666,6 +724,7 @@ function prevStep() {
   if (currentStep > 1) {
     currentStep--;
     renderStep();
+    _saveCreateState();
   }
 }
 

@@ -96,14 +96,20 @@
     #back-btn {
       font-size: 13px; color: #c9cfe0; background: transparent;
       border: 1px solid #3a3f52; border-radius: 6px;
-      cursor: pointer; font-family: inherit; padding: 7px 28px; transition: border-color 100ms, color 100ms;
+      cursor: pointer; font-family: inherit; padding: 7px 36px; transition: border-color 100ms, color 100ms;
     }
     #back-btn:hover { border-color: #6366f1; color: #e8eaf2; }
+    #startover-btn {
+      font-size: 12px; color: #5a6080; background: transparent;
+      border: none; cursor: pointer; font-family: inherit;
+      padding: 7px 12px; transition: color 100ms; margin-left: 4px;
+    }
+    #startover-btn:hover { color: #c9cfe0; }
     #action-dots { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; }
     .dot { border-radius: 3px; transition: all 150ms; }
     #primary-btn {
       margin-left: auto; font-size: 13px; font-weight: 500;
-      padding: 7px 28px; border-radius: 6px; background: #6366f1; color: #fff;
+      padding: 7px 36px; border-radius: 6px; background: #6366f1; color: #fff;
       border: none; cursor: pointer; font-family: inherit;
       transition: opacity 100ms, background 100ms; white-space: nowrap;
     }
@@ -408,6 +414,7 @@
 <!-- ═══ Action bar (fixed bottom) ════════════════════════════════ -->
 <div id="action-bar">
   <button id="back-btn" onclick="goBack()">← Back</button>
+  <button id="startover-btn" onclick="doStartOver()" style="display:none;">↺ Start over</button>
   <div id="action-dots"></div>
   <button id="primary-btn" onclick="advance()" disabled>Next →</button>
 </div>
@@ -447,6 +454,48 @@ let draftFilter      = 'all';
 let platformArticles = {};    // connId → DraftSummary[] | null (null = loading)
 let fetchingBodyForId = null; // article id being body-fetched
 
+// ─── Session persistence (5-min TTL) ────────────────────────────
+const _SS_KEY_IA = 'bh_import_v1';
+const _SS_TTL_IA = 5 * 60 * 1000;
+let _pendingPlatformId = null;
+
+function _saveImportState() {
+  try {
+    sessionStorage.setItem(_SS_KEY_IA, JSON.stringify({
+      ts: Date.now(), mode: MODE, step,
+      selectedPlatformId: selectedPlatform?.id || null,
+      selectedArticle: selectedArticle ? {
+        id: selectedArticle.id,
+        title: selectedArticle.title,
+        snippet: selectedArticle.snippet,
+        status: selectedArticle.status,
+        wordCount: selectedArticle.wordCount,
+        age: selectedArticle.age,
+        coverImage: selectedArticle.coverImage || null,
+        body: selectedArticle.body || null,
+      } : null,
+      editedTitle, draftSearch, draftFilter,
+    }));
+  } catch {}
+}
+
+function _restoreImportState() {
+  try {
+    const raw = sessionStorage.getItem(_SS_KEY_IA);
+    if (!raw) return false;
+    const s = JSON.parse(raw);
+    if (!s || Date.now() - s.ts > _SS_TTL_IA) { sessionStorage.removeItem(_SS_KEY_IA); return false; }
+    if (s.mode !== MODE) return false;
+    step            = typeof s.step === 'number' ? s.step : 1;
+    _pendingPlatformId = s.selectedPlatformId || null;
+    if (s.selectedArticle) selectedArticle = s.selectedArticle;
+    editedTitle   = s.editedTitle   || '';
+    draftSearch   = s.draftSearch   || '';
+    draftFilter   = s.draftFilter   || 'all';
+    return true;
+  } catch { return false; }
+}
+
 // Upload mode: 2 steps; Platform mode: 3 steps
 const totalSteps = MODE === 'upload' ? 2 : 3;
 
@@ -457,17 +506,20 @@ const STEP_LABELS = MODE === 'upload'
 
 // ─── Init ────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  const _restored = _restoreImportState();
   renderStepBar();
   if (MODE === 'platform') {
     showView('platform-pick');
-    initConnections();
+    initConnections(_restored);
   } else {
+    // Upload mode: file content from disk can't be restored; reset to step 1
+    if (_restored && step > 1) { step = 1; sessionStorage.removeItem(_SS_KEY_IA); }
     showView('upload');
+    renderActionBar();
   }
-  renderActionBar();
 });
 
-async function initConnections() {
+async function initConnections(restored = false) {
   try {
     const res = await fetch('/api/connections');
     const data = await res.json();
@@ -482,11 +534,30 @@ async function initConnections() {
         initials: PLATFORM_META[c.id]?.initials || c.id[0].toUpperCase(),
         connected: c.status === 'connected',
       }));
+    if (restored && _pendingPlatformId) {
+      selectedPlatform = PLATFORMS.find(p => p.id === _pendingPlatformId) || null;
+      _pendingPlatformId = null;
+    }
   } catch {
-    PLATFORMS = Object.entries(PLATFORM_META).map(([id, m]) => ({ id, ...m, connected: false }));
+    // API unreachable — PLATFORMS stays [], renderPlatformGrid() shows #no-platforms
   }
   renderPlatformGrid();
+  renderStepBar();
   renderActionBar();
+  if (restored && step === 2 && selectedPlatform) {
+    showView('draft-list');
+    loadDrafts(selectedPlatform.id).then(() => {
+      const si = document.getElementById('draft-search');
+      if (si && draftSearch) si.value = draftSearch;
+      ['all', 'draft', 'published'].forEach(k => {
+        const el = document.getElementById('pill-' + k);
+        if (el) el.classList.toggle('active', k === draftFilter);
+      });
+    });
+  } else if (restored && step === 3 && selectedPlatform) {
+    showView('review');
+    renderReview();
+  }
 }
 
 async function loadDrafts(connId) {
@@ -560,8 +631,12 @@ function renderActionBar() {
   const primaryBtn = document.getElementById('primary-btn');
   const dotsEl     = document.getElementById('action-dots');
 
-  // Back visibility
+  // Back/startover visibility
   backBtn.style.visibility = step > 1 ? 'visible' : 'hidden';
+  const soBtn = document.getElementById('startover-btn');
+  if (soBtn) soBtn.style.display = step > 1 ? 'inline-block' : 'none';
+  const cancelLink = document.getElementById('cancel-link');
+  if (cancelLink) cancelLink.style.display = step > 1 ? 'none' : '';
 
   // Dots
   dotsEl.innerHTML = '';
@@ -619,6 +694,7 @@ function advance() {
     if (step === 2) { renderReview(); showView('review'); }
   }
   renderActionBar();
+  _saveImportState();
 }
 
 function goBack() {
@@ -634,6 +710,7 @@ function goBack() {
   }
   renderActionBar();
   hideError();
+  _saveImportState();
 }
 
 function doCancel() {
@@ -676,6 +753,7 @@ function selectPlatform(id) {
   selectedArticle = null;
   renderPlatformGrid();
   renderActionBar();
+  _saveImportState();
 }
 
 // ─── Draft list ──────────────────────────────────────────────────
@@ -751,6 +829,7 @@ async function selectArticle(id) {
   editedTitle = selectedArticle?.title || '';
   renderDraftList();
   renderActionBar();
+  _saveImportState();
 
   // Pre-fetch body if not already loaded
   if (selectedArticle && !selectedArticle.body) {
@@ -782,12 +861,14 @@ function setDraftFilter(f) {
     if (el) el.classList.toggle('active', k === f);
   });
   renderDraftList();
+  _saveImportState();
 }
 
 function setDraftSearch(q) {
   draftSearch = q.toLowerCase();
   visibleCount = 20;
   renderDraftList();
+  _saveImportState();
 }
 
 // ─── Review pane ─────────────────────────────────────────────────
@@ -851,6 +932,7 @@ function renderReview() {
 function syncTitle(val) {
   editedTitle = val;
   renderActionBar();
+  _saveImportState();
 }
 
 function inlineMarkdown(text) {
@@ -1185,6 +1267,7 @@ async function doImport() {
     }
 
     const { id } = await res.json();
+    sessionStorage.removeItem(_SS_KEY_IA);
     window.location.href = `../editor/v2.html?id=${id}`;
   } catch (err) {
     document.getElementById('import-overlay').classList.remove('active');
@@ -1207,6 +1290,29 @@ function hideError() {
 function retryImport() {
   hideError();
   document.getElementById('primary-btn').disabled = false;
+}
+
+function doStartOver() {
+  sessionStorage.removeItem(_SS_KEY_IA);
+  step = 1;
+  selectedPlatform = null;
+  selectedArticle = null;
+  uploadedFile = null;
+  editedTitle = '';
+  draftSearch = '';
+  draftFilter = 'all';
+  platformArticles = {};
+  fetchingBodyForId = null;
+  if (MODE === 'platform') {
+    showView('platform-pick');
+    renderPlatformGrid();
+  } else {
+    showView('upload');
+    setDzState('idle');
+  }
+  renderStepBar();
+  renderActionBar();
+  hideError();
 }
 </script>
 </body>

@@ -100,24 +100,18 @@ def delete_articles(body: DeleteArticleRequest):
 # ── Generate ──────────────────────────────────────────────────────────────────
 
 _SKILL_INSTRUCTIONS: dict[str, str] = {
-    "deep-dive": (
-        "Write a technical deep-dive article. Include concrete code examples, "
-        "explain the underlying mechanisms, cover edge cases, and reference real-world usage."
-    ),
-    "tutorial": (
-        "Write a step-by-step tutorial. Cover prerequisites, walk through a real "
-        "implementation from scratch, highlight common pitfalls, and show how to verify "
-        "the result works."
-    ),
-    "comparison": (
-        "Write a comparison article. Cover setup complexity, performance characteristics, "
-        "developer experience, and ecosystem maturity. Include a summary table. "
-        "End with a recommendation for different scenarios."
-    ),
-    "opinion": (
-        "Write an opinion piece. Lead with a clear thesis, support it with specific "
-        "evidence and examples, acknowledge counterarguments, and close with a takeaway."
-    ),
+    "deep-dive":
+        ("Write a technical deep-dive article. Include concrete code examples, "
+         "explain the underlying mechanisms, cover edge cases, and reference real-world usage."),
+    "tutorial": ("Write a step-by-step tutorial. Cover prerequisites, walk through a real "
+                 "implementation from scratch, highlight common pitfalls, and show how to verify "
+                 "the result works."),
+    "comparison":
+        ("Write a comparison article. Cover setup complexity, performance characteristics, "
+         "developer experience, and ecosystem maturity. Include a summary table. "
+         "End with a recommendation for different scenarios."),
+    "opinion": ("Write an opinion piece. Lead with a clear thesis, support it with specific "
+                "evidence and examples, acknowledge counterarguments, and close with a takeaway."),
 }
 
 
@@ -143,8 +137,7 @@ def _build_generation_prompt(prompt: str, skill: str, word_count: int) -> str:
         f"Target length: approximately {word_count} words.\n\n"
         "Output the article in Markdown. The first line must be a # Title. "
         "Write the complete article — do not stop early or add any commentary outside the article itself.\n\n"
-        f"Author's brief:\n{prompt}"
-    )
+        f"Author's brief:\n{prompt}")
 
 
 def _extract_title(markdown: str) -> str:
@@ -153,7 +146,6 @@ def _extract_title(markdown: str) -> str:
         if stripped.startswith("# "):
             return stripped[2:].strip()
     return "Untitled Article"
-
 
 
 @router.post("/generate", response_model=GenerateArticleResponse, status_code=201)
@@ -200,7 +192,8 @@ def generate_article(body: GenerateArticleRequest):
         )
         for platform, push_result in results.items():
             store.apply_push_result(
-                article["id"], platform,
+                article["id"],
+                platform,
                 success=push_result.success,
                 url=push_result.url,
                 error=push_result.error,
@@ -251,18 +244,19 @@ def push_article(article_id: str, body: dict = {}):
 
 # ── Import ────────────────────────────────────────────────────────────────────
 
+
 class ImportArticleRequest(BaseModel):
-    source: str                        # "platform" | "upload"
+    source: str  # "platform" | "upload"
     # platform source
     platform: Optional[str] = None
     draft_id: Optional[str] = None
     # upload source
     filename: Optional[str] = None
     # shared fields
-    content: Optional[str] = None     # pre-fetched body (platform) or parsed MD (upload)
+    content: Optional[str] = None  # pre-fetched body (platform) or parsed MD (upload)
     title: str
-    status: Optional[str] = None      # "draft" | "published" — from platform draft
-    cover_image: Optional[str] = None # cover image URL from platform
+    status: Optional[str] = None  # "draft" | "published" — from platform draft
+    cover_image: Optional[str] = None  # cover image URL from platform
 
 
 class ImportArticleResponse(BaseModel):
@@ -286,11 +280,14 @@ def import_article(body: ImportArticleRequest):
 
     if body.source == "platform":
         if not body.platform or not body.draft_id:
-            raise HTTPException(status_code=422, detail="platform and draft_id required for source=platform")
+            raise HTTPException(status_code=422,
+                                detail="platform and draft_id required for source=platform")
 
-        platform_label = {"medium": "Medium", "hashnode": "Hashnode", "devto": "Dev.to"}.get(
-            body.platform, body.platform
-        )
+        platform_label = {
+            "medium": "Medium",
+            "hashnode": "Hashnode",
+            "devto": "Dev.to"
+        }.get(body.platform, body.platform)
         event = f"Imported from {platform_label}"
 
         if body.content:
@@ -303,7 +300,10 @@ def import_article(body: ImportArticleRequest):
             if not token:
                 raise HTTPException(
                     status_code=404,
-                    detail={"error": "platform_not_connected", "platform": body.platform},
+                    detail={
+                        "error": "platform_not_connected",
+                        "platform": body.platform
+                    },
                 )
             from backend.routers.connections import _fetch_draft
             draft = _fetch_draft(body.platform, body.draft_id, token)
@@ -313,9 +313,8 @@ def import_article(body: ImportArticleRequest):
             canonical_url = draft.get("canonical_url")
 
         # Deduplication: match by canonical_url then exact title.
-        canonical_url = getattr(body, "canonical_url", None) or (
-            canonical_url if not body.content else None
-        )
+        canonical_url = getattr(body, "canonical_url",
+                                None) or (canonical_url if not body.content else None)
         existing = None
         if canonical_url:
             existing = store.find_article_by_canonical_url(canonical_url)
@@ -367,3 +366,128 @@ def inspect_article(article_id: str):
     store.complete_job(job["job_id"], result={"gate": gate})
 
     return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
+
+
+# ── Regenerate (AI review → patches) ─────────────────────────────────────────
+
+
+class RegenerateResponse(BaseModel):
+    jobId: str
+    status: str
+
+
+@router.post("/{article_id}/regenerate", response_model=RegenerateResponse, status_code=202)
+def regenerate_article(article_id: str):
+    article = store.get_article(article_id)
+    if article is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    job = store.create_job("regenerate", article_id)
+    comments = store.list_comments(article_id)
+    unresolved = [c for c in comments if not c["resolved"]]
+
+    for comment in unresolved:
+        store.add_patch(
+            article_id,
+            label=f"AI suggestion for: {comment['text'][:40]}",
+            removed="Original text here.",
+            added="AI-improved text based on the comment.",
+            comment_id=comment["id"],
+        )
+
+    store.complete_job(job["job_id"], result={"patches_created": len(unresolved)})
+    return RegenerateResponse(jobId=job["job_id"], status="done")
+
+
+# ── Chat ──────────────────────────────────────────────────────────────────────
+
+
+class ChatRequest(BaseModel):
+    command: str
+
+
+class ChatMessage(BaseModel):
+    role: str
+    text: str
+    createdAt: str
+
+
+class ChatHistoryResponse(BaseModel):
+    messages: list[ChatMessage]
+
+
+class ChatResponse(BaseModel):
+    reply: str
+
+
+_CHAT_HELP = ("Available commands:\n"
+              "  help                — show this message\n"
+              "  destinations status — show platform statuses\n"
+              "  comment list        — list open comments\n"
+              "  patch apply <id>    — accept a patch by id\n"
+              "  regenerate          — trigger AI review\n"
+              "  inspect             — run gate validation")
+
+
+@router.get("/{article_id}/chat", response_model=ChatHistoryResponse)
+def get_chat_history(article_id: str):
+    if store.get_article(article_id) is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    messages = store.list_chat(article_id)
+    return ChatHistoryResponse(messages=[
+        ChatMessage(role=m["role"], text=m["text"], createdAt=m["created_at"]) for m in messages
+    ])
+
+
+@router.post("/{article_id}/chat", response_model=ChatResponse)
+def post_chat(article_id: str, body: ChatRequest):
+    article = store.get_article(article_id)
+    if article is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    cmd = body.command.strip()
+    store.add_chat_message(article_id, role="user", text=cmd)
+
+    cmd_lower = cmd.lower()
+    if cmd_lower in ("help", "?"):
+        reply = _CHAT_HELP
+    elif cmd_lower in ("destinations status", "destinations", "check destinations"):
+        dests = article.get("destinations", {})
+        lines = [f"{p:<12} → {d.get('status', 'unknown')}" for p, d in dests.items()]
+        reply = "\n".join(lines) if lines else "No destinations linked."
+    elif cmd_lower in ("comment list", "comments"):
+        comments = store.list_comments(article_id)
+        open_cmts = [c for c in comments if not c["resolved"]]
+        if not open_cmts:
+            reply = "No open comments."
+        else:
+            lines = [f"[{c['id']}] {c['text'][:60]}" for c in open_cmts]
+            reply = "\n".join(lines)
+    elif cmd_lower.startswith("patch apply "):
+        patch_id = cmd.split(" ", 2)[-1].strip()
+        updated = store.set_patch_state(article_id, patch_id, "accepted")
+        if updated is None:
+            reply = f"Patch '{patch_id}' not found."
+        else:
+            reply = f"Patch '{patch_id}' accepted."
+    elif cmd_lower in ("regenerate", "regen"):
+        comments = store.list_comments(article_id)
+        unresolved = [c for c in comments if not c["resolved"]]
+        for c in unresolved:
+            store.add_patch(
+                article_id,
+                label=f"AI suggestion for: {c['text'][:40]}",
+                removed="Original text here.",
+                added="AI-improved text based on the comment.",
+                comment_id=c["id"],
+            )
+        reply = f"Generated {len(unresolved)} patch(es)."
+    elif cmd_lower == "inspect":
+        gate = "pass" if article["word_count"] >= 500 else "warn"
+        store.apply_inspect_result(article_id, gate)
+        reply = f"Gate: {gate} (word count: {article['word_count']})"
+    else:
+        reply = f"Unknown command: '{cmd}'. Type 'help' for a list of commands."
+
+    store.add_chat_message(article_id, role="bot", text=reply)
+    return ChatResponse(reply=reply)

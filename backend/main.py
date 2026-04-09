@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.routers import agent, articles, connections, dev, jobs, platforms
+from backend.routers import agent, articles, comments, connections, dev, jobs, patches, platforms
 
 app = FastAPI(
     title="BlogHub API",
@@ -21,6 +21,8 @@ app.add_middleware(
 
 app.include_router(agent.router)
 app.include_router(articles.router)
+app.include_router(comments.router)
+app.include_router(patches.router)
 app.include_router(connections.router)
 app.include_router(jobs.router)
 app.include_router(platforms.router)
