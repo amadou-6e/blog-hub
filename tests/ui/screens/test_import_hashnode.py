@@ -19,12 +19,47 @@ from pathlib import Path
 import pytest
 import requests as http
 
+from blogs.hashnode.client import HashnodeClient
+from blogs.hashnode.render import prepare_draft
 from tests.ui.conftest import BASE_URL
 
 pytestmark = pytest.mark.browser
 
 PLATFORM_URL = f"{BASE_URL}/screens/import-article/v1.html?mode=platform&returnTo=overview"
 _REPO_ROOT = Path(__file__).resolve().parents[4]  # py-dockerdb/
+_OUTPUTS_DIR = Path(__file__).parent.parent / "outputs"
+_OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+
+# ── Image fixture constants ───────────────────────────────────────────────────
+# Fixed title — never changes between runs so subsequent runs reuse the draft.
+_FIXTURE_TITLE = "BlogHub UI fixture — image preview test"
+_IMAGE_BASE = (
+    "https://raw.githubusercontent.com/amadou-6e/blog-components/main/"
+    "medium/002_neo4j_llamaindex/images"
+)
+_FIXTURE_MARKDOWN = f"""\
+# {_FIXTURE_TITLE}
+
+This draft is the stable BlogHub UI test fixture for image-preview validation.
+Do not delete — it is recreated automatically if absent.
+
+## Introduction
+
+An article with real images to validate end-to-end import preview.
+
+![Title image]({_IMAGE_BASE}/title.png)
+
+## How it works
+
+The import wizard fetches this draft's body via `draft(id: $id)` and renders
+the markdown including images in the browser preview.
+
+![Architecture diagram]({_IMAGE_BASE}/knowledge_graph.png)
+
+## Summary
+
+End-to-end UI import confirmed.
+"""
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -82,7 +117,30 @@ def _to_review(page, *, search: str | None = None):
     )
 
 
-# ── Module-level skip if no token ─────────────────────────────────────────────
+# ── Module-level skip if no token ────────────────────────────────────────────
+
+
+def _read_first_publication_id(client: HashnodeClient) -> str:
+    query = """
+    query MePublications($first: Int!) {
+      me {
+        publications(first: $first) {
+          edges { node { id title } }
+        }
+      }
+    }
+    """
+    resp = client._session.post(
+        "https://gql.hashnode.com",
+        headers=client.headers,
+        json={"query": query, "variables": {"first": 10}},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    edges = resp.json()["data"]["me"]["publications"]["edges"]
+    if not edges:
+        raise RuntimeError("No Hashnode publications for this token")
+    return edges[0]["node"]["id"]
 
 
 @pytest.fixture(scope="module")
@@ -91,6 +149,35 @@ def hashnode_pat():
     if not pat:
         pytest.skip("HASHNODE_PAT is not set — skipping Hashnode UI tests")
     return pat
+
+
+@pytest.fixture(scope="module")
+def image_fixture_draft_id(hashnode_pat):
+    """
+    Module-scoped fixture that guarantees a Hashnode draft with a fixed stable
+    title and two embedded images exists in the account.
+
+    If the draft is already present (e.g. from a previous run) it is reused;
+    otherwise it is created.  The draft ID is returned.
+    """
+    client = HashnodeClient(hashnode_pat)
+
+    # Search existing drafts for the stable fixture title
+    drafts = client.list_all_drafts(page_size=20)
+    for d in drafts:
+        if d.title == _FIXTURE_TITLE:
+            return d.article_id
+
+    # Not found — create it
+    pub_id = _read_secret("HASHNODE_PUBLICATION_ID") or _read_first_publication_id(client)
+    prepared = prepare_draft(
+        _FIXTURE_MARKDOWN,
+        publication_id=pub_id,
+        cover_image_url=f"{_IMAGE_BASE}/title.png",
+        tags=("bloghub", "fixture"),
+    )
+    result = client.create_draft(prepared.draft)
+    return result.draft_id
 
 
 @pytest.fixture(autouse=True)
@@ -206,45 +293,57 @@ def test_clearing_title_disables_import(page):
 # ── 4. Article with images ────────────────────────────────────────────────────
 
 
-def test_neo4j_article_preview_renders_images(page):
+def test_image_fixture_preview_renders_images(page, image_fixture_draft_id):
     """
-    Select an article known to contain images (Neo4j article).
-    Verify <img> elements appear and have absolute https:// src values.
-    Falls back to the first article if the Neo4j article is not in the list.
+    Navigate to the stable image-fixture draft (created if absent), open its
+    review pane, assert images render with absolute src values, and save a
+    full-page screenshot of the preview to tests/ui/outputs/.
     """
     _to_draft_list(page)
 
-    # Try to find the Neo4j article via search first
-    page.locator("#draft-search").fill("Neo4j")
+    # Search for the fixture by its fixed title
+    page.locator("#draft-search").fill(_FIXTURE_TITLE[:30])  # partial match is fine
     page.wait_for_timeout(400)
+    page.wait_for_selector(".draft-row", timeout=10_000)
 
-    rows = page.locator(".draft-row")
-    neo4j_rows = rows.filter(has_text="Neo4j")
-    if neo4j_rows.count() > 0:
-        neo4j_rows.first.click()
-    else:
-        # Fall back: clear search and pick any first row
-        page.locator("#draft-search").fill("")
-        page.wait_for_selector(".draft-row", timeout=5_000)
-        page.locator(".draft-row").first.click()
+    fixture_rows = page.locator(".draft-row").filter(has_text="image preview test")
+    assert fixture_rows.count() > 0, (
+        f"Fixture draft '{_FIXTURE_TITLE}' not found in draft list after creation"
+    )
+    fixture_rows.first.click()
 
     advance(page)
-    page.wait_for_selector("#markdown-preview", timeout=10_000)
-
-    # Wait for body fetch to complete and preview to populate
+    page.wait_for_selector("#view-review", timeout=10_000)
+    # Wait for async renderReview() to finish (body fetch + title fill)
     page.wait_for_function(
-        "document.querySelector('#markdown-preview').innerHTML.length > 100",
+        "document.querySelector('#title-input').value.trim().length > 0",
+        timeout=30_000,
+    )
+    # Also wait for markdown preview to have rendered image HTML
+    page.wait_for_function(
+        "document.querySelector('#markdown-preview').innerHTML.includes('<img')",
         timeout=15_000,
     )
+    # Wait for network activity to settle (images downloading) — then screenshot.
+    # Using a best-effort wait; failure to load images from GitHub CDN won't fail
+    # the test because we assert on src attributes, not visual rendering.
+    try:
+        page.wait_for_load_state("networkidle", timeout=20_000)
+    except Exception:
+        pass  # proceed even if some resources are still in-flight
 
+    # ── Screenshot ─────────────────────────────────────────────────────────
+    screenshot_path = _OUTPUTS_DIR / "preview_hashnode_image_fixture.png"
+    page.locator("#view-review").screenshot(path=str(screenshot_path))
+
+    # ── Assertions ─────────────────────────────────────────────────────────
     imgs = page.locator("#markdown-preview img")
-    if imgs.count() == 0:
-        pytest.skip("Selected article has no images — need an image-rich article")
-
-    assert imgs.count() >= 1
+    assert imgs.count() >= 1, "No <img> elements found in the markdown preview"
     for i in range(imgs.count()):
         src = imgs.nth(i).get_attribute("src") or ""
-        assert src.startswith("https://"), f"Image {i} src is not absolute https://: {src!r}"
+        assert src.startswith("https://"), (
+            f"Image {i} src is not absolute https://: {src!r}"
+        )
 
 
 # ── 5. Import completes ───────────────────────────────────────────────────────
