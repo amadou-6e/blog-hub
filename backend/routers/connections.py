@@ -48,100 +48,14 @@ from backend.schemas.connections import (
 
 router = APIRouter(prefix="/api/connections", tags=["connections"])
 
-_VALID_IDS    = {"medium", "hashnode", "devto", "anthropic", "openai"}
-_BLOG_IDS     = {"medium", "hashnode", "devto"}
-_CLI_IDS      = {"anthropic", "openai"}
+_VALID_IDS = {"medium", "hashnode", "devto", "anthropic", "openai"}
+_BLOG_IDS = {"medium", "hashnode", "devto"}
+_CLI_IDS = {"anthropic", "openai"}
 _PROVIDER_MAP = {"anthropic": "anthropic", "openai": "openai"}
 
 _MOCK_DRAFTS: dict[str, list[dict]] = {
-    "medium": [
-        {
-            "id": "med-draft-001",
-            "title": "How I built a distributed cache from scratch",
-            "snippet": "A deep dive into consistent hashing, sharding strategies, and the night I caused a production outage at 2am.",
-            "word_count": 1840,
-            "updated_at": "2026-04-03T10:00:00+00:00",
-            "status": "draft",
-            "body": "# How I built a distributed cache from scratch\n\nBuilding a distributed cache requires careful thought about consistency, availability, and partition tolerance.\n\n## Consistent hashing\n\nConsistent hashing distributes keys across nodes so that adding or removing a node only remaps a small fraction of keys.\n\n```python\nimport hashlib\n\ndef hash_key(key: str) -> int:\n    return int(hashlib.md5(key.encode()).hexdigest(), 16)\n```\n\n## Sharding strategy\n\nWe chose virtual nodes (vnodes) to balance load across heterogeneous hardware. Each physical node owns 150 virtual positions on the hash ring.\n\n## The 2am incident\n\nA misconfigured replication factor meant one shard had no replicas. When the primary went down, we lost 12 minutes of write traffic before the on-call engineer rerouted requests.\n",
-        },
-        {
-            "id": "med-draft-002",
-            "title": "The case for boring technology in 2026",
-            "snippet": "Everyone wants the shiny new framework. Here is why your next project should use the dullest tool in the shed.",
-            "word_count": 920,
-            "updated_at": "2026-03-30T14:00:00+00:00",
-            "status": "draft",
-            "body": "# The case for boring technology in 2026\n\nEvery year the JavaScript ecosystem releases approximately forty-seven new frameworks. Every year engineering teams spend weeks evaluating them. Every year most teams would have been better off with what they already had.\n\n## What boring means\n\nBoring technology is battle-tested, well-documented, and has solved most of its edge cases years ago. Postgres is boring. Linux is boring. HTTP is boring. They are also the backbone of almost every successful product you have used today.\n\n## The hidden cost of novelty\n\nNew tools come with undiscovered bugs, sparse documentation, and a community that is still figuring out the right patterns. You will find those bugs in production.\n",
-        },
-        {
-            "id": "med-post-003",
-            "title": "Postgres full-text search vs Elasticsearch",
-            "snippet": "When does it make sense to reach for a dedicated search engine? I ran the benchmarks so you do not have to.",
-            "word_count": 2300,
-            "updated_at": "2026-03-20T09:00:00+00:00",
-            "status": "published",
-            "canonical_url": "https://acisse.dev/blog/postgres-fts-vs-elasticsearch",
-            "body": "# Postgres full-text search vs Elasticsearch\n\nFor most applications under 10 million documents, Postgres full-text search is fast enough, cheaper to operate, and dramatically simpler to keep consistent with your primary data.\n\n## Benchmark setup\n\n- Dataset: 2.4 million Stack Overflow posts\n- Hardware: 4-core, 16 GB RAM, NVMe SSD\n- Postgres 16 with `pg_trgm` and `tsvector` indexes\n- Elasticsearch 8.12 with default settings\n\n## Results\n\n| Query type | Postgres p99 | Elasticsearch p99 |\n|---|---|---|\n| Single term | 8 ms | 4 ms |\n| Phrase match | 22 ms | 7 ms |\n| Fuzzy (edit distance 1) | 180 ms | 12 ms |\n\nFuzzy search is where Elasticsearch wins decisively. If your product needs typo-tolerance at scale, the operational overhead is justified.\n",
-        },
-        {
-            "id": "med-post-004",
-            "title": "Why I stopped writing REST APIs",
-            "snippet": "After years of hand-crafting endpoints, I switched to tRPC and have not looked back.",
-            "word_count": 1200,
-            "updated_at": "2026-03-05T11:00:00+00:00",
-            "status": "published",
-            "body": "# Why I stopped writing REST APIs\n\nI spent five years writing REST APIs. I hand-crafted every endpoint, wrote OpenAPI specs by hand, and maintained client SDKs that were always slightly behind the server. Then I tried tRPC.\n\n## What changed\n\ntRPC gives you end-to-end type safety between your TypeScript server and client with zero code generation. Your API is just a TypeScript module. Your client calls it like a local function.\n\n```typescript\nconst router = t.router({\n  getUser: t.procedure\n    .input(z.object({ id: z.string() }))\n    .query(async ({ input }) => db.users.findById(input.id)),\n});\n```\n\nThe IDE knows the shape of every response. Rename a field and every call site shows a type error immediately.\n",
-        },
-        {
-            "id": "med-draft-005",
-            "title": "Migrating a monolith: what actually worked",
-            "snippet": "We moved 400k lines of Rails to Go over 18 months. Here is what the blog posts do not tell you.",
-            "word_count": 3100,
-            "updated_at": "2026-02-14T16:00:00+00:00",
-            "status": "draft",
-            "body": "# Migrating a monolith: what actually worked\n\nMost migration blog posts are written by the team that succeeded. They describe the strategy they used after the fact, with the benefit of knowing it worked. This post is different: I will tell you what we tried that failed, and why.\n\n## What we tried first (and abandoned)\n\nWe started with the Strangler Fig pattern. In theory: identify a bounded context, extract it to a new service, route traffic gradually. In practice: our monolith had no bounded contexts. Everything called everything. The dependency graph looked like a bowl of spaghetti someone had already eaten.\n\n## What actually worked\n\nWe stopped thinking about services and started thinking about data ownership. Which team owns which tables? That question had a clear answer, even when the code did not.\n",
-        },
-    ],
-    "hashnode": [
-        {
-            "id": "hn-draft-001",
-            "title": "Building a CLI tool in Go from zero",
-            "snippet": "Go has excellent standard library support for building CLIs. No framework needed.",
-            "word_count": 2100,
-            "updated_at": "2026-04-01T08:00:00+00:00",
-            "status": "draft",
-            "body": "# Building a CLI tool in Go from zero\n\nGo's standard library provides everything you need to build a production-quality CLI: `flag` for argument parsing, `os/exec` for subprocess management, and `io` for streaming output.\n\n## Project structure\n\n```\ncmd/\n  root.go      — root command, flag definitions\n  deploy.go    — deploy subcommand\ninternal/\n  config/      — config file loading\n  api/         — HTTP client\nmain.go\n```\n\n## Parsing subcommands without a framework\n\n```go\nfunc main() {\n    if len(os.Args) < 2 {\n        fmt.Fprintln(os.Stderr, \"usage: mytool <command>\")\n        os.Exit(1)\n    }\n    switch os.Args[1] {\n    case \"deploy\":\n        runDeploy(os.Args[2:])\n    default:\n        fmt.Fprintf(os.Stderr, \"unknown command: %s\\n\", os.Args[1])\n        os.Exit(1)\n    }\n}\n```\n",
-        },
-        {
-            "id": "hn-draft-002",
-            "title": "Docker without root: a practical guide",
-            "snippet": "Running Docker as root in production is a security risk most teams accept silently.",
-            "word_count": 1650,
-            "updated_at": "2026-03-18T10:00:00+00:00",
-            "status": "draft",
-            "body": "# Docker without root: a practical guide\n\nBy default, the Docker daemon runs as root and containers run as root inside their namespace. This matters when a container escape occurs: the attacker has root on the host.\n\n## Rootless Docker\n\nDocker 20.10+ supports rootless mode, where the daemon runs as an unprivileged user:\n\n```bash\ndockerd-rootless-setuptool.sh install\nexport DOCKER_HOST=unix://$XDG_RUNTIME_DIR/docker.sock\n```\n\n## USER in Dockerfile\n\nEven without rootless mode, you can drop privileges inside the container:\n\n```dockerfile\nRUN addgroup --system app && adduser --system --ingroup app app\nUSER app\n```\n\nThis does not protect against daemon-level exploits but limits damage from application-level vulnerabilities.\n",
-        },
-        {
-            "id": "hn-post-003-xpost",
-            "title": "Postgres full-text search vs Elasticsearch",
-            "snippet": "When does it make sense to reach for a dedicated search engine? I ran the benchmarks so you do not have to.",
-            "word_count": 2300,
-            "updated_at": "2026-03-20T09:00:00+00:00",
-            "status": "published",
-            "canonical_url": "https://acisse.dev/blog/postgres-fts-vs-elasticsearch",
-            "body": "# Postgres full-text search vs Elasticsearch\n\nFor most applications under 10 million documents, Postgres full-text search is fast enough, cheaper to operate, and dramatically simpler to keep consistent with your primary data.\n\n## Benchmark setup\n\n- Dataset: 2.4 million Stack Overflow posts\n- Hardware: 4-core, 16 GB RAM, NVMe SSD\n- Postgres 16 with `pg_trgm` and `tsvector` indexes\n- Elasticsearch 8.12 with default settings\n\n## Results\n\n| Query type | Postgres p99 | Elasticsearch p99 |\n|---|---|---|\n| Single term | 8 ms | 4 ms |\n| Phrase match | 22 ms | 7 ms |\n| Fuzzy (edit distance 1) | 180 ms | 12 ms |\n\nFuzzy search is where Elasticsearch wins decisively. If your product needs typo-tolerance at scale, the operational overhead is justified.\n",
-        },
-        {
-            "id": "hn-post-003",
-            "title": "Rate limiting that actually works",
-            "snippet": "Token bucket, leaky bucket, sliding window — a principled comparison with real throughput numbers.",
-            "word_count": 1900,
-            "updated_at": "2026-03-01T12:00:00+00:00",
-            "status": "published",
-            "body": "# Rate limiting that actually works\n\nMost rate limiting implementations I have seen in production have one of two problems: they are too coarse (bursts saturate downstream services) or too strict (legitimate traffic is shed during spikes).\n\n## Token bucket\n\nTokens accumulate at a fixed rate up to a maximum capacity. Each request consumes one token. If the bucket is empty, the request is rejected or queued.\n\nPros: allows short bursts up to bucket capacity. Cons: a client that exhausts the bucket during a burst gets nothing for the refill interval.\n\n## Sliding window log\n\nRecord the timestamp of each request. On each new request, count requests in the last N seconds. Reject if count exceeds limit.\n\nPros: precise. Cons: memory scales with request volume. Not practical for high-traffic endpoints without approximation.\n",
-        },
-    ],
-    "devto": [],
+    # Medium has no public API for drafts — show empty list rather than fake content.
+    "medium": [],
 }
 
 # ── Helpers — real platform API calls ────────────────────────────────────────
@@ -171,58 +85,65 @@ def _list_platform_drafts(conn_id: str, token: str) -> list[dict]:
     try:
         if conn_id == "hashnode":
             client = HashnodeClient(token)
-            articles = client.list_drafts(first=50)
+            articles = client.list_all_drafts(page_size=20)
             articles += client.list_published_articles(post_first=50)
-            return [
-                {
-                    "id": a.article_id,
-                    "title": a.title,
-                    "snippet": _snippet(a.body_markdown),
-                    "word_count": _word_count(a.body_markdown),
-                    "updated_at": _iso(a.updated_at),
-                    "status": "published" if a.published else "draft",
-                    "canonical_url": a.canonical_url,
-                    "cover_image": a.cover_image_url,
-                    "body": a.body_markdown,
-                }
-                for a in articles
-            ]
+            return [{
+                "id": a.article_id,
+                "title": a.title,
+                "snippet": _snippet(a.body_markdown),
+                "word_count": _word_count(a.body_markdown),
+                "updated_at": _iso(a.updated_at),
+                "status": "published" if a.published else "draft",
+                "canonical_url": a.canonical_url,
+                "cover_image": a.cover_image_url,
+                "body": a.body_markdown,
+            } for a in articles]
 
         if conn_id == "devto":
             client = DevToClient(token)
             articles = client.list_my_articles(per_page=100)
-            return [
-                {
-                    "id": str(a.article_id),
-                    "title": a.title,
-                    "snippet": a.description or _snippet(a.body_markdown),
-                    "word_count": _word_count(a.body_markdown),
-                    "updated_at": _iso(a.updated_at),
-                    "status": "published" if a.published else "draft",
-                    "canonical_url": a.canonical_url,
-                    "cover_image": a.cover_image,
-                    "body": a.body_markdown,
-                }
-                for a in articles
-            ]
+            return [{
+                "id": str(a.article_id),
+                "title": a.title,
+                "snippet": a.description or _snippet(a.body_markdown),
+                "word_count": _word_count(a.body_markdown),
+                "updated_at": _iso(a.updated_at),
+                "status": "published" if a.published else "draft",
+                "canonical_url": a.canonical_url,
+                "cover_image": a.cover_image,
+                "body": a.body_markdown,
+            } for a in articles]
 
     except (HashnodeError, DevToError, Exception) as exc:  # noqa: BLE001
         _log.warning("Failed to fetch drafts for %s: %s", conn_id, exc)
 
-    # Medium has no public drafts API; return mock data so the UI is usable.
+    # Medium has no public API for drafts; return empty list.
     return _MOCK_DRAFTS.get(conn_id, [])
 
 
 def _fetch_draft(conn_id: str, draft_id: str, token: str) -> dict | None:
     """Fetch a single draft's full content from the platform API."""
     try:
+        # For Hashnode: try a direct by-ID query first (avoids list pagination limits)
+        if conn_id == "hashnode":
+            client = HashnodeClient(token)
+            article = client.get_draft_by_id(draft_id)
+            if article:
+                return {
+                    "id": article.article_id,
+                    "title": article.title,
+                    "word_count": _word_count(article.body_markdown),
+                    "updated_at": _iso(article.updated_at),
+                    "status": "published" if article.published else "draft",
+                    "canonical_url": article.canonical_url,
+                    "cover_image": article.cover_image_url,
+                    "body": article.body_markdown,
+                }
         drafts = _list_platform_drafts(conn_id, token)
         return next((d for d in drafts if d["id"] == draft_id), None)
     except Exception as exc:  # noqa: BLE001
         _log.warning("_fetch_draft failed for %s/%s: %s", conn_id, draft_id, exc)
         return None
-
-
 
 
 @router.get("", response_model=ConnectionListResponse)
@@ -375,14 +296,12 @@ def _medium_oauth_start() -> OAuthStartResponse:
     )
     state = store.create_oauth_state("medium")
     scope = "basicProfile%20publicationsList"
-    url = (
-        f"https://medium.com/m/oauth/authorize"
-        f"?client_id={client_id}"
-        f"&scope={scope}"
-        f"&state={state}"
-        f"&response_type=code"
-        f"&redirect_uri={redirect_uri}"
-    )
+    url = (f"https://medium.com/m/oauth/authorize"
+           f"?client_id={client_id}"
+           f"&scope={scope}"
+           f"&state={state}"
+           f"&response_type=code"
+           f"&redirect_uri={redirect_uri}")
     return OAuthStartResponse(url=url, available=True)
 
 
@@ -502,14 +421,17 @@ def list_drafts(
     if not store.get_connection_token(conn_id):
         raise HTTPException(
             status_code=404,
-            detail={"error": "platform_not_connected", "platform": conn_id},
+            detail={
+                "error": "platform_not_connected",
+                "platform": conn_id
+            },
         )
 
     token = store.get_connection_token(conn_id)
     all_drafts = _list_platform_drafts(conn_id, token)
     total = len(all_drafts)
     start = (page - 1) * per_page
-    page_items = all_drafts[start: start + per_page]
+    page_items = all_drafts[start:start + per_page]
 
     return DraftListResponse(
         platform=conn_id,
@@ -522,8 +444,7 @@ def list_drafts(
                 status=d.get("status", "draft"),
                 snippet=d.get("snippet", ""),
                 cover_image=d.get("cover_image"),
-            )
-            for d in page_items
+            ) for d in page_items
         ],
         total=total,
         page=page,
@@ -546,7 +467,10 @@ def get_draft(conn_id: str, draft_id: str):
     if not store.get_connection_token(conn_id):
         raise HTTPException(
             status_code=404,
-            detail={"error": "platform_not_connected", "platform": conn_id},
+            detail={
+                "error": "platform_not_connected",
+                "platform": conn_id
+            },
         )
 
     token = store.get_connection_token(conn_id)
@@ -573,8 +497,10 @@ def get_draft(conn_id: str, draft_id: str):
 
 
 @router.get("/{conn_id}/oauth-callback", response_class=HTMLResponse)
-async def oauth_callback(conn_id: str, code: str | None = None,
-                         state: str | None = None, error: str | None = None):
+async def oauth_callback(conn_id: str,
+                         code: str | None = None,
+                         state: str | None = None,
+                         error: str | None = None):
     if conn_id != "medium":
         raise HTTPException(status_code=400, detail="OAuth callback only valid for medium")
 
@@ -584,9 +510,9 @@ async def oauth_callback(conn_id: str, code: str | None = None,
     if not state or not store.consume_oauth_state(state, conn_id):
         return HTMLResponse(_popup_html("error", conn_id, error="Invalid or expired OAuth state"))
 
-    client_id     = os.environ.get("MEDIUM_CLIENT_ID", "")
+    client_id = os.environ.get("MEDIUM_CLIENT_ID", "")
     client_secret = os.environ.get("MEDIUM_CLIENT_SECRET", "")
-    redirect_uri  = os.environ.get(
+    redirect_uri = os.environ.get(
         "MEDIUM_REDIRECT_URI",
         "http://localhost:8000/api/connections/medium/oauth-callback",
     )
@@ -596,11 +522,11 @@ async def oauth_callback(conn_id: str, code: str | None = None,
             token_resp = await client.post(
                 "https://api.medium.com/v1/tokens",
                 json={
-                    "code":          code,
-                    "client_id":     client_id,
+                    "code": code,
+                    "client_id": client_id,
                     "client_secret": client_secret,
-                    "grant_type":    "authorization_code",
-                    "redirect_uri":  redirect_uri,
+                    "grant_type": "authorization_code",
+                    "redirect_uri": redirect_uri,
                 },
             )
             token_data = token_resp.json()
@@ -614,7 +540,7 @@ async def oauth_callback(conn_id: str, code: str | None = None,
                 "https://api.medium.com/v1/me",
                 headers={"Authorization": f"Bearer {token}"},
             )
-            me_data  = me_resp.json().get("data", {})
+            me_data = me_resp.json().get("data", {})
             username = me_data.get("username") or me_data.get("name")
 
         store.save_connection(conn_id, token, status="connected", username=username)
@@ -624,8 +550,11 @@ async def oauth_callback(conn_id: str, code: str | None = None,
         return HTMLResponse(_popup_html("error", conn_id, error=str(exc)))
 
 
-def _popup_html(status: str, platform: str, *,
-                error: str | None = None, username: str | None = None) -> str:
+def _popup_html(status: str,
+                platform: str,
+                *,
+                error: str | None = None,
+                username: str | None = None) -> str:
     payload: dict = {"type": "oauth-complete", "platform": platform, "status": status}
     if username:
         payload["username"] = username

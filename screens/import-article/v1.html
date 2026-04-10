@@ -26,6 +26,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/turndown/7.1.2/turndown.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
@@ -62,12 +63,7 @@
     }
     .logo-mark svg { width: 12px; height: 12px; fill: white; }
     .wordmark { font-size: 14px; font-weight: 600; color: #e8eaf2; margin-left: 8px; }
-    #cancel-link {
-      margin-left: auto; font-size: 13px; color: #5a6080;
-      background: none; border: none; cursor: pointer; font-family: inherit;
-      padding: 4px 0; transition: color 100ms;
-    }
-    #cancel-link:hover { color: #c9cfe0; }
+    /* cancel-link removed from nav — kept for action bar JS compat */
 
     /* ── Step bar ── */
     #step-indicator {
@@ -204,19 +200,28 @@
     }
     #title-input:focus { border-bottom-color: #6366f1; }
     #markdown-preview {
-      max-height: 420px; overflow-y: auto; font-size: 13px; color: #c9cfe0;
-      line-height: 1.8; padding-right: 8px;
+      font-size: 14px; color: #c9cfe0; line-height: 1.85;
     }
-    #markdown-preview p { margin-bottom: 10px; }
-    #markdown-preview h1, #markdown-preview h2 { color: #e8eaf2; font-weight: 600; margin-bottom: 8px; }
-    #markdown-preview code { font-family: 'JetBrains Mono', monospace; font-size: 12px; background: #181c27; border: 1px solid #252a38; padding: 1px 5px; border-radius: 3px; }
-    #markdown-preview pre { background: #181c27; border: 1px solid #252a38; border-radius: 6px; padding: 12px 14px; margin-bottom: 10px; overflow-x: auto; }
-    #markdown-preview strong { color: #e8eaf2; }
-    #markdown-preview ul { padding-left: 18px; margin-bottom: 10px; }
-    #markdown-preview ol { padding-left: 18px; margin-bottom: 10px; }
-    #markdown-preview blockquote { border-left: 3px solid #6366f1; padding-left: 12px; margin-bottom: 10px; color: #7a82a0; }
-    #markdown-preview img { max-width: 100%; border-radius: 4px; margin: 6px 0; display: block; }
-    #markdown-preview hr { border: none; border-top: 1px solid #252a38; margin: 14px 0; }
+    #markdown-preview p { margin: 0 0 14px; }
+    #markdown-preview h1 { font-size: 22px; font-weight: 700; color: #e8eaf2; margin: 28px 0 14px; line-height: 1.3; }
+    #markdown-preview h2 { font-size: 18px; font-weight: 600; color: #e8eaf2; margin: 24px 0 10px; line-height: 1.3; }
+    #markdown-preview h3 { font-size: 15px; font-weight: 600; color: #e8eaf2; margin: 20px 0 8px; }
+    #markdown-preview h4, #markdown-preview h5, #markdown-preview h6 { font-size: 13px; font-weight: 600; color: #e8eaf2; margin: 16px 0 6px; }
+    #markdown-preview code { font-family: 'JetBrains Mono', monospace; font-size: 12px; background: #181c27; border: 1px solid #252a38; padding: 2px 6px; border-radius: 3px; }
+    #markdown-preview pre { background: #181c27; border: 1px solid #252a38; border-radius: 6px; padding: 14px 16px; margin: 0 0 16px; overflow-x: auto; }
+    #markdown-preview pre code { background: none; border: none; padding: 0; font-size: 12px; }
+    #markdown-preview strong { color: #e8eaf2; font-weight: 600; }
+    #markdown-preview em { color: #b0b8d0; }
+    #markdown-preview ul, #markdown-preview ol { padding-left: 22px; margin: 0 0 14px; }
+    #markdown-preview li { margin-bottom: 4px; }
+    #markdown-preview blockquote { border-left: 3px solid #6366f1; padding: 8px 14px; margin: 0 0 14px; color: #7a82a0; background: #13162000; }
+    #markdown-preview img { max-width: 100%; border-radius: 6px; margin: 12px 0; display: block; }
+    #markdown-preview table { border-collapse: collapse; width: 100%; margin: 0 0 16px; font-size: 13px; }
+    #markdown-preview th, #markdown-preview td { border: 1px solid #252a38; padding: 6px 12px; text-align: left; }
+    #markdown-preview th { background: #181c27; color: #e8eaf2; font-weight: 600; }
+    #markdown-preview a { color: #6366f1; text-decoration: none; }
+    #markdown-preview a:hover { text-decoration: underline; }
+    #markdown-preview hr { border: none; border-top: 1px solid #252a38; margin: 20px 0; }
 
     /* ── Cover image ── */
     .cover-img-box { width: 100%; border-radius: 8px; overflow: hidden; background: #181c27; border: 1px solid #252a38; }
@@ -275,13 +280,22 @@
 <body>
 
 <!-- ═══ Nav bar ═══════════════════════════════════════════════════ -->
-<div id="nav-bar">
-  <div class="logo-mark">
-    <svg viewBox="0 0 12 12"><path d="M2 2h8v2H2zM2 5h5v2H2zM2 8h7v2H2z"/></svg>
+<nav id="nav-bar" style="height:48px;background:#0f1117;border-bottom:1px solid #252a38;flex-shrink:0;display:flex;align-items:center;padding:0 32px;z-index:40;">
+  <div style="flex:1;display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden;">
+    <div style="width:22px;height:22px;border-radius:5px;background:#6366f1;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+        <path d="M2 2h8M2 6h5M2 10h7" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <span style="color:#e8eaf2;font-weight:600;font-size:14px;letter-spacing:-0.02em;white-space:nowrap;">BlogHub</span>
   </div>
-  <span class="wordmark">BlogHub</span>
-  <button id="cancel-link" onclick="doCancel()">Cancel</button>
-</div>
+  <div style="display:flex;align-items:stretch;height:48px;flex-shrink:0;">
+    <a href="../overview/v3.html" style="padding:0 14px;font-size:13px;cursor:pointer;background:transparent;border-bottom:2px solid #6366f1;color:#e8eaf2;font-weight:500;display:flex;align-items:center;text-decoration:none;">Articles</a>
+    <a href="#" style="padding:0 14px;font-size:13px;cursor:pointer;background:transparent;border-bottom:2px solid transparent;color:#5a6080;display:flex;align-items:center;text-decoration:none;">Queue</a>
+    <a href="../settings/v2.html" style="padding:0 14px;font-size:13px;cursor:pointer;background:transparent;border-bottom:2px solid transparent;color:#5a6080;display:flex;align-items:center;text-decoration:none;">Settings</a>
+  </div>
+  <div style="flex:1;display:flex;align-items:center;justify-content:flex-end;min-width:0;"></div>
+</nav>
 
 <!-- ═══ Step indicator ════════════════════════════════════════════ -->
 <div id="step-bar">
@@ -453,8 +467,8 @@ const MODE       = params.get('mode') || 'platform';  // 'platform' | 'upload'
 const RETURN_TO  = params.get('returnTo') || 'overview';
 
 let step              = 1;
-let selectedPlatform  = null;  // platform object
-let selectedArticles  = [];    // array of article objects (multi-select)
+let selectedPlatforms = [];    // array of platform objects (multi-select step 1)
+let selectedArticles  = [];    // array of article objects (multi-select step 2)
 let uploadedFile      = null;  // { name, content, title, wordCount }
 let editedTitle       = '';
 let showError         = false;
@@ -466,13 +480,13 @@ let fetchingBodyForId = null;  // article id being body-fetched
 // ─── Session persistence (5-min TTL) ────────────────────────────
 const _SS_KEY_IA = 'bh_import_v1';
 const _SS_TTL_IA = 5 * 60 * 1000;
-let _pendingPlatformId = null;
+let _pendingPlatformIds = [];
 
 function _saveImportState() {
   try {
     sessionStorage.setItem(_SS_KEY_IA, JSON.stringify({
       ts: Date.now(), mode: MODE, step,
-      selectedPlatformId: selectedPlatform?.id || null,
+      selectedPlatformIds: selectedPlatforms.map(p => p.id),
       selectedArticles: selectedArticles.map(a => ({
         id: a.id, title: a.title, snippet: a.snippet,
         status: a.status, wordCount: a.wordCount, age: a.age,
@@ -490,9 +504,9 @@ function _restoreImportState() {
     const s = JSON.parse(raw);
     if (!s || Date.now() - s.ts > _SS_TTL_IA) { sessionStorage.removeItem(_SS_KEY_IA); return false; }
     if (s.mode !== MODE) return false;
-    step               = typeof s.step === 'number' ? s.step : 1;
-    _pendingPlatformId = s.selectedPlatformId || null;
-    selectedArticles   = Array.isArray(s.selectedArticles) ? s.selectedArticles : [];
+    step                 = typeof s.step === 'number' ? s.step : 1;
+    _pendingPlatformIds  = Array.isArray(s.selectedPlatformIds) ? s.selectedPlatformIds : (s.selectedPlatformId ? [s.selectedPlatformId] : []);
+    selectedArticles     = Array.isArray(s.selectedArticles) ? s.selectedArticles : [];
     editedTitle        = s.editedTitle || '';
     draftSearch        = s.draftSearch || '';
     draftFilter        = s.draftFilter || 'all';
@@ -538,9 +552,9 @@ async function initConnections(restored = false) {
         initials: PLATFORM_META[c.id]?.initials || c.id[0].toUpperCase(),
         connected: c.status === 'connected',
       }));
-    if (restored && _pendingPlatformId) {
-      selectedPlatform = PLATFORMS.find(p => p.id === _pendingPlatformId) || null;
-      _pendingPlatformId = null;
+    if (restored && _pendingPlatformIds.length > 0) {
+      selectedPlatforms = PLATFORMS.filter(p => _pendingPlatformIds.includes(p.id));
+      _pendingPlatformIds = [];
     }
   } catch {
     // API unreachable — PLATFORMS stays [], renderPlatformGrid() shows #no-platforms
@@ -548,9 +562,9 @@ async function initConnections(restored = false) {
   renderPlatformGrid();
   renderStepBar();
   renderActionBar();
-  if (restored && step === 2 && selectedPlatform) {
+  if (restored && step === 2 && selectedPlatforms.length > 0) {
     showView('draft-list');
-    loadDrafts(selectedPlatform.id).then(() => {
+    Promise.all(selectedPlatforms.map(p => loadDrafts(p.id))).then(() => {
       const si = document.getElementById('draft-search');
       if (si && draftSearch) si.value = draftSearch;
       ['all', 'draft', 'published'].forEach(k => {
@@ -558,7 +572,7 @@ async function initConnections(restored = false) {
         if (el) el.classList.toggle('active', k === draftFilter);
       });
     });
-  } else if (restored && step === 3 && selectedPlatform) {
+  } else if (restored && step === 3 && selectedPlatforms.length > 0) {
     showView('review');
     renderReview();
   }
@@ -663,7 +677,7 @@ function renderActionBar() {
 
 function canAdvance() {
   if (MODE === 'platform') {
-    if (step === 1) return selectedPlatform !== null;
+    if (step === 1) return selectedPlatforms.length > 0;
     if (step === 2) return selectedArticles.length > 0;
     if (step === 3) return selectedArticles.length === 1
       ? editedTitle.trim().length > 0
@@ -696,7 +710,7 @@ function advance() {
         if (el) el.classList.toggle('active', k === 'all');
       });
       showView('draft-list');
-      loadDrafts(selectedPlatform.id);
+      selectedPlatforms.forEach(p => loadDrafts(p.id));
     }
     if (step === 3) { renderReview(); showView('review'); }
   } else {
@@ -742,8 +756,10 @@ function renderPlatformGrid() {
     return;
   }
 
-  grid.innerHTML = PLATFORMS.map(p => `
-    <div class="platform-card ${p.connected ? '' : 'disconnected'} ${selectedPlatform?.id === p.id ? 'selected' : ''}"
+  grid.innerHTML = PLATFORMS.map(p => {
+    const isSel = selectedPlatforms.some(s => s.id === p.id);
+    return `
+    <div class="platform-card ${p.connected ? '' : 'disconnected'} ${isSel ? 'selected' : ''}"
       onclick="${p.connected ? `selectPlatform('${p.id}')` : ''}">
       <div class="platform-logo" style="background:${p.bg};color:${p.color};">${p.initials}</div>
       <div>
@@ -753,13 +769,21 @@ function renderPlatformGrid() {
       <div class="platform-check">
         <svg viewBox="0 0 10 10"><path d="M1.5 5l2.5 2.5 4.5-4.5"/></svg>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 function selectPlatform(id) {
-  selectedPlatform = PLATFORMS.find(p => p.id === id) || null;
-  selectedArticles = [];
+  const plat = PLATFORMS.find(p => p.id === id);
+  if (!plat) return;
+  const idx = selectedPlatforms.findIndex(p => p.id === id);
+  if (idx >= 0) {
+    selectedPlatforms.splice(idx, 1);
+    // deselect any articles from this platform
+    selectedArticles = selectedArticles.filter(a => a._platformId !== id);
+  } else {
+    selectedPlatforms.push(plat);
+  }
   renderPlatformGrid();
   renderActionBar();
   _saveImportState();
@@ -768,35 +792,51 @@ function selectPlatform(id) {
 // ─── Draft list ──────────────────────────────────────────────────
 let visibleCount = 20;
 function renderDraftList() {
-  if (!selectedPlatform) return;
-  const p = selectedPlatform;
+  if (selectedPlatforms.length === 0) return;
 
-  document.getElementById('platform-list-title').textContent = p.name;
+  // Header: show platform name(s)
+  const names = selectedPlatforms.map(p => p.name).join(' + ');
+  document.getElementById('platform-list-title').textContent = names;
   const logoSm = document.getElementById('platform-logo-sm');
-  logoSm.style.background = p.bg;
-  logoSm.style.color = p.color;
-  logoSm.textContent = p.initials;
+  if (selectedPlatforms.length === 1) {
+    logoSm.style.background = selectedPlatforms[0].bg;
+    logoSm.style.color = selectedPlatforms[0].color;
+    logoSm.textContent = selectedPlatforms[0].initials;
+  } else {
+    logoSm.style.background = '#252a38';
+    logoSm.style.color = '#c9cfe0';
+    logoSm.textContent = String(selectedPlatforms.length);
+  }
 
   const rows = document.getElementById('draft-rows');
-  const raw  = platformArticles[p.id];
 
-  // Still loading
-  if (raw === null || raw === undefined) {
+  // Check if any platform is still loading
+  const stillLoading = selectedPlatforms.some(p => platformArticles[p.id] === null || platformArticles[p.id] === undefined);
+  if (stillLoading) {
     rows.innerHTML = '<div style="padding:24px;text-align:center;font-size:13px;color:#5a6080;display:flex;align-items:center;justify-content:center;gap:8px;"><span class="spinner" style="width:14px;height:14px;"></span> Loading articles…</div>';
     document.getElementById('article-count-label').textContent = '';
     document.getElementById('load-more-wrap').style.display = 'none';
     return;
   }
 
+  // Combine articles from all selected platforms, tagging each with _platformId
+  let combined = [];
+  selectedPlatforms.forEach(p => {
+    (platformArticles[p.id] || []).forEach(a => combined.push(Object.assign({}, a, { _platformId: p.id, _platformName: p.name, _platformBg: p.bg, _platformColor: p.color, _platformInitials: p.initials })));
+  });
+
   // Apply status filter and search query
-  let articles = raw;
+  let articles = combined;
   if (draftFilter !== 'all') articles = articles.filter(a => a.status === draftFilter);
   if (draftSearch) articles = articles.filter(a =>
     a.title.toLowerCase().includes(draftSearch) ||
     (a.snippet || '').toLowerCase().includes(draftSearch)
   );
 
-  document.getElementById('article-count-label').textContent = `${articles.length} article${articles.length !== 1 ? 's' : ''}`;
+  const selCount = selectedArticles.length;
+  document.getElementById('article-count-label').textContent =
+    `${articles.length} article${articles.length !== 1 ? 's' : ''}` +
+    (selCount > 0 ? ` · ${selCount} selected` : '');
 
   const slice = articles.slice(0, visibleCount);
 
@@ -806,13 +846,9 @@ function renderDraftList() {
     return;
   }
 
-  const selCount = selectedArticles.length;
-  document.getElementById('article-count-label').textContent =
-    `${articles.length} article${articles.length !== 1 ? 's' : ''}` +
-    (selCount > 0 ? ` · ${selCount} selected` : '');
-
+  const showPlatformBadge = selectedPlatforms.length > 1;
   rows.innerHTML = slice.map(a => {
-    const isSelected  = selectedArticles.some(s => s.id === a.id);
+    const isSelected  = selectedArticles.some(s => s.id === a.id && s._platformId === a._platformId);
     const isFetching  = fetchingBodyForId === a.id;
     const loadingCue  = isFetching
       ? '<span class="spinner" style="width:11px;height:11px;border-width:1.5px;margin-left:6px;"></span>'
@@ -822,10 +858,13 @@ function renderDraftList() {
            <svg viewBox="0 0 10 10" width="10" height="10" fill="none" stroke="#fff" stroke-width="1.5"><path d="M1.5 5l2.5 2.5 4.5-4.5"/></svg>
          </span>`
       : `<span style="flex-shrink:0;width:16px;height:16px;border-radius:4px;border:1px solid #252a38;display:inline-block;margin-right:8px;"></span>`;
+    const platBadge = showPlatformBadge
+      ? `<span style="flex-shrink:0;font-size:10px;font-weight:600;padding:1px 5px;border-radius:3px;background:${a._platformBg};color:${a._platformColor};margin-right:6px;">${a._platformInitials}</span>`
+      : '';
     return `
     <div class="draft-row ${isSelected ? 'selected' : ''}"
-      onclick="selectArticle('${a.id}')">
-      <div class="draft-row-title" style="display:flex;align-items:center;">${check}${a.title}${loadingCue}</div>
+      onclick="selectArticle('${a.id}','${a._platformId}')">
+      <div class="draft-row-title" style="display:flex;align-items:center;">${check}${platBadge}${a.title}${loadingCue}</div>
       <div class="draft-row-snippet" style="padding-left:24px;">${a.snippet}</div>
       <div class="draft-row-meta" style="padding-left:24px;">
         <span class="draft-badge ${a.status}">${a.status}</span>
@@ -838,22 +877,29 @@ function renderDraftList() {
   }).join('');
 
   const loadWrap = document.getElementById('load-more-wrap');
-  loadWrap.style.display = visibleCount < articles.length ? 'block' : 'none';
+  if (visibleCount < articles.length) {
+    loadWrap.style.display = 'block';
+    const loadBtn = loadWrap.querySelector('button');
+    if (loadBtn) loadBtn.textContent = `Load more (${articles.length - visibleCount} more)`;
+  } else {
+    loadWrap.style.display = 'none';
+  }
 }
 
-async function selectArticle(id) {
-  if (!selectedPlatform) return;
-  const allArticles = platformArticles[selectedPlatform.id] || [];
+async function selectArticle(id, platformId) {
+  if (selectedPlatforms.length === 0) return;
+  const pid = platformId || (selectedPlatforms[0] && selectedPlatforms[0].id);
+  const allArticles = platformArticles[pid] || [];
   const article = allArticles.find(a => a.id === id);
   if (!article) return;
 
-  const idx = selectedArticles.findIndex(a => a.id === id);
+  const idx = selectedArticles.findIndex(a => a.id === id && a._platformId === pid);
   if (idx >= 0) {
     // Deselect
     selectedArticles.splice(idx, 1);
   } else {
     // Select — add a copy so we can mutate body independently
-    selectedArticles.push(Object.assign({}, article));
+    selectedArticles.push(Object.assign({}, article, { _platformId: pid }));
   }
 
   // For single selection, keep editedTitle in sync
@@ -864,18 +910,18 @@ async function selectArticle(id) {
   _saveImportState();
 
   // Pre-fetch body for newly selected article
-  const sel = selectedArticles.find(a => a.id === id);
+  const sel = selectedArticles.find(a => a.id === id && a._platformId === pid);
   if (sel && !sel.body) {
     fetchingBodyForId = id;
     renderDraftList();
     try {
-      const r = await fetch(`/api/connections/${encodeURIComponent(selectedPlatform.id)}/drafts/${encodeURIComponent(id)}`);
+      const r = await fetch(`/api/connections/${encodeURIComponent(pid)}/drafts/${encodeURIComponent(id)}`);
       if (r.ok) {
         const d = await r.json();
-        sel.body = d.body || '';
+        sel.body = typeof d.body === 'string' ? d.body : '';
         if (!sel.coverImage && d.cover_image) sel.coverImage = d.cover_image;
       }
-    } catch {}
+    } catch (_e) {}
     fetchingBodyForId = null;
     renderDraftList();
     renderActionBar();
@@ -906,7 +952,7 @@ function setDraftSearch(q) {
 }
 
 // ─── Review pane ─────────────────────────────────────────────────
-function renderReview() {
+async function renderReview() {
   const multiEl  = document.getElementById('review-multi');
   const singleEl = document.getElementById('review-single');
 
@@ -914,7 +960,11 @@ function renderReview() {
   if (MODE === 'platform' && selectedArticles.length > 1) {
     multiEl.style.display  = 'block';
     singleEl.style.display = 'none';
-    const src = selectedPlatform?.name || 'Platform';
+    const platNames = [...new Set(selectedArticles.map(a => {
+      const p = selectedPlatforms.find(p => p.id === a._platformId);
+      return p ? p.name : a._platformId;
+    }))];
+    const src = platNames.length === 1 ? platNames[0] : platNames.join(' & ');
     document.getElementById('review-multi-heading').textContent =
       `Import ${selectedArticles.length} articles from ${src}`;
     document.getElementById('review-multi-sub').textContent =
@@ -939,10 +989,27 @@ function renderReview() {
 
   if (MODE === 'platform' && singleArticle) {
     title = singleArticle.title;
-    const src = selectedPlatform ? selectedPlatform.name : 'Platform';
+    const platObj = selectedPlatforms.find(p => p.id === singleArticle._platformId) || selectedPlatforms[0];
+    const src = platObj ? platObj.name : 'Platform';
     const st  = singleArticle.status === 'published' ? 'Published on' : 'Draft from';
     meta  = `${(singleArticle.wordCount||0).toLocaleString()} words · ${st} ${src}`;
     body  = singleArticle.body;
+    // Body may still be fetching (user hit Next before the async pre-fetch finished)
+    if (!body) {
+      const pid = singleArticle._platformId;
+      const aid = singleArticle.id;
+      document.getElementById('markdown-preview').innerHTML =
+        `<div style="font-size:12px;color:#5a6080;text-align:center;padding:32px 0;">Loading article…</div>`;
+      try {
+        const r = await fetch(`/api/connections/${encodeURIComponent(pid)}/drafts/${encodeURIComponent(aid)}`);
+        if (r.ok) {
+          const d = await r.json();
+          singleArticle.body = typeof d.body === 'string' ? d.body : '';
+          if (!singleArticle.coverImage && d.cover_image) singleArticle.coverImage = d.cover_image;
+          body = singleArticle.body;
+        }
+      } catch (_e) { /* render empty below */ }
+    }
   } else if (MODE === 'upload' && uploadedFile) {
     title = uploadedFile.title;
     meta  = `${uploadedFile.wordCount.toLocaleString()} words · Local file — ${uploadedFile.name}`;
@@ -960,7 +1027,7 @@ function renderReview() {
   const coverCon  = document.getElementById('cover-image-container');
   const coverUrl  = (MODE === 'platform' && singleArticle?.coverImage) ? singleArticle.coverImage : null;
   if (coverUrl) {
-    const platClass = selectedPlatform?.id || 'upload';
+    const platClass = singleArticle?._platformId || 'upload';
     coverCon.className = `cover-img-box ${platClass}`;
     const hints = { hashnode: 'Hashnode cover — 1600 × 840', devto: 'Dev.to cover — 1000 × 420', medium: 'Medium cover — 16:9', upload: '16:9' };
     coverHint.textContent = hints[platClass] || '';
@@ -1008,6 +1075,16 @@ function inlineMarkdown(text) {
 }
 
 function renderMarkdown(md) {
+  const el = document.getElementById('markdown-preview');
+  const text = typeof md === 'string' ? md : (md != null ? String(md) : '');
+  if (!text) { el.innerHTML = ''; return; }
+  el.innerHTML = marked.parse(text, { breaks: false, gfm: true });
+  // Open all links in new tab safely
+  el.querySelectorAll('a').forEach(a => { a.target = '_blank'; a.rel = 'noopener'; });
+}
+
+// ── Legacy inline parser (kept for internal use) ──────────────────
+function _renderMarkdown_UNUSED(md) {
   if (!md) { document.getElementById('markdown-preview').innerHTML = ''; return; }
   const lines  = md.split('\n');
   const parts  = [];
@@ -1295,7 +1372,6 @@ function resetDropZone(e) {
 async function doImport() {
   document.getElementById('import-overlay').classList.add('active');
   document.getElementById('primary-btn').disabled = true;
-  document.getElementById('cancel-link').disabled = true;
 
   try {
     if (MODE === 'upload') {
@@ -1325,7 +1401,7 @@ async function doImport() {
     for (const article of selectedArticles) {
       const body = {
         source: 'platform',
-        platform: selectedPlatform.id,
+        platform: article._platformId,
         draft_id: article.id,
         title: selectedArticles.length === 1 ? editedTitle : article.title,
         content: article.body || undefined,
@@ -1338,7 +1414,11 @@ async function doImport() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(`"${article.title}": ${err.detail || `Server error ${res.status}`}`);
+        const detail = err.detail;
+        const msg = typeof detail === 'string' ? detail
+          : typeof detail === 'object' && detail !== null ? (detail.error || JSON.stringify(detail))
+          : `Server error ${res.status}`;
+        throw new Error(`"${article.title}": ${msg}`);
       }
       results.push(await res.json());
     }
@@ -1353,7 +1433,6 @@ async function doImport() {
     document.getElementById('import-overlay').classList.remove('active');
     showImportError(err.message || 'Import failed');
     document.getElementById('primary-btn').disabled = false;
-    document.getElementById('cancel-link').disabled = false;
   }
 }
 
@@ -1375,7 +1454,7 @@ function retryImport() {
 function doStartOver() {
   sessionStorage.removeItem(_SS_KEY_IA);
   step = 1;
-  selectedPlatform = null;
+  selectedPlatforms = [];
   selectedArticles = [];
   uploadedFile = null;
   editedTitle = '';

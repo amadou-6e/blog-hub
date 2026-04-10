@@ -102,22 +102,22 @@
 <body class="font-sans h-screen flex flex-col overflow-hidden">
 
   <!-- ── Top nav ───────────────────────────────────────────── -->
-  <nav class="flex items-center justify-between px-5 h-12 border-b shrink-0"
-       style="border-color:#252a38; background:#0f1117;">
-    <div class="flex items-center gap-6">
-      <a href="/screens/overview/v3.html" class="text-bright font-semibold tracking-tight text-sm">BlogHub</a>
-      <div id="back-link-wrap" style="display:none;">
-        <a id="back-link" href="#" style="font-size:12px;color:#5a6080;text-decoration:none;display:flex;align-items:center;gap:4px;" onmouseover="this.style.color='#c9cfe0'" onmouseout="this.style.color='#5a6080'">← Back</a>
+  <nav style="height:48px;background:#0f1117;border-bottom:1px solid #252a38;flex-shrink:0;display:flex;align-items:center;padding:0 32px;z-index:40;">
+    <div style="flex:1;display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden;">
+      <div style="width:22px;height:22px;border-radius:5px;background:#6366f1;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <path d="M2 2h8M2 6h5M2 10h7" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
       </div>
-      <div class="flex items-center gap-1 text-xs">
-        <a href="/screens/overview/v4.html" class="px-3 py-1.5 rounded text-muted hover:text-text">Articles</a>
-        <a href="#" class="px-3 py-1.5 rounded text-muted hover:text-text">Queue</a>
-        <a href="/screens/settings/v2.html" class="px-3 py-1.5 rounded text-bright font-medium" style="background:#252a38;">Platforms</a>
-        <a href="#" class="px-3 py-1.5 rounded text-muted hover:text-text">Settings</a>
-      </div>
+      <span style="color:#e8eaf2;font-weight:600;font-size:14px;letter-spacing:-0.02em;white-space:nowrap;">BlogHub</span>
     </div>
-    <div class="flex items-center gap-1.5 text-xs text-muted">
-      <span id="count-dot" class="w-1.5 h-1.5 rounded-full inline-block" style="background:#5a6080;"></span>
+    <div style="display:flex;align-items:stretch;height:48px;flex-shrink:0;">
+      <a href="../overview/v3.html" style="padding:0 14px;font-size:13px;cursor:pointer;background:transparent;border-bottom:2px solid transparent;color:#5a6080;display:flex;align-items:center;text-decoration:none;">Articles</a>
+      <a href="#" style="padding:0 14px;font-size:13px;cursor:pointer;background:transparent;border-bottom:2px solid transparent;color:#5a6080;display:flex;align-items:center;text-decoration:none;">Queue</a>
+      <a href="../settings/v2.html" style="padding:0 14px;font-size:13px;cursor:pointer;background:transparent;border-bottom:2px solid #6366f1;color:#e8eaf2;font-weight:500;display:flex;align-items:center;text-decoration:none;">Settings</a>
+    </div>
+    <div style="flex:1;display:flex;align-items:center;gap:6px;justify-content:flex-end;min-width:0;font-size:12px;color:#5a6080;">
+      <span id="count-dot" style="width:6px;height:6px;border-radius:50%;background:#5a6080;display:inline-block;"></span>
       <span id="count-label">— connections</span>
     </div>
   </nav>

@@ -89,21 +89,20 @@
 
 <!-- ═══ Top nav ════════════════════════════════════════════════════ -->
 <nav style="height:48px;background:#0f1117;border-bottom:1px solid #252a38;flex-shrink:0;display:flex;align-items:center;padding:0 32px;z-index:40;">
-  <div style="display:flex;align-items:center;gap:24px;">
-    <div style="display:flex;align-items:center;gap:8px;">
-      <div style="width:22px;height:22px;border-radius:5px;background:#6366f1;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-          <path d="M2 2h8M2 6h5M2 10h7" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
-        </svg>
-      </div>
-      <span style="color:#e8eaf2;font-weight:600;font-size:14px;letter-spacing:-0.02em;">BlogHub</span>
+  <div style="flex:1;display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden;">
+    <div style="width:22px;height:22px;border-radius:5px;background:#6366f1;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+        <path d="M2 2h8M2 6h5M2 10h7" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
     </div>
-    <div style="display:flex;align-items:stretch;height:48px;">
-      <a href="../overview/v3.html" style="padding:0 14px;font-size:13px;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid transparent;color:#5a6080;display:flex;align-items:center;text-decoration:none;">Articles</a>
-      <button style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid #6366f1;color:#e8eaf2;font-weight:500;">New article</button>
-    </div>
+    <span style="color:#e8eaf2;font-weight:600;font-size:14px;letter-spacing:-0.02em;white-space:nowrap;">BlogHub</span>
   </div>
-  <div style="margin-left:auto;display:flex;align-items:center;gap:14px;">
+  <div style="display:flex;align-items:stretch;height:48px;flex-shrink:0;">
+    <a href="../overview/v3.html" style="padding:0 14px;font-size:13px;cursor:pointer;background:transparent;border-bottom:2px solid #6366f1;color:#e8eaf2;font-weight:500;display:flex;align-items:center;text-decoration:none;">Articles</a>
+    <a href="#" style="padding:0 14px;font-size:13px;cursor:pointer;background:transparent;border-bottom:2px solid transparent;color:#5a6080;display:flex;align-items:center;text-decoration:none;">Queue</a>
+    <a href="../settings/v2.html" style="padding:0 14px;font-size:13px;cursor:pointer;background:transparent;border-bottom:2px solid transparent;color:#5a6080;display:flex;align-items:center;text-decoration:none;">Settings</a>
+  </div>
+  <div style="flex:1;display:flex;align-items:center;gap:14px;justify-content:flex-end;min-width:0;">
     <button onclick="doResetWizard()" title="Reset wizard" style="font-size:12px;color:#3a3f52;background:transparent;border:none;cursor:pointer;font-family:inherit;padding:4px 8px;border-radius:4px;transition:color 100ms;" onmouseover="this.style.color='#c9cfe0'" onmouseout="this.style.color='#3a3f52'">↺ Reset</button>
     <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#5a6080;">
       <span style="width:6px;height:6px;border-radius:50%;background:#4ade80;display:inline-block;"></span>

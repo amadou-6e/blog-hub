@@ -17,6 +17,8 @@ STOP THE SERVER
 
 A PID record is written to .dev-server.pid so stop.py can find the process.
 """
+import sys
+sys.stdout.reconfigure(encoding="utf-8")
 import os
 import socket
 import subprocess

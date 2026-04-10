@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <title>BlogHub — Editor</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script>tailwind.config={theme:{extend:{colors:{surface:'#0f1117',panel:'#181c27',border:'#252a38','border-hi':'#3a3f52',muted:'#5a6080',text:'#c9cfe0',bright:'#e8eaf2',accent:'#6366f1'},fontFamily:{sans:['Inter','system-ui','sans-serif'],mono:['JetBrains Mono','monospace']}}}}</script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <style>
@@ -47,6 +48,12 @@
     .rendered-preview blockquote{margin:0 0 10px;padding:7px 12px;border-left:2px solid #fbbf24;background:#1e1b0e;border-radius:0 4px 4px 0;font-size:12px;color:#c9cfe0}
     .rendered-preview pre{background:#161a24;border-radius:5px;padding:10px 12px;margin:0 0 10px;overflow:hidden}
     .rendered-preview code{font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.5;color:#c9cfe0}
+    .rendered-preview img{max-width:100%;border-radius:6px;margin:8px 0;display:block;}
+    .rendered-preview a{color:#6366f1;text-decoration:none;}
+    .rendered-preview ul,.rendered-preview ol{padding-left:22px;margin:0 0 10px;}
+    .rendered-preview li{margin-bottom:4px;font-size:13px;}
+    .rendered-preview table{border-collapse:collapse;width:100%;margin:0 0 12px;font-size:12px;}
+    .rendered-preview th,.rendered-preview td{border:1px solid #252a38;padding:5px 10px;text-align:left;}
     .kw{color:#a5b4fc}.cm-c{color:#5a6080}
 
     .chat-msg{display:flex;flex-direction:column;gap:2px;margin-bottom:10px}
@@ -114,15 +121,24 @@
 
 <!-- Zone A: Nav -->
 <div style="height:48px;background:#0f1117;border-bottom:1px solid #252a38;display:flex;align-items:center;padding:0 14px;gap:8px;flex-shrink:0;z-index:30;">
-  <button class="icon-btn" title="Back to overview" style="color:#5a6080;" onclick="location.href='../overview/v3.html'">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
-  </button>
-  <div style="display:flex;align-items:center;gap:7px;flex:1;min-width:0;">
+  <!-- Logo + back -->
+  <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+    <button class="icon-btn" title="Back to overview" style="color:#5a6080;" onclick="location.href='../overview/v3.html'">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+    </button>
+    <div style="width:22px;height:22px;border-radius:5px;background:#6366f1;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 2h8M2 6h5M2 10h7" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>
+    </div>
+    <span style="color:#e8eaf2;font-weight:600;font-size:14px;letter-spacing:-0.02em;">BlogHub</span>
+  </div>
+  <!-- Article title + save indicator -->
+  <div style="display:flex;align-items:center;gap:7px;flex:1;min-width:0;padding:0 16px;">
     <span id="article-title" contenteditable="true" oninput="onInput()"
       style="font-size:14px;font-weight:500;color:#e8eaf2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:420px;outline:none;padding-bottom:1px;border-bottom:1px solid transparent;cursor:text;"
-      onfocus="this.style.borderBottomColor='#252a38'" onblur="this.style.borderBottomColor='transparent'">Zero-downtime Postgres Migration</span>
+      onfocus="this.style.borderBottomColor='#252a38'" onblur="this.style.borderBottomColor='transparent'"></span>
     <div id="save-indicator" style="flex-shrink:0;display:flex;align-items:center;"></div>
   </div>
+  <!-- Actions -->
   <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
     <button class="nav-btn accent" onclick="showReview()">Review</button>
     <button class="nav-btn" onclick="triggerInspect()">Inspect</button>
@@ -462,26 +478,18 @@ function renderPreview() {
   } else {
     extLink.style.display = 'none';
   }
-  const core = `<div class="rendered-preview">
-    <h1>Zero-downtime Postgres Migration</h1>
-    <p>Migrating a production Postgres database without downtime requires careful coordination between schema changes, application deployments, and traffic routing.</p>
-    <h2>Phase 1 — Baseline and snapshot</h2>
-    <p>Before touching any schema, capture a full logical backup and establish your rollback threshold.</p>
-    <blockquote><p>A dry run in staging is mandatory. Skipping this has caused three incidents in our post-mortem history.</p></blockquote>
-    <h2>Phase 2 — Schema expansion</h2>
-    <pre><code><span class="cm-c">-- Safe: add nullable column first</span>
-<span class="kw">ALTER TABLE</span> orders <span class="kw">ADD COLUMN</span> retry_count <span class="kw">INTEGER</span>;
-<span class="kw">UPDATE</span> orders <span class="kw">SET</span> retry_count = 0 <span class="kw">WHERE</span> retry_count <span class="kw">IS NULL</span>;</code></pre>
-    <h2>Phase 3 — Cutover</h2>
-    <p>Health checks must run before and after each migration step. Lock timeout: 5 seconds.</p>
-    <pre><code><span class="kw">CREATE INDEX CONCURRENTLY</span> idx_orders_retry <span class="kw">ON</span> orders(retry_count);</code></pre>
-  </div>`;
+  const md = document.getElementById('raw-editor').value || '';
+  const core = `<div class="rendered-preview">${marked.parse(md, { breaks: false, gfm: true })}</div>`;
   const body = document.getElementById('preview-body');
-  if (platform === 'rendered') { body.innerHTML = core; return; }
+  if (platform === 'rendered') {
+    body.innerHTML = core;
+    body.querySelectorAll('a').forEach(a => { a.target = '_blank'; a.rel = 'noopener'; });
+    return;
+  }
   const name = { medium:'Medium', hashnode:'Hashnode', devto:'Dev.to' }[platform];
   body.innerHTML = `<div style="font-size:10px;color:#5a6080;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;display:flex;align-items:center;gap:6px;"><span style="width:6px;height:6px;border-radius:50%;background:#6366f1;"></span>${name} preview</div>
-    <div style="background:#13161f;border:1px solid #252a38;border-radius:8px;padding:14px;">${core}</div>
-    <div style="margin-top:10px;font-size:11px;color:#5a6080;">Draft synced · last pushed 3 min ago</div>`;
+    <div style="background:#13161f;border:1px solid #252a38;border-radius:8px;padding:14px;">${core}</div>`;
+  body.querySelectorAll('a').forEach(a => { a.target = '_blank'; a.rel = 'noopener'; });
 }
 
 // ── Content builders ──────────────────────────────────────────────────────────

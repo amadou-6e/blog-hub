@@ -84,6 +84,50 @@ def create_article(body: CreateArticleRequest):
     )
 
 
+@router.get("/{article_id}")
+def get_article(article_id: str):
+    article = store.get_article(article_id)
+    if article is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    platform_names = {"medium": "Medium", "hashnode": "Hashnode", "devto": "Dev.to"}
+    return {
+        "id": article["id"],
+        "title": article["title"],
+        "content": article["body"] or "",
+        "word_count": article["word_count"],
+        "gate": article["gate"],
+        "source": article["source"],
+        "source_platform": article["source_platform"],
+        "destinations": {
+            k: {
+                "status": v["status"],
+                "label": v["label"],
+                "url": v["url"],
+                "error": v["error"],
+                "platform": platform_names.get(k, k),
+            }
+            for k, v in article["destinations"].items()
+        },
+    }
+
+
+class PatchArticleRequest(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+
+
+@router.patch("/{article_id}", status_code=200)
+def patch_article(article_id: str, body: PatchArticleRequest):
+    article = store.get_article(article_id)
+    if article is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    if body.title is not None:
+        store.update_article_title(article_id, body.title)
+    if body.content is not None:
+        store.update_article_body(article_id, body.content, event="Edited manually")
+    return {"id": article_id, "status": "saved"}
+
+
 @router.delete("", status_code=204)
 def delete_articles(body: DeleteArticleRequest):
     blocked = store.delete_articles(ids=body.ids, force=body.force)

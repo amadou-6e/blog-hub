@@ -108,11 +108,45 @@ class HashnodeClient:
             raw=data,
         )
 
-    def list_drafts(self, *, first: int = 20) -> list[HashnodeRemoteArticle]:
+    def get_draft_by_id(self, draft_id: str) -> HashnodeRemoteArticle | None:
+        """Fetch a single draft by its ID directly from the Hashnode API."""
         query = """
-        query MeDrafts($first: Int!) {
+        query GetDraft($id: ObjectId!) {
+          draft(id: $id) {
+            id
+            title
+            subtitle
+            canonicalUrl
+            dateUpdated
+            coverImage {
+              url
+            }
+            publication {
+              url
+            }
+            content {
+              markdown
+            }
+          }
+        }
+        """
+        payload = self._graphql(query, {"id": draft_id})
+        node = (payload.get("data") or {}).get("draft")
+        if not node:
+            return None
+        return self._remote_article_payload(node, published=False)
+
+    def list_drafts(self, *, first: int = 20) -> list[HashnodeRemoteArticle]:
+        return self.list_all_drafts(page_size=first, max_pages=1)
+
+    def list_all_drafts(self, *, page_size: int = 20, max_pages: int = 100) -> list[HashnodeRemoteArticle]:
+        """Fetch all drafts using cursor-based pagination. Max page_size is 20 (Hashnode limit)."""
+        page_size = min(page_size, 20)  # Hashnode enforces max 20 per page
+        query = """
+        query MeDraftsPage($first: Int!, $after: String) {
           me {
-            drafts(first: $first) {
+            drafts(first: $first, after: $after) {
+              pageInfo { hasNextPage endCursor }
               edges {
                 node {
                   id
@@ -135,11 +169,22 @@ class HashnodeClient:
           }
         }
         """
-        payload = self._graphql(query, {"first": first})
-        return [
-            self._remote_article_payload(edge["node"], published=False)
-            for edge in payload["data"]["me"]["drafts"]["edges"]
-        ]
+        results: list[HashnodeRemoteArticle] = []
+        after: str | None = None
+        for _ in range(max_pages):
+            payload = self._graphql(query, {"first": page_size, "after": after})
+            drafts_data = payload["data"]["me"]["drafts"]
+            results.extend(
+                self._remote_article_payload(edge["node"], published=False)
+                for edge in drafts_data["edges"]
+            )
+            page_info = drafts_data.get("pageInfo", {})
+            if not page_info.get("hasNextPage"):
+                break
+            after = page_info.get("endCursor")
+            if not after:
+                break
+        return results
 
     def list_published_articles(
         self,

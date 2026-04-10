@@ -9,8 +9,9 @@ How it finds processes (two complementary strategies):
   2. Scans all processes via psutil for any uvicorn running backend.main:app
      from this project directory — catches servers started manually too
 """
-import os
 import sys
+sys.stdout.reconfigure(encoding="utf-8")
+import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PID_FILE = os.path.join(BASE_DIR, ".dev-server.pid")
