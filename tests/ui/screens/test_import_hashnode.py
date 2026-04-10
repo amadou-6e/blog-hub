@@ -332,9 +332,38 @@ def test_image_fixture_preview_renders_images(page, image_fixture_draft_id):
     except Exception:
         pass  # proceed even if some resources are still in-flight
 
-    # ── Screenshot ─────────────────────────────────────────────────────────
+    # ── Screenshot + expectation note ──────────────────────────────────────
     screenshot_path = _OUTPUTS_DIR / "preview_hashnode_image_fixture.png"
     page.locator("#view-review").screenshot(path=str(screenshot_path))
+
+    # Collect runtime values for the expectation description
+    img_count = page.locator("#markdown-preview img").count()
+    title_value = page.locator("#title-input").input_value().strip()
+
+    expected_note = f"""\
+Screenshot: preview_hashnode_image_fixture.png
+Captured : {screenshot_path.stat().st_mtime:.0f} (unix timestamp)
+
+Expected contents
+─────────────────
+• Cover image box (top): Hashnode cover 1600×840 — should show the
+  "title.png" image from the blog-components GitHub repo.
+• Article title input: "{title_value}"
+• Markdown preview body must contain {img_count} <img> element(s), each
+  with an absolute https:// src pointing to raw.githubusercontent.com.
+• No "[object Object]" text anywhere in the preview.
+• Import button enabled; title field populated.
+
+Images expected
+───────────────
+  1. {_IMAGE_BASE}/title.png   (cover + first inline image)
+  2. {_IMAGE_BASE}/knowledge_graph.png   (architecture diagram)
+
+This file is regenerated on every test run.
+"""
+    (_OUTPUTS_DIR / "preview_hashnode_image_fixture_expected.txt").write_text(
+        expected_note, encoding="utf-8"
+    )
 
     # ── Assertions ─────────────────────────────────────────────────────────
     imgs = page.locator("#markdown-preview img")

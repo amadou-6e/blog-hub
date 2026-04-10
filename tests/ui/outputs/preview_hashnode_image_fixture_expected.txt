@@ -1,0 +1,19 @@
+Screenshot: preview_hashnode_image_fixture.png
+Captured : 1775804782 (unix timestamp)
+
+Expected contents
+─────────────────
+• Cover image box (top): Hashnode cover 1600×840 — should show the
+  "title.png" image from the blog-components GitHub repo.
+• Article title input: "BlogHub UI fixture — image preview test"
+• Markdown preview body must contain 2 <img> element(s), each
+  with an absolute https:// src pointing to raw.githubusercontent.com.
+• No "[object Object]" text anywhere in the preview.
+• Import button enabled; title field populated.
+
+Images expected
+───────────────
+  1. https://raw.githubusercontent.com/amadou-6e/blog-components/main/medium/002_neo4j_llamaindex/images/title.png   (cover + first inline image)
+  2. https://raw.githubusercontent.com/amadou-6e/blog-components/main/medium/002_neo4j_llamaindex/images/knowledge_graph.png   (architecture diagram)
+
+This file is regenerated on every test run.
