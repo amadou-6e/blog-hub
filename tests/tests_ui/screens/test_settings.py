@@ -19,7 +19,7 @@ import pytest
 import requests
 from urllib.parse import urlparse, parse_qs
 
-from tests.ui.conftest import BASE_URL, RUNNER_URL, SETTINGS_URL
+from tests.tests_ui.conftest import BASE_URL, RUNNER_URL, SETTINGS_URL
 
 pytestmark = pytest.mark.browser
 

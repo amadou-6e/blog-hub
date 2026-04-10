@@ -1,5 +1,5 @@
 Screenshot: preview_hashnode_image_fixture.png
-Captured : 1775804782 (unix timestamp)
+Captured : 1775806392 (unix timestamp)
 
 Expected contents
 ─────────────────

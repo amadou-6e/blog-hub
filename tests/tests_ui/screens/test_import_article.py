@@ -14,7 +14,7 @@ import zlib
 import pytest
 import requests as http
 
-from tests.ui.conftest import BASE_URL
+from tests.tests_ui.conftest import BASE_URL
 
 pytestmark = pytest.mark.browser
 

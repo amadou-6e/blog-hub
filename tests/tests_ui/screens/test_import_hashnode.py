@@ -21,7 +21,7 @@ import requests as http
 
 from blogs.hashnode.client import HashnodeClient
 from blogs.hashnode.render import prepare_draft
-from tests.ui.conftest import BASE_URL
+from tests.tests_ui.conftest import BASE_URL
 
 pytestmark = pytest.mark.browser
 
@@ -353,9 +353,15 @@ def test_image_fixture_preview_renders_images(page, image_fixture_draft_id):
     img_count = page.locator("#markdown-preview img").count()
     title_value = page.locator("#title-input").input_value().strip()
 
+    draft_url = f"https://hashnode.com/draft/{image_fixture_draft_id}"
+    (_OUTPUTS_DIR / "preview_hashnode_image_fixture_draft_url.txt").write_text(
+        draft_url + "\n", encoding="utf-8"
+    )
+
     expected_note = f"""\
 Screenshot: preview_hashnode_image_fixture.png
 Captured : {screenshot_path.stat().st_mtime:.0f} (unix timestamp)
+Draft URL: {draft_url}
 
 Expected contents
 ─────────────────
