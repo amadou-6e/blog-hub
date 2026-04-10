@@ -33,10 +33,8 @@ _OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 # ── Image fixture constants ───────────────────────────────────────────────────
 # Fixed title — never changes between runs so subsequent runs reuse the draft.
 _FIXTURE_TITLE = "BlogHub UI fixture — image preview test"
-_IMAGE_BASE = (
-    "https://raw.githubusercontent.com/amadou-6e/blog-components/main/"
-    "medium/002_neo4j_llamaindex/images"
-)
+_IMAGE_BASE = ("https://raw.githubusercontent.com/amadou-6e/blog-components/main/"
+               "medium/002_neo4j_llamaindex/images")
 _FIXTURE_MARKDOWN = f"""\
 # {_FIXTURE_TITLE}
 
@@ -133,7 +131,12 @@ def _read_first_publication_id(client: HashnodeClient) -> str:
     resp = client._session.post(
         "https://gql.hashnode.com",
         headers=client.headers,
-        json={"query": query, "variables": {"first": 10}},
+        json={
+            "query": query,
+            "variables": {
+                "first": 10
+            }
+        },
         timeout=30,
     )
     resp.raise_for_status()
@@ -308,8 +311,7 @@ def test_image_fixture_preview_renders_images(page, image_fixture_draft_id):
 
     fixture_rows = page.locator(".draft-row").filter(has_text="image preview test")
     assert fixture_rows.count() > 0, (
-        f"Fixture draft '{_FIXTURE_TITLE}' not found in draft list after creation"
-    )
+        f"Fixture draft '{_FIXTURE_TITLE}' not found in draft list after creation")
     fixture_rows.first.click()
 
     advance(page)
@@ -333,8 +335,19 @@ def test_image_fixture_preview_renders_images(page, image_fixture_draft_id):
         pass  # proceed even if some resources are still in-flight
 
     # ── Screenshot + expectation note ──────────────────────────────────────
+    # Expand the viewport height so #content-area (overflow-y:auto) is tall
+    # enough to show the full article — cover + title + all body images — in
+    # one unclipped frame.  Restore afterwards so remaining tests are unaffected.
+    full_h = page.evaluate(
+        "document.getElementById('content-area').scrollHeight + 200"
+    )
+    page.set_viewport_size({"width": 1280, "height": max(full_h, 1200)})
+    page.wait_for_timeout(300)  # let layout reflow
+
     screenshot_path = _OUTPUTS_DIR / "preview_hashnode_image_fixture.png"
     page.locator("#view-review").screenshot(path=str(screenshot_path))
+
+    page.set_viewport_size({"width": 1280, "height": 720})  # restore
 
     # Collect runtime values for the expectation description
     img_count = page.locator("#markdown-preview img").count()
@@ -361,18 +374,15 @@ Images expected
 
 This file is regenerated on every test run.
 """
-    (_OUTPUTS_DIR / "preview_hashnode_image_fixture_expected.txt").write_text(
-        expected_note, encoding="utf-8"
-    )
+    (_OUTPUTS_DIR / "preview_hashnode_image_fixture_expected.txt").write_text(expected_note,
+                                                                              encoding="utf-8")
 
     # ── Assertions ─────────────────────────────────────────────────────────
     imgs = page.locator("#markdown-preview img")
     assert imgs.count() >= 1, "No <img> elements found in the markdown preview"
     for i in range(imgs.count()):
         src = imgs.nth(i).get_attribute("src") or ""
-        assert src.startswith("https://"), (
-            f"Image {i} src is not absolute https://: {src!r}"
-        )
+        assert src.startswith("https://"), (f"Image {i} src is not absolute https://: {src!r}")
 
 
 # ── 5. Import completes ───────────────────────────────────────────────────────
