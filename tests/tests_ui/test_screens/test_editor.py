@@ -2,7 +2,7 @@
 test_editor.py — Playwright UI tests for the Editor screen (v2.html).
 
 Run:
-    pytest tests/tests_ui/screens/test_editor.py -m browser --browser chromium -v
+    pytest tests/tests_ui/test_screens/test_editor.py -m browser --browser chromium -v
 
 Requires a live backend on http://localhost:8000:
     .venv/Scripts/python.exe -m uvicorn backend.main:app --port 8000
