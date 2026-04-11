@@ -217,3 +217,13 @@ __marimo__/
 node_modules/
 diagnose_*
 tests/results/
+
+# BlogHub runtime artifacts
+.dev-server.pid
+nul
+data/blobs/
+data/*.db-shm
+data/*.db-wal
+
+# Playwright / UI test outputs
+tests/tests_ui/outputs/

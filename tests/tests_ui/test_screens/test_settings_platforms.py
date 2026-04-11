@@ -2,7 +2,7 @@
 test_settings_platforms.py — Playwright tests for the Publishing Platforms section of Settings.
 
 Run:
-    pytest tests/tests_ui/screens/test_settings_platforms.py -m browser --browser chromium -v
+    pytest tests/tests_ui/test_screens/test_settings_platforms.py -m browser --browser chromium -v
 
 Covers:
 - Initial render of Platforms section

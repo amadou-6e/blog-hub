@@ -5,7 +5,7 @@ Covers: platform connection cards, AI provider cards, save/clear token,
 and navigation links.
 
 Run:
-    pytest tests/tests_ui/bridges/test_settings_bridge.py -m browser --browser chromium -v
+    pytest tests/tests_ui/test_bridges/test_settings_bridge.py -m browser --browser chromium -v
 """
 import pytest
 

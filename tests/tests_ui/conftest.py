@@ -49,11 +49,3 @@ def ai_providers_page(settings_page):
     settings_page.get_by_role("button", name="AI Providers").click()
     settings_page.wait_for_selector("#ai-wrap-anthropic", timeout=5000)
     return settings_page
-
-
-@pytest.fixture
-def ai_providers_page(settings_page):
-    """Open the AI Providers tab and return the page."""
-    settings_page.get_by_role("button", name="AI Providers").click()
-    settings_page.wait_for_selector("#ai-wrap-anthropic", timeout=5000)
-    return settings_page

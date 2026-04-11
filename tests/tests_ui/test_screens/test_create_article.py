@@ -2,7 +2,7 @@
 test_create_article.py — Playwright click-through tests for the Create Article wizard.
 
 Run:
-    pytest tests/tests_ui/screens/test_create_article.py -m browser --browser chromium -v
+    pytest tests/tests_ui/test_screens/test_create_article.py -m browser --browser chromium -v
 """
 import pytest
 
