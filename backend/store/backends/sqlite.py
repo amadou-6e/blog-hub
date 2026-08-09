@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from backend.store.crypto import decrypt_token, encrypt_token
+from backend.store.crypto import decrypt_token, encrypt_token, needs_reencryption
 
 # ─── Static metadata ──────────────────────────────────────────────────────────
 
@@ -350,6 +350,7 @@ class SQLiteStore:
             except Exception:
                 pass  # column already exists
         self._con.commit()
+        self.reencrypt_connection_credentials()
         self._seed_if_empty()
         # Ephemeral — no need to persist across restarts
         self._oauth_pending: dict[str, dict] = {}
@@ -778,7 +779,6 @@ class SQLiteStore:
             "label": meta["label"],
             "type": meta["type"],
             "auth_method": meta["auth"],
-            "token": token,
             "status": status,
             "username": username,
             "connected_at": now_s,
@@ -803,6 +803,27 @@ class SQLiteStore:
         if not row or not row["token"]:
             return None
         return decrypt_token(row["token"]) or None
+
+    def reencrypt_connection_credentials(self) -> int:
+        """Move plaintext, legacy, and retired-key credentials to the active key."""
+        rows = self._con.execute(
+            "SELECT platform, user_id, token FROM connections WHERE token <> ''"
+        ).fetchall()
+        replacements = []
+        for row in rows:
+            if needs_reencryption(row["token"]):
+                replacements.append((
+                    encrypt_token(decrypt_token(row["token"])),
+                    row["platform"],
+                    row["user_id"],
+                ))
+        if replacements:
+            with self._con:
+                self._con.executemany(
+                    "UPDATE connections SET token=? WHERE platform=? AND user_id IS ?",
+                    replacements,
+                )
+        return len(replacements)
 
     def count_connected(self, user_id: str) -> int:
         return sum(1 for c in self.list_connections(user_id) if c["status"] == "connected")
