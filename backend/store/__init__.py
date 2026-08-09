@@ -213,5 +213,21 @@ def delete_expired_sessions() -> int:
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 
+def schema_version() -> int:
+    return _backend.schema_version
+
+
+def create_backup(*a, **kw):
+    return _backend.create_backup(*a, **kw)
+
+
+def create_backup_if_due(*a, **kw):
+    return _backend.create_backup_if_due(*a, **kw)
+
+
+def close() -> None:
+    return _backend.close()
+
+
 def reset(*a, **kw):
     return _backend.reset(*a, **kw)

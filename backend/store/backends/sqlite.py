@@ -13,10 +13,23 @@ import shutil
 import sqlite3
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from backend.store.backups import (
+    BackupError,
+    create_backup as create_verified_backup,
+    create_backup_if_due as create_verified_backup_if_due,
+)
 from backend.store.crypto import decrypt_token, encrypt_token
+from backend.store.locking import WorkspaceLock
+from backend.store.migrations import (
+    SEED_USER_EMAIL as DEFAULT_SEED_USER_EMAIL,
+    SEED_USER_HASH as DEFAULT_SEED_USER_HASH,
+    SEED_USER_ID as DEFAULT_SEED_USER_ID,
+    current_version,
+    run_migrations,
+)
 
 # ─── Static metadata ──────────────────────────────────────────────────────────
 
@@ -67,122 +80,6 @@ _PLATFORM_META: list[dict] = [
         "username": "acisse"
     },
 ]
-
-# ─── Schema ───────────────────────────────────────────────────────────────────
-
-_DDL = """
-CREATE TABLE IF NOT EXISTS users (
-    id            TEXT PRIMARY KEY,
-    email         TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    created_at    TEXT NOT NULL,
-    is_active     INTEGER NOT NULL DEFAULT 1
-);
-
-CREATE TABLE IF NOT EXISTS sessions (
-    token       TEXT PRIMARY KEY,
-    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    expires_at  TEXT NOT NULL,
-    created_at  TEXT NOT NULL,
-    remember_me INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS articles (
-    id              TEXT PRIMARY KEY,
-    title           TEXT NOT NULL,
-    body            TEXT NOT NULL DEFAULT '',
-    body_path       TEXT,
-    word_count      INTEGER NOT NULL DEFAULT 0,
-    gate            TEXT NOT NULL DEFAULT 'pending',
-    source          TEXT NOT NULL DEFAULT 'native',
-    source_platform TEXT,
-    canonical_url   TEXT,
-    created_at      TEXT NOT NULL,
-    updated_at      TEXT NOT NULL,
-    user_id         TEXT REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS article_destinations (
-    article_id  TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-    platform    TEXT NOT NULL,
-    status      TEXT NOT NULL DEFAULT 'none',
-    label       TEXT,
-    url         TEXT,
-    draft_id    TEXT,
-    error       TEXT,
-    PRIMARY KEY (article_id, platform)
-);
-
-CREATE TABLE IF NOT EXISTS article_timeline (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    article_id  TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-    timestamp   TEXT NOT NULL,
-    event       TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS connections (
-    platform      TEXT NOT NULL,
-    token         TEXT NOT NULL,
-    status        TEXT NOT NULL DEFAULT 'connected',
-    username      TEXT,
-    connected_at  TEXT NOT NULL,
-    error_message TEXT,
-    user_id       TEXT REFERENCES users(id) ON DELETE CASCADE,
-    PRIMARY KEY (platform, user_id)
-);
-
-CREATE TABLE IF NOT EXISTS jobs (
-    job_id       TEXT PRIMARY KEY,
-    kind         TEXT NOT NULL,
-    article_id   TEXT,
-    status       TEXT NOT NULL DEFAULT 'pending',
-    result       TEXT,
-    error        TEXT,
-    created_at   TEXT NOT NULL,
-    completed_at TEXT,
-    user_id      TEXT REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS article_assets (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    article_id  TEXT    NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-    filename    TEXT    NOT NULL,
-    asset_path  TEXT    NOT NULL,
-    mime_type   TEXT,
-    created_at  TEXT    NOT NULL,
-    UNIQUE(article_id, filename)
-);
-
-CREATE TABLE IF NOT EXISTS article_comments (
-    id          TEXT PRIMARY KEY,
-    article_id  TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-    author      TEXT NOT NULL,
-    text        TEXT NOT NULL,
-    anchor      TEXT,
-    resolved    INTEGER NOT NULL DEFAULT 0,
-    has_patch   INTEGER NOT NULL DEFAULT 0,
-    created_at  TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS article_patches (
-    id          TEXT PRIMARY KEY,
-    article_id  TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-    comment_id  TEXT REFERENCES article_comments(id) ON DELETE SET NULL,
-    label       TEXT NOT NULL,
-    removed     TEXT NOT NULL,
-    added       TEXT NOT NULL,
-    state       TEXT NOT NULL DEFAULT 'pending',
-    created_at  TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS article_chat_log (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    article_id  TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-    role        TEXT NOT NULL,
-    text        TEXT NOT NULL,
-    created_at  TEXT NOT NULL
-);
-"""
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -317,50 +214,28 @@ class SQLiteStore:
         self._db_path = db_path
         self._blobs_dir = Path(blobs_dir).resolve()
         self._blobs_dir.mkdir(parents=True, exist_ok=True)
+        self._workspace_lock = WorkspaceLock(
+            self._blobs_dir.parent
+            / f".{self._blobs_dir.name}.bloghub-workspace.lock"
+        )
+        if db_path != ":memory:":
+            Path(db_path).resolve().parent.mkdir(parents=True, exist_ok=True)
         self._con = sqlite3.connect(db_path, check_same_thread=False)
         self._con.row_factory = sqlite3.Row
         self._con.execute("PRAGMA journal_mode=WAL")
         self._con.execute("PRAGMA foreign_keys=ON")
-        self._con.executescript(_DDL)
-        # Migrate existing DBs that pre-date the error column
-        try:
-            self._con.execute("ALTER TABLE jobs ADD COLUMN error TEXT")
-            self._con.commit()
-        except Exception:
-            pass  # column already exists
-        try:
-            self._con.execute("ALTER TABLE articles ADD COLUMN body_path TEXT")
-            self._con.commit()
-        except Exception:
-            pass  # column already exists
-        try:
-            self._con.execute("ALTER TABLE article_comments ADD COLUMN anchor TEXT")
-            self._con.commit()
-        except Exception:
-            pass  # column already exists
-        # Migrate DBs that pre-date multi-user auth (user_id columns).
-        for stmt in (
-            "ALTER TABLE articles ADD COLUMN user_id TEXT",
-            "ALTER TABLE connections ADD COLUMN user_id TEXT",
-            "ALTER TABLE jobs ADD COLUMN user_id TEXT",
-        ):
-            try:
-                self._con.execute(stmt)
-                self._con.commit()
-            except Exception:
-                pass  # column already exists
-        self._con.commit()
-        self._seed_if_empty()
+        with self._workspace_lock.acquire():
+            run_migrations(self._con)
+            self._seed_if_empty()
         # Ephemeral — no need to persist across restarts
         self._oauth_pending: dict[str, dict] = {}
 
     # ── Seed ─────────────────────────────────────────────────────────────────
 
     # Known seed credentials — used by tests to log in without re-registering.
-    SEED_USER_ID = "user_seed"
-    SEED_USER_EMAIL = "seed@example.com"
-    # bcrypt hash of "seed1234"
-    SEED_USER_HASH = "$2b$12$BJsbJlf3SZUMUISLA8oASeFn.Q3U.Ar6TqoIFtu0F9OlYyev.DZLC"
+    SEED_USER_ID = DEFAULT_SEED_USER_ID
+    SEED_USER_EMAIL = DEFAULT_SEED_USER_EMAIL
+    SEED_USER_HASH = DEFAULT_SEED_USER_HASH
 
     def _seed_if_empty(self) -> None:
         # Always ensure the seed user exists (safe with INSERT OR IGNORE).
@@ -568,43 +443,48 @@ class SQLiteStore:
         source_platform: str | None = None,
         canonical_url: str | None = None,
     ) -> dict:
-        article_id = f"art_{uuid.uuid4().hex[:8]}"
-        now_s = _ts(_now())
-        body = _seed_body(title)
-        body_path = self._write_body(article_id, body)
-        self._con.execute(
-            """INSERT INTO articles
-               (id, title, body, body_path, word_count, gate, source, source_platform,
-                canonical_url, created_at, updated_at, user_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (article_id, title, "", body_path, len(title.split()) + 11, "pending", source,
-             source_platform, canonical_url, now_s, now_s, user_id),
-        )
-        for p in _PLATFORMS:
+        with self._workspace_lock.acquire():
+            article_id = f"art_{uuid.uuid4().hex[:8]}"
+            now_s = _ts(_now())
+            body = _seed_body(title)
+            body_path = self._write_body(article_id, body)
             self._con.execute(
-                "INSERT INTO article_destinations (article_id, platform, status, label) VALUES (?,?,?,?)",
-                (article_id, p, "none", "—"),
+                """INSERT INTO articles
+                   (id, title, body, body_path, word_count, gate, source, source_platform,
+                    canonical_url, created_at, updated_at, user_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (article_id, title, "", body_path, len(title.split()) + 11, "pending",
+                 source, source_platform, canonical_url, now_s, now_s, user_id),
             )
-        self._con.execute(
-            "INSERT INTO article_timeline (article_id, timestamp, event) VALUES (?,?,?)",
-            (article_id, now_s, "Article created"),
-        )
-        self._con.commit()
-        return self.get_article(user_id, article_id)  # type: ignore[return-value]
+            for p in _PLATFORMS:
+                self._con.execute(
+                    "INSERT INTO article_destinations "
+                    "(article_id, platform, status, label) VALUES (?,?,?,?)",
+                    (article_id, p, "none", "—"),
+                )
+            self._con.execute(
+                "INSERT INTO article_timeline "
+                "(article_id, timestamp, event) VALUES (?,?,?)",
+                (article_id, now_s, "Article created"),
+            )
+            self._con.commit()
+            return self.get_article(user_id, article_id)  # type: ignore[return-value]
 
     def update_article_body(self,
                             user_id: str,
                             article_id: str,
                             body: str,
                             event: str = "Article generated by AI") -> None:
-        word_count = len(body.split())
-        body_path = self._write_body(article_id, body)
-        self._con.execute(
-            "UPDATE articles SET body='', body_path=?, word_count=?, updated_at=? WHERE id=? AND user_id=?",
-            (body_path, word_count, _ts(_now()), article_id, user_id),
-        )
-        self._add_timeline(article_id, event)
-        self._con.commit()
+        with self._workspace_lock.acquire():
+            word_count = len(body.split())
+            body_path = self._write_body(article_id, body)
+            self._con.execute(
+                "UPDATE articles SET body='', body_path=?, word_count=?, updated_at=? "
+                "WHERE id=? AND user_id=?",
+                (body_path, word_count, _ts(_now()), article_id, user_id),
+            )
+            self._add_timeline(article_id, event)
+            self._con.commit()
 
     def update_article_title(self, user_id: str, article_id: str, title: str) -> None:
         self._con.execute(
@@ -614,24 +494,30 @@ class SQLiteStore:
         self._con.commit()
 
     def delete_articles(self, user_id: str, ids: list[str], force: bool = False) -> list[str]:
-        blocked = []
-        for aid in ids:
-            row = self._con.execute("SELECT id FROM articles WHERE id=? AND user_id=?", (aid, user_id)).fetchone()
-            if row is None:
-                continue
-            is_published = self._con.execute(
-                "SELECT 1 FROM article_destinations WHERE article_id=? AND status='published'",
-                (aid,),
-            ).fetchone() is not None
-            if is_published and not force:
-                blocked.append(aid)
-            else:
-                self._con.execute("DELETE FROM articles WHERE id=? AND user_id=?", (aid, user_id))
-                blob_dir = self._blobs_dir / "articles" / aid
-                if blob_dir.exists():
-                    shutil.rmtree(blob_dir)
-        self._con.commit()
-        return blocked
+        with self._workspace_lock.acquire():
+            blocked = []
+            for aid in ids:
+                row = self._con.execute(
+                    "SELECT id FROM articles WHERE id=? AND user_id=?", (aid, user_id)
+                ).fetchone()
+                if row is None:
+                    continue
+                is_published = self._con.execute(
+                    "SELECT 1 FROM article_destinations "
+                    "WHERE article_id=? AND status='published'",
+                    (aid,),
+                ).fetchone() is not None
+                if is_published and not force:
+                    blocked.append(aid)
+                else:
+                    self._con.execute(
+                        "DELETE FROM articles WHERE id=? AND user_id=?", (aid, user_id)
+                    )
+                    blob_dir = self._blobs_dir / "articles" / aid
+                    if blob_dir.exists():
+                        shutil.rmtree(blob_dir)
+            self._con.commit()
+            return blocked
 
     def find_article_by_canonical_url(self, user_id: str, canonical_url: str) -> dict | None:
         url = canonical_url.strip().lower()
@@ -957,6 +843,46 @@ class SQLiteStore:
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
+    @property
+    def schema_version(self) -> int:
+        return current_version(self._con)
+
+    def create_backup(
+        self,
+        backup_dir: str | None = None,
+        *,
+        retain: int = 14,
+    ) -> Path:
+        if self._db_path == ":memory:":
+            raise BackupError("File backups are not available for an in-memory database")
+        destination = backup_dir or str(Path(self._db_path).resolve().parent / "backups")
+        with self._workspace_lock.acquire():
+            return create_verified_backup(
+                self._con, self._blobs_dir, destination, retain=retain
+            )
+
+    def create_backup_if_due(
+        self,
+        interval: timedelta,
+        backup_dir: str | None = None,
+        *,
+        retain: int = 14,
+    ) -> Path | None:
+        if self._db_path == ":memory:":
+            raise BackupError("File backups are not available for an in-memory database")
+        destination = backup_dir or str(Path(self._db_path).resolve().parent / "backups")
+        with self._workspace_lock.acquire():
+            return create_verified_backup_if_due(
+                self._con,
+                self._blobs_dir,
+                destination,
+                interval=interval,
+                retain=retain,
+            )
+
+    def close(self) -> None:
+        self._con.close()
+
     def store_asset(
         self,
         user_id: str,
@@ -966,47 +892,52 @@ class SQLiteStore:
         mime_type: str | None = None,
     ) -> str:
         """Write binary asset to disk and record in article_assets. Returns asset_path."""
-        row = self._con.execute("SELECT id FROM articles WHERE id=? AND user_id=?",
-                                (article_id, user_id)).fetchone()
-        if row is None:
-            raise KeyError(f"Article {article_id} not found for user")
-        assets_dir = self._blobs_dir / "articles" / article_id / "assets"
-        assets_dir.mkdir(parents=True, exist_ok=True)
-        dest = assets_dir / filename
-        dest.write_bytes(data)
-        rel = str(dest.relative_to(self._blobs_dir))
-        now_s = _ts(_now())
-        self._con.execute(
-            """INSERT INTO article_assets (article_id, filename, asset_path, mime_type, created_at)
-               VALUES (?,?,?,?,?)
-               ON CONFLICT(article_id, filename) DO UPDATE SET
-               asset_path=excluded.asset_path, mime_type=excluded.mime_type""",
-            (article_id, filename, rel, mime_type, now_s),
-        )
-        self._con.commit()
-        return rel
+        with self._workspace_lock.acquire():
+            row = self._con.execute(
+                "SELECT id FROM articles WHERE id=? AND user_id=?",
+                (article_id, user_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"Article {article_id} not found for user")
+            assets_dir = self._blobs_dir / "articles" / article_id / "assets"
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            dest = assets_dir / filename
+            dest.write_bytes(data)
+            rel = str(dest.relative_to(self._blobs_dir))
+            now_s = _ts(_now())
+            self._con.execute(
+                """INSERT INTO article_assets
+                   (article_id, filename, asset_path, mime_type, created_at)
+                   VALUES (?,?,?,?,?)
+                   ON CONFLICT(article_id, filename) DO UPDATE SET
+                   asset_path=excluded.asset_path, mime_type=excluded.mime_type""",
+                (article_id, filename, rel, mime_type, now_s),
+            )
+            self._con.commit()
+            return rel
 
     def reset(self) -> None:
         """Drop all data and re-seed. Used by the /api/dev/reset endpoint in tests."""
-        self._con.executescript("""
-            DELETE FROM article_chat_log;
-            DELETE FROM article_patches;
-            DELETE FROM article_comments;
-            DELETE FROM article_timeline;
-            DELETE FROM article_destinations;
-            DELETE FROM article_assets;
-            DELETE FROM articles;
-            DELETE FROM jobs;
-            DELETE FROM connections;
-            DELETE FROM sessions;
-            DELETE FROM users;
-        """)
-        self._con.commit()
-        articles_blobs = self._blobs_dir / "articles"
-        if articles_blobs.exists():
-            shutil.rmtree(articles_blobs)
-        self._seed_if_empty()
-        self._oauth_pending.clear()
+        with self._workspace_lock.acquire():
+            self._con.executescript("""
+                DELETE FROM article_chat_log;
+                DELETE FROM article_patches;
+                DELETE FROM article_comments;
+                DELETE FROM article_timeline;
+                DELETE FROM article_destinations;
+                DELETE FROM article_assets;
+                DELETE FROM articles;
+                DELETE FROM jobs;
+                DELETE FROM connections;
+                DELETE FROM sessions;
+                DELETE FROM users;
+            """)
+            self._con.commit()
+            articles_blobs = self._blobs_dir / "articles"
+            if articles_blobs.exists():
+                shutil.rmtree(articles_blobs)
+            self._seed_if_empty()
+            self._oauth_pending.clear()
 
     # ── Comments ─────────────────────────────────────────────────────────────
 
