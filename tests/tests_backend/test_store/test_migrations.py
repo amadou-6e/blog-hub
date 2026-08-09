@@ -57,6 +57,7 @@ def test_fresh_database_is_migrated_to_latest_schema(tmp_path):
         assert [(row[0], row[1]) for row in applied] == [
             (1, "create_current_schema"),
             (2, "add_query_indexes"),
+            (3, "add_agent_session_persistence"),
         ]
         tables = {
             row[0]
@@ -74,6 +75,13 @@ def test_fresh_database_is_migrated_to_latest_schema(tmp_path):
             "article_comments",
             "article_patches",
             "article_chat_log",
+            "agent_sessions",
+            "agent_session_events",
+            "agent_session_messages",
+            "agent_tool_calls",
+            "agent_approvals",
+            "agent_checkpoints",
+            "agent_session_outputs",
         } <= tables
     finally:
         store.close()

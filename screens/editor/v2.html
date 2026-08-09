@@ -276,6 +276,7 @@ let COMMENTS = [];
 let PATCHES  = [];
 
 let CHAT_HISTORY = [];
+let AGENT_SESSION = null;
 
 
 
@@ -562,7 +563,17 @@ function buildChat() {
       <div class="chat-label">${m.role === 'user' ? 'You' : 'bloghub'}</div>
       <div class="bubble">${esc(m.text)}</div>
     </div>`).join('');
+  const status = AGENT_SESSION ? AGENT_SESSION.status.replaceAll('_', ' ') : 'new session';
+  const resumable = AGENT_SESSION && ['waiting_for_input','waiting_for_resume','failed'].includes(AGENT_SESSION.status);
+  const cancelable = AGENT_SESSION && ['running','waiting_for_input','waiting_for_approval','waiting_for_resume'].includes(AGENT_SESSION.status);
   return `<div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;font-size:10px;color:#737b98;font-family:'JetBrains Mono',monospace;">
+      <span>${esc(status)}</span>
+      <span style="display:flex;gap:5px;">
+        ${resumable ? `<button onclick="resumeAgentSession()" style="font-size:10px;padding:2px 7px;border:1px solid #343a50;border-radius:4px;background:transparent;color:#c9cfe0;cursor:pointer;">Resume</button>` : ''}
+        ${cancelable ? `<button onclick="cancelAgentSession()" style="font-size:10px;padding:2px 7px;border:1px solid #343a50;border-radius:4px;background:transparent;color:#737b98;cursor:pointer;">Cancel</button>` : ''}
+      </span>
+    </div>
     <div id="chat-msgs" style="max-height:200px;overflow-y:auto;margin-bottom:8px;">${msgs}</div>
     <div style="border-top:1px solid #252a38;padding-top:8px;display:flex;gap:6px;align-items:center;">
       <span style="font-size:11px;color:#6366f1;font-family:'JetBrains Mono',monospace;flex-shrink:0;">$</span>
@@ -579,7 +590,19 @@ async function sendChat() {
   const text = input.value.trim();
   if (!text) return;
   input.value = '';
+  const durableSession = await ensureAgentSession();
+  if (!durableSession) {
+    CHAT_HISTORY.push({ role:'bot', text:'This session is waiting for an approval.' });
+    renderSection('chat');
+    return;
+  }
   CHAT_HISTORY.push({ role:'user', text });
+  if (AGENT_SESSION) {
+    await fetch(`/api/agent-sessions/${AGENT_SESSION.id}/messages`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ role:'user', content:text })
+    });
+  }
   renderSection('chat');
   try {
     const r = await fetch(`/api/articles/${ARTICLE_ID}/chat`, {
@@ -589,12 +612,55 @@ async function sendChat() {
     if (r.ok) {
       const data = await r.json();
       CHAT_HISTORY.push({ role:'bot', text: data.reply });
+      if (AGENT_SESSION) {
+        await fetch(`/api/agent-sessions/${AGENT_SESSION.id}/messages`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ role:'assistant', content:data.reply })
+        });
+      }
     } else {
       CHAT_HISTORY.push({ role:'bot', text: 'Error: server returned ' + r.status });
     }
   } catch (e) {
     CHAT_HISTORY.push({ role:'bot', text: 'Error: ' + e.message });
   }
+  renderSection('chat');
+}
+
+async function ensureAgentSession() {
+  if (AGENT_SESSION) {
+    if (['waiting_for_input','waiting_for_resume','failed'].includes(AGENT_SESSION.status)) {
+      const resumed = await fetch(
+        `/api/agent-sessions/${AGENT_SESSION.id}/resume`, { method:'POST' }
+      );
+      if (resumed.ok) AGENT_SESSION = await resumed.json();
+    }
+    if (AGENT_SESSION.status === 'running') return AGENT_SESSION;
+    if (AGENT_SESSION.status === 'waiting_for_approval') return null;
+    AGENT_SESSION = null;
+  }
+  const r = await fetch('/api/agent-sessions', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      provider:'bloghub', articleId:ARTICLE_ID, title:'Editor chat',
+      metadata:{ surface:'editor' }
+    })
+  });
+  if (r.ok) AGENT_SESSION = await r.json();
+  return AGENT_SESSION;
+}
+
+async function resumeAgentSession() {
+  if (!AGENT_SESSION) return;
+  const r = await fetch(`/api/agent-sessions/${AGENT_SESSION.id}/resume`, { method:'POST' });
+  if (r.ok) AGENT_SESSION = await r.json();
+  renderSection('chat');
+}
+
+async function cancelAgentSession() {
+  if (!AGENT_SESSION) return;
+  const r = await fetch(`/api/agent-sessions/${AGENT_SESSION.id}/cancel`, { method:'POST' });
+  if (r.ok) AGENT_SESSION = await r.json();
   renderSection('chat');
 }
 
@@ -786,6 +852,7 @@ async function loadArticle() {
     await loadComments();
     await loadPatches();
     await loadChat();
+    await loadAgentSession();
   } catch (_e) {
     console.error('Failed to load article', _e);
   }
@@ -824,6 +891,26 @@ async function loadChat() {
     if (!r.ok) return;
     const data = await r.json();
     CHAT_HISTORY = data.messages.map(m => ({ role: m.role, text: m.text }));
+    renderSection('chat');
+  } catch (_e) { /* silently ignore */ }
+}
+
+async function loadAgentSession() {
+  try {
+    const listResponse = await fetch(
+      `/api/agent-sessions?articleId=${encodeURIComponent(ARTICLE_ID)}&includeArchived=true&limit=1`
+    );
+    if (!listResponse.ok) return;
+    const list = await listResponse.json();
+    if (!list.sessions.length) return;
+    const detailResponse = await fetch(`/api/agent-sessions/${list.sessions[0].id}`);
+    if (!detailResponse.ok) return;
+    AGENT_SESSION = await detailResponse.json();
+    if (AGENT_SESSION.messages.length) {
+      CHAT_HISTORY = AGENT_SESSION.messages
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .map(m => ({ role: m.role === 'assistant' ? 'bot' : 'user', text: m.content }));
+    }
     renderSection('chat');
   } catch (_e) { /* silently ignore */ }
 }

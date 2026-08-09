@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class ArticleStore(Protocol):
@@ -137,6 +137,34 @@ class ArticleStore(Protocol):
         ...
 
     def complete_job(self, user_id: str, job_id: str, result: dict | None = None, error: str | None = None) -> None:
+        ...
+
+    # ── Agent sessions ──────────────────────────────────────────────────────
+
+    def create_agent_session(self, user_id: str, **kwargs: Any) -> dict:
+        ...
+
+    def list_agent_sessions(self, user_id: str, **kwargs: Any) -> list[dict]:
+        ...
+
+    def get_agent_session(self, user_id: str, session_id: str) -> dict | None:
+        ...
+
+    def add_agent_message(
+        self, user_id: str, session_id: str, role: str, content: str,
+        metadata: dict | None = None,
+    ) -> dict:
+        ...
+
+    def record_agent_tool_call(
+        self, user_id: str, session_id: str, **kwargs: Any,
+    ) -> tuple[dict, bool]:
+        ...
+
+    def recover_agent_sessions(self) -> int:
+        ...
+
+    def cleanup_agent_sessions(self, retention_days: int = 90) -> dict[str, int]:
         ...
 
     # ── Lifecycle ────────────────────────────────────────────────────────────

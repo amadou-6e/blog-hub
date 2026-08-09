@@ -126,6 +126,85 @@ def complete_job(user_id: str, *a, **kw):
     return _backend.complete_job(user_id, *a, **kw)
 
 
+# ── Agent sessions ───────────────────────────────────────────────────────────
+
+
+def create_agent_session(user_id: str, *a, **kw):
+    return _backend.create_agent_session(user_id, *a, **kw)
+
+
+def list_agent_sessions(user_id: str, *a, **kw):
+    return _backend.list_agent_sessions(user_id, *a, **kw)
+
+
+def get_agent_session(user_id: str, *a, **kw):
+    return _backend.get_agent_session(user_id, *a, **kw)
+
+
+def add_agent_message(user_id: str, *a, **kw):
+    return _backend.add_agent_message(user_id, *a, **kw)
+
+
+def record_agent_tool_call(user_id: str, *a, **kw):
+    return _backend.record_agent_tool_call(user_id, *a, **kw)
+
+
+def claim_agent_tool_call(user_id: str, *a, **kw):
+    return _backend.claim_agent_tool_call(user_id, *a, **kw)
+
+
+def complete_agent_tool_call(user_id: str, *a, **kw):
+    return _backend.complete_agent_tool_call(user_id, *a, **kw)
+
+
+def add_agent_checkpoint(user_id: str, *a, **kw):
+    return _backend.add_agent_checkpoint(user_id, *a, **kw)
+
+
+def request_agent_approval(user_id: str, *a, **kw):
+    return _backend.request_agent_approval(user_id, *a, **kw)
+
+
+def resolve_agent_approval(user_id: str, *a, **kw):
+    return _backend.resolve_agent_approval(user_id, *a, **kw)
+
+
+def add_agent_output(user_id: str, *a, **kw):
+    return _backend.add_agent_output(user_id, *a, **kw)
+
+
+def update_agent_session_status(user_id: str, *a, **kw):
+    return _backend.update_agent_session_status(user_id, *a, **kw)
+
+
+def resume_agent_session(user_id: str, *a, **kw):
+    return _backend.resume_agent_session(user_id, *a, **kw)
+
+
+def cancel_agent_session(user_id: str, *a, **kw):
+    return _backend.cancel_agent_session(user_id, *a, **kw)
+
+
+def archive_agent_session(user_id: str, *a, **kw):
+    return _backend.archive_agent_session(user_id, *a, **kw)
+
+
+def delete_agent_session(user_id: str, *a, **kw):
+    return _backend.delete_agent_session(user_id, *a, **kw)
+
+
+def export_agent_session(user_id: str, *a, **kw):
+    return _backend.export_agent_session(user_id, *a, **kw)
+
+
+def recover_agent_sessions():
+    return _backend.recover_agent_sessions()
+
+
+def cleanup_agent_sessions(*a, **kw):
+    return _backend.cleanup_agent_sessions(*a, **kw)
+
+
 # ── Comments ──────────────────────────────────────────────────────────────────
 
 
