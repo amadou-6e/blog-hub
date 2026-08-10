@@ -86,3 +86,6 @@ def test_codex_receives_article_from_audited_runner_tool_without_shell_requireme
     assert "audited read_article tool" in prompt
     assert "# Synthetic" in prompt
     assert "Do not invoke command execution" in prompt
+    assert "<!-- bloghub-agent: COMMAND -->" in prompt
+    assert "BLOGHUB_ARTICLE_START" in prompt
+    assert "all other article prose" in prompt

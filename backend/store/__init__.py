@@ -287,6 +287,14 @@ def list_patches(user_id: str, *a, **kw):
     return _backend.list_patches(user_id, *a, **kw)
 
 
+def get_patch(user_id: str, *a, **kw):
+    return _backend.get_patch(user_id, *a, **kw)
+
+
+def get_pending_agent_session_patch(user_id: str, *a, **kw):
+    return _backend.get_pending_agent_session_patch(user_id, *a, **kw)
+
+
 def add_patch(user_id: str, *a, **kw):
     return _backend.add_patch(user_id, *a, **kw)
 

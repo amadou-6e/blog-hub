@@ -1,8 +1,24 @@
 """Execute provider chat turns and persist their observable event stream."""
 from __future__ import annotations
 
+import re
+
 import backend.services.cli_runner as runner
 import backend.store as store
+
+
+_ARTICLE_BLOCK = re.compile(
+    r"BLOGHUB_ARTICLE_START[ \t]*\r?\n(.*?)\r?\nBLOGHUB_ARTICLE_END", re.DOTALL
+)
+
+
+def _extract_article_update(text: str) -> tuple[str, str | None]:
+    match = _ARTICLE_BLOCK.search(text)
+    if match is None:
+        return text.strip(), None
+    article = match.group(1)
+    reply = _ARTICLE_BLOCK.sub("", text).strip()
+    return reply or "I prepared an article edit for the next agent boundary.", article
 
 
 def _connection_api_key(user_id: str, provider: str) -> str | None:
@@ -10,13 +26,15 @@ def _connection_api_key(user_id: str, provider: str) -> str | None:
     return runner.api_key_from_connection_token(token)
 
 
-def run_turn(*, user_id: str, session_id: str) -> None:
+def run_turn(*, user_id: str, session_id: str, article_revision_id: str) -> None:
     session = store.get_agent_session(user_id, session_id)
     if session is None:
         return
-    article = store.get_article(user_id, session["article_id"])
-    if article is None:
-        store.update_agent_session_status(user_id, session_id, "failed", "Article not found")
+    revision = store.get_article_revision(
+        user_id, session["article_id"], article_revision_id
+    )
+    if revision is None:
+        store.update_agent_session_status(user_id, session_id, "failed", "Article revision not found")
         return
 
     messages = [
@@ -28,7 +46,7 @@ def run_turn(*, user_id: str, session_id: str) -> None:
     try:
         for event in runner.stream_chat(
             provider=session["provider"], session_id=session_id,
-            article_md=article.get("body", ""), messages=messages,
+            article_md=revision["content"], messages=messages,
             model=session.get("model"),
             api_key=_connection_api_key(user_id, session["provider"]),
         ):
@@ -73,7 +91,27 @@ def run_turn(*, user_id: str, session_id: str) -> None:
                 )
 
         if final_text:
-            store.add_agent_message(user_id, session_id, "assistant", final_text)
+            reply, article_update = _extract_article_update(final_text)
+            if article_update is not None and article_update != revision["content"]:
+                patch = store.add_patch(
+                    user_id,
+                    article_id=session["article_id"],
+                    label="Queued agent edit",
+                    removed=revision["content"],
+                    added=article_update,
+                    base_revision_id=article_revision_id,
+                )
+                store.add_agent_output(
+                    user_id,
+                    session_id,
+                    kind="article_patch",
+                    reference=patch["id"],
+                    metadata={"base_revision_id": article_revision_id},
+                )
+                store.add_agent_event(
+                    user_id, session_id, "article_patch_queued", {"patch_id": patch["id"]}
+                )
+            store.add_agent_message(user_id, session_id, "assistant", reply)
         store.add_agent_event(user_id, session_id, "turn_completed")
         current = store.get_agent_session(user_id, session_id)
         if current and current["status"] == "running":

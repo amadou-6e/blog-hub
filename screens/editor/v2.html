@@ -412,7 +412,7 @@ async function saveDraft() {
   clearTimeout(saveTimer);
   const draft = currentDraft();
   persistLocalDraft();
-  if (!navigator.onLine) { setSave('offline'); return; }
+  if (!navigator.onLine) { setSave('offline'); return false; }
   setSave('saving');
   try {
     const r = await fetch(`/api/articles/${ARTICLE_ID}`, {
@@ -427,17 +427,19 @@ async function saveDraft() {
     const data = await r.json();
     if (r.status === 409 && data.detail?.code === 'revision_conflict') {
       showConflict(data.detail.current, draft);
-      return;
+      return false;
     }
-    if (!r.ok) { setSave('error'); return; }
+    if (!r.ok) { setSave('error'); return false; }
     CURRENT_REVISION_ID = data.revision_id;
     CURRENT_REVISION_NUMBER = data.revision_number;
     document.getElementById('word-count').textContent = data.word_count.toLocaleString() + ' words';
     clearLocalDraftIfMatches(draft);
     setSave('saved');
     await loadRevisions();
+    return true;
   } catch (_e) {
     setSave(navigator.onLine ? 'error' : 'offline');
+    return false;
   }
 }
 
@@ -679,7 +681,9 @@ function buildPatches() {
         <div class="diff-added">+ ${esc(p.added)}</div>
       </div>
       <div style="display:flex;gap:6px;">
-        <button onclick="acceptPatch('${p.id}')" style="font-size:12px;padding:4px 14px;border-radius:5px;background:#6366f1;border:none;color:#fff;cursor:pointer;">Accept</button>
+        ${p.agentSessionId
+          ? `<span style="font-size:10px;color:#a5b4fc;line-height:25px;">Queued for next turn or thread close</span>`
+          : `<button onclick="acceptPatch('${p.id}')" style="font-size:12px;padding:4px 14px;border-radius:5px;background:#6366f1;border:none;color:#fff;cursor:pointer;">Accept</button>`}
         <button onclick="rejectPatch('${p.id}')" style="font-size:12px;padding:4px 12px;border-radius:5px;background:#0f1117;border:1px solid #252a38;color:#c9cfe0;cursor:pointer;">Reject</button>
       </div>
     </div>`;
@@ -815,6 +819,7 @@ function buildChat() {
   const status = AGENT_SESSION ? AGENT_SESSION.status.replaceAll('_', ' ') : 'new thread';
   const resumable = AGENT_SESSION && ['waiting_for_resume','failed'].includes(AGENT_SESSION.status);
   const cancelable = AGENT_SESSION && AGENT_SESSION.status === 'running';
+  const closeable = AGENT_SESSION && !cancelable && !['completed','canceled','expired'].includes(AGENT_SESSION.status);
   const options = CONNECTED_PROVIDERS.map(provider => `<option value="${provider.id}" ${provider.id === CHAT_PROVIDER ? 'selected' : ''}>${esc(provider.label)}</option>`).join('');
   return `<div>
     <div style="display:flex;align-items:center;gap:6px;margin-bottom:9px;">
@@ -826,6 +831,7 @@ function buildChat() {
       <span style="display:flex;gap:5px;">
         ${resumable ? `<button onclick="resumeAgentSession()" style="font-size:10px;padding:2px 7px;border:1px solid #343a50;border-radius:4px;background:transparent;color:#c9cfe0;cursor:pointer;">Resume</button>` : ''}
         ${cancelable ? `<button onclick="cancelAgentSession()" style="font-size:10px;padding:2px 7px;border:1px solid #343a50;border-radius:4px;background:transparent;color:#737b98;cursor:pointer;">Cancel</button>` : ''}
+        ${closeable ? `<button onclick="closeAgentThread()" style="font-size:10px;padding:2px 7px;border:1px solid #343a50;border-radius:4px;background:transparent;color:#737b98;cursor:pointer;">Close</button>` : ''}
       </span>
     </div>
     <div id="chat-msgs" style="max-height:310px;overflow-y:auto;margin-bottom:8px;">${tools}${approvals}${msgs}${deltas && AGENT_SESSION?.status === 'running' ? `<div class="chat-msg bot"><div class="chat-label">${esc(CHAT_PROVIDER)} · streaming</div><div class="bubble">${esc(deltas)}</div></div>` : ''}</div>
@@ -842,6 +848,7 @@ async function sendChat() {
   const input = document.getElementById('chat-input');
   const text = input.value.trim();
   if (!text) return;
+  if (!await saveDraft()) return;
   input.value = '';
   const durableSession = await ensureAgentSession();
   if (!durableSession) {
@@ -855,9 +862,15 @@ async function sendChat() {
   try {
     const r = await fetch(`/api/agent-sessions/${AGENT_SESSION.id}/turns`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ content: text })
+      body: JSON.stringify({ content: text, articleRevisionId: CURRENT_REVISION_ID })
     });
-    if (!r.ok) throw new Error((await r.json()).detail || `HTTP ${r.status}`);
+    const data = await r.json();
+    if (r.status === 409 && data.detail?.code === 'revision_conflict') {
+      showConflict(data.detail.current);
+      throw new Error(data.detail.message);
+    }
+    if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${r.status}`);
+    if (data.articleChanged) await reloadArticleHead();
     startChatPolling();
   } catch (e) {
     CHAT_HISTORY.push({ role:'bot', text: 'Error: ' + e.message });
@@ -907,11 +920,17 @@ function startChatPolling() {
     await refreshAgentSession();
     if (!AGENT_SESSION || AGENT_SESSION.status !== 'running') {
       clearInterval(CHAT_POLL); CHAT_POLL = null;
+      await loadPatches();
     }
   }, 700);
 }
 
 async function switchChatProvider(provider) {
+  if (provider === CHAT_PROVIDER) return;
+  if (!await closeAgentThread(false)) {
+    document.getElementById('chat-provider').value = CHAT_PROVIDER;
+    return;
+  }
   CHAT_PROVIDER = provider;
   localStorage.setItem('bloghub-chat-provider', provider);
   AGENT_SESSION = null; AGENT_SESSION_HISTORY = [];
@@ -919,9 +938,42 @@ async function switchChatProvider(provider) {
   renderSection('chat');
 }
 
-function newAgentThread() {
+async function newAgentThread() {
+  if (!await closeAgentThread(false)) return;
   AGENT_SESSION = null; AGENT_SESSION_HISTORY = [];
   mergeChatHistory(); renderSection('chat');
+}
+
+async function closeAgentThread(clear=true) {
+  if (!AGENT_SESSION) return true;
+  if (['completed','canceled','expired'].includes(AGENT_SESSION.status)) {
+    if (clear) { AGENT_SESSION = null; AGENT_SESSION_HISTORY = []; mergeChatHistory(); renderSection('chat'); }
+    return true;
+  }
+  if (!await saveDraft()) return false;
+  const r = await fetch(`/api/agent-sessions/${AGENT_SESSION.id}/close`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({articleRevisionId:CURRENT_REVISION_ID}),
+  });
+  const data = await r.json();
+  if (r.status === 409 && data.detail?.code === 'revision_conflict') {
+    showConflict(data.detail.current);
+    return false;
+  }
+  if (!r.ok) {
+    CHAT_HISTORY.push({role:'bot', text:'Unable to close thread: ' + (data.detail || `HTTP ${r.status}`)});
+    renderSection('chat');
+    return false;
+  }
+  if (data.articleChanged) await reloadArticleHead();
+  await loadPatches();
+  if (clear) {
+    AGENT_SESSION = null; AGENT_SESSION_HISTORY = [];
+    mergeChatHistory(); renderSection('chat');
+  } else {
+    AGENT_SESSION = data.session;
+  }
+  return true;
 }
 
 async function resolveAgentApproval(approvalId, approved) {
@@ -949,7 +1001,13 @@ async function cancelAgentSession() {
 
 // ── Patch actions ─────────────────────────────────────────────────────────────
 async function acceptPatch(id) {
-  await fetch(`/api/articles/${ARTICLE_ID}/patches/${id}/accept`, { method: 'POST' });
+  const r = await fetch(`/api/articles/${ARTICLE_ID}/patches/${id}/accept`, { method: 'POST' });
+  const data = await r.json();
+  if (r.status === 409 && data.detail?.code === 'revision_conflict') {
+    showConflict(data.detail.current);
+    return;
+  }
+  if (r.ok) await reloadArticleHead();
   await loadPatches();
 }
 async function rejectPatch(id) {
@@ -1148,6 +1206,22 @@ async function loadArticle() {
   } catch (_e) {
     console.error('Failed to load article', _e);
   }
+}
+
+async function reloadArticleHead() {
+  const r = await fetch(`/api/articles/${ARTICLE_ID}`);
+  if (!r.ok) return false;
+  const a = await r.json();
+  document.getElementById('raw-editor').value = a.content;
+  document.getElementById('article-title').textContent = a.title;
+  CURRENT_REVISION_ID = a.revision_id;
+  CURRENT_REVISION_NUMBER = a.revision_number;
+  document.getElementById('word-count').textContent = a.word_count.toLocaleString() + ' words';
+  localStorage.removeItem(localDraftKey());
+  setSave('saved');
+  renderPreview();
+  await loadRevisions();
+  return true;
 }
 
 function recoverLocalDraft(server) {

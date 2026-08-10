@@ -13,11 +13,13 @@ class TestPatches:
         return client.get("/api/articles").json()["items"][0]["id"]
 
     def _add_patch(self, article_id: str) -> dict:
+        article = store.get_article(SQLiteStore.SEED_USER_ID, article_id)
+        removed = article["body"][:40]
         return store.add_patch(
             SQLiteStore.SEED_USER_ID,
             article_id=article_id,
             label="Test patch",
-            removed="old text here",
+            removed=removed,
             added="new text here",
         )
 
@@ -40,7 +42,7 @@ class TestPatches:
         assert len(patches) == 1
         p = patches[0]
         assert p["label"] == "Test patch"
-        assert p["removed"] == "old text here"
+        assert p["removed"]
         assert p["added"] == "new text here"
         assert p["state"] == "pending"
         assert "id" in p
@@ -55,6 +57,7 @@ class TestPatches:
         r = client.post(f"/api/articles/{aid}/patches/{pid}/accept")
         assert r.status_code == 200
         assert r.json()["state"] == "accepted"
+        assert "new text here" in client.get(f"/api/articles/{aid}").json()["content"]
 
     def test_accept_reflected_in_list(self, client: TestClient):
         aid = self._first_article_id(client)

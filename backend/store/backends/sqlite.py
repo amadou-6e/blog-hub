@@ -1085,13 +1085,44 @@ class SQLiteStore(ConnectionAuthStoreMixin, AgentSessionStoreMixin, ArticleRevis
 
     def list_patches(self, user_id: str, article_id: str) -> list[dict]:
         rows = self._con.execute(
-            "SELECT p.*, pr.base_revision_id FROM article_patches p "
+            "SELECT p.*, pr.base_revision_id, ao.session_id AS agent_session_id "
+            "FROM article_patches p "
             "LEFT JOIN article_patch_revisions pr ON pr.patch_id=p.id "
+            "LEFT JOIN agent_session_outputs ao "
+            "ON ao.reference=p.id AND ao.kind='article_patch' "
             "JOIN articles a ON p.article_id = a.id "
             "WHERE p.article_id=? AND a.user_id=? ORDER BY p.created_at ASC",
             (article_id, user_id),
         ).fetchall()
         return [self._patch_row_to_dict(r) for r in rows]
+
+    def get_patch(self, user_id: str, article_id: str, patch_id: str) -> dict | None:
+        row = self._con.execute(
+            "SELECT p.*, pr.base_revision_id, ao.session_id AS agent_session_id "
+            "FROM article_patches p "
+            "LEFT JOIN article_patch_revisions pr ON pr.patch_id=p.id "
+            "LEFT JOIN agent_session_outputs ao "
+            "ON ao.reference=p.id AND ao.kind='article_patch' "
+            "JOIN articles a ON p.article_id=a.id "
+            "WHERE p.id=? AND p.article_id=? AND a.user_id=?",
+            (patch_id, article_id, user_id),
+        ).fetchone()
+        return self._patch_row_to_dict(row) if row else None
+
+    def get_pending_agent_session_patch(
+        self, user_id: str, session_id: str
+    ) -> dict | None:
+        row = self._con.execute(
+            "SELECT p.*, pr.base_revision_id, ao.session_id AS agent_session_id "
+            "FROM agent_session_outputs ao "
+            "JOIN agent_sessions s ON s.id=ao.session_id "
+            "JOIN article_patches p ON p.id=ao.reference "
+            "JOIN article_patch_revisions pr ON pr.patch_id=p.id "
+            "WHERE ao.session_id=? AND s.user_id=? AND ao.kind='article_patch' "
+            "AND p.state='pending' ORDER BY ao.created_at DESC LIMIT 1",
+            (session_id, user_id),
+        ).fetchone()
+        return self._patch_row_to_dict(row) if row else None
 
     def add_patch(self,
                   user_id: str,
@@ -1157,7 +1188,12 @@ class SQLiteStore(ConnectionAuthStoreMixin, AgentSessionStoreMixin, ArticleRevis
                                   (article_id, user_id)).fetchone()
         if owner is None:
             return
-        self._con.execute("DELETE FROM article_patches WHERE article_id=?", (article_id,))
+        self._con.execute(
+            "DELETE FROM article_patches WHERE article_id=? AND NOT EXISTS ("
+            "SELECT 1 FROM agent_session_outputs ao "
+            "WHERE ao.kind='article_patch' AND ao.reference=article_patches.id)",
+            (article_id,),
+        )
         self._con.execute("UPDATE article_comments SET has_patch=0 WHERE article_id=?",
                           (article_id,))
         self._con.commit()
@@ -1174,6 +1210,9 @@ class SQLiteStore(ConnectionAuthStoreMixin, AgentSessionStoreMixin, ArticleRevis
             "state": row["state"],
             "created_at": row["created_at"],
             "base_revision_id": row["base_revision_id"],
+            "agent_session_id": (
+                row["agent_session_id"] if "agent_session_id" in row.keys() else None
+            ),
         }
 
     # ── Chat log ─────────────────────────────────────────────────────────────
