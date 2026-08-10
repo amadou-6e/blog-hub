@@ -29,8 +29,12 @@ from pydantic import BaseModel
 from fastapi.responses import HTMLResponse
 
 import backend.services.cli_runner as runner
+import backend.services.connection_auth as agent_auth
 import backend.store as store
 from backend.schemas.connections import (
+    ActiveAgentAuthFlowsResponse,
+    AgentAuthCallbackRequest,
+    AgentAuthFlowResponse,
     ConnectionInfo,
     ConnectionListResponse,
     DraftContent,
@@ -222,6 +226,63 @@ def list_connections(request: Request):
         connections=[ConnectionInfo(**c) for c in store.list_connections(user_id)])
 
 
+# ── Provider-neutral AI agent authentication ─────────────────────────────────
+
+
+def _auth_call(operation):
+    try:
+        return operation()
+    except agent_auth.ConnectionAuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@router.post(
+    "/{conn_id}/auth-flows", response_model=AgentAuthFlowResponse, status_code=201,
+)
+def start_agent_auth_flow(request: Request, conn_id: str):
+    user_id: str = request.state.user_id
+    return _auth_call(lambda: agent_auth.start(store, user_id, conn_id))
+
+
+@router.get(
+    "/auth-flows/active", response_model=ActiveAgentAuthFlowsResponse,
+)
+def active_agent_auth_flows(request: Request):
+    user_id: str = request.state.user_id
+    return ActiveAgentAuthFlowsResponse(
+        flows=[
+            AgentAuthFlowResponse(**agent_auth.response_for(flow))
+            for flow in store.list_active_connection_auth_flows(user_id)
+        ]
+    )
+
+
+@router.get("/auth-flows/{flow_id}", response_model=AgentAuthFlowResponse)
+def get_agent_auth_flow(request: Request, flow_id: str):
+    user_id: str = request.state.user_id
+    return _auth_call(lambda: agent_auth.status(store, user_id, flow_id))
+
+
+@router.post(
+    "/auth-flows/{flow_id}/callback", response_model=AgentAuthFlowResponse,
+)
+def submit_agent_auth_callback(
+    request: Request, flow_id: str, body: AgentAuthCallbackRequest,
+):
+    user_id: str = request.state.user_id
+    return _auth_call(
+        lambda: agent_auth.submit_callback(
+            store, user_id, flow_id, body.callback_url
+        )
+    )
+
+
+@router.delete("/auth-flows/{flow_id}", response_model=AgentAuthFlowResponse)
+def cancel_agent_auth_flow(request: Request, flow_id: str):
+    user_id: str = request.state.user_id
+    return _auth_call(lambda: agent_auth.cancel(store, user_id, flow_id))
+
+
 # ── Save token ────────────────────────────────────────────────────────────────
 
 
@@ -262,6 +323,7 @@ def disconnect(request: Request, conn_id: str):
     user_id: str = request.state.user_id
     if conn_id not in _VALID_IDS:
         raise HTTPException(status_code=404, detail=f"Unknown connection: {conn_id}")
+    store.delete_connection_auth_flows(user_id, conn_id)
     store.delete_connection(user_id, conn_id)
     if conn_id in _CLI_IDS:
         # Best-effort: tell the runner to logout; ignore errors

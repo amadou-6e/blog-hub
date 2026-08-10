@@ -154,6 +154,7 @@ def test_invalid_environment_key_fails_configuration(credential_environment, mon
         '{"access_token":"oauth-secret","ok":true}',
         'Cookie: session=private; theme=dark',
         'auth_code=temporary-code',
+        'callbackUrl=http://localhost/callback?code=temporary-code&state=temporary-state',
     ],
 )
 def test_redaction_removes_secrets(value):

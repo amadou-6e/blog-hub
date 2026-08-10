@@ -84,7 +84,8 @@ def run_generation(
     if context_text:
         full_prompt += f"\n\nAdditional context:\n{context_text}"
 
-    api_key = store.get_connection_token(user_id, runner_provider) if runner_provider == "openai" else None
+    token = store.get_connection_token(user_id, runner_provider) if runner_provider == "openai" else None
+    api_key = runner.api_key_from_connection_token(token)
 
     try:
         result = runner.run_task(

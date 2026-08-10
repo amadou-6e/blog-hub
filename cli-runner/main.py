@@ -25,6 +25,8 @@ import uuid
 from typing import Optional
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_DEVICE_CODE_RE = re.compile(r"\b[A-Z0-9]{4}-[A-Z0-9]{4,6}\b")
+_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -145,9 +147,35 @@ class LoginResponse(BaseModel):
 
 
 class StatusResponse(BaseModel):
-    status: str              # "connected" | "pending" | "error"
+    status: str
     username: Optional[str] = None
     reason: Optional[str] = None
+    error_code: Optional[str] = None
+
+
+def _safe_reason(value: str | None) -> str:
+    """Return an actionable error with auth URLs and one-time codes removed."""
+    cleaned = _ANSI_RE.sub("", value or "Provider login failed")
+    cleaned = _URL_RE.sub("[redacted-url]", cleaned)
+    cleaned = _DEVICE_CODE_RE.sub("[redacted-code]", cleaned)
+    cleaned = re.sub(
+        r"(?i)((?:code|state|token)=)[^\s&#]+", r"\1[redacted]", cleaned
+    )
+    return " ".join(cleaned.split())[:300]
+
+
+def _failure_status(reason: str | None) -> tuple[str, str]:
+    safe = _safe_reason(reason)
+    lowered = safe.lower()
+    if "rate limit" in lowered or "too many requests" in lowered or "429" in lowered:
+        return "rate_limited", safe
+    if "expired" in lowered:
+        return "expired", safe
+    if any(item in lowered for item in ("rejected", "denied", "access_denied")):
+        return "rejected", safe
+    if "timed out" in lowered or "timeout" in lowered:
+        return "timed_out", safe
+    return "failed", safe
 
 
 class TaskRequest(BaseModel):
@@ -156,6 +184,7 @@ class TaskRequest(BaseModel):
     article_md: str
     context_md: Optional[str] = None
     args:       list[str] = []
+    api_key:    Optional[str] = None
 
 
 class TaskResponse(BaseModel):
@@ -180,7 +209,7 @@ def health():
 
 @app.get("/debug/session/{provider}")
 def debug_session(provider: str):
-    """Expose session internals for debugging — not for production use."""
+    """Expose process health without returning authorization material."""
     session = _login_sessions.get(provider)
     if not session:
         return {"session": None}
@@ -201,8 +230,6 @@ def debug_session(provider: str):
                         listen_ports.append(int(cols[1].split(":")[1], 16))
         except FileNotFoundError:
             pass
-    stdout_lines = session.get("stdout", [])
-    stderr_lines = session.get("stderr", [])
     return {
         "pid": pid,
         "poll": poll,
@@ -211,9 +238,7 @@ def debug_session(provider: str):
         "listen_ports": listen_ports,
         "callback_port": session.get("callback_port"),
         "started_at": session.get("started_at"),
-        "url_prefix": session.get("url", "")[:60],
-        "stdout": "".join(stdout_lines)[-2000:],
-        "stderr": "".join(stderr_lines)[-2000:],
+        "flow": "device_code" if session.get("device_code") else "browser_callback",
     }
 
 
@@ -257,8 +282,6 @@ def auth_login(provider: str):
     collected_stdout: list[str] = []
 
     # Device code pattern: e.g. "1N2M-HJRYD" (4 alphanum + hyphen + 4-6 alphanum)
-    _DEVICE_CODE_RE = re.compile(r"\b([A-Z0-9]{4}-[A-Z0-9]{4,6})\b")
-
     def _scan(stream, lines: list[str]) -> None:
         nonlocal url, device_code
         for raw in stream:
@@ -273,7 +296,7 @@ def auth_login(provider: str):
             if device_code is None:
                 m = _DEVICE_CODE_RE.search(clean)
                 if m:
-                    device_code = m.group(1)
+                    device_code = m.group(0)
 
     t_out = threading.Thread(target=_scan, args=(proc.stdout, collected_stdout), daemon=True)
     t_err = threading.Thread(target=_scan, args=(proc.stderr, collected_stderr), daemon=True)
@@ -286,7 +309,12 @@ def auth_login(provider: str):
     if not url:
         proc.terminate()
         reason = "".join(collected_stderr + collected_stdout).strip() or "CLI did not print a login URL"
-        return LoginResponse(available=False, reason=reason[:300])
+        return LoginResponse(available=False, reason=_safe_reason(reason))
+
+    if provider == "openai":
+        code_deadline = min(deadline, time.time() + 2)
+        while time.time() < code_deadline and device_code is None and proc.poll() is None:
+            time.sleep(0.1)
 
     # For device-code flows (OpenAI Codex), the CLI polls internally — no loopback port.
     # For loopback flows (Claude), scan for the callback port the CLI is listening on.
@@ -441,6 +469,13 @@ def auth_status(provider: str):
 
     if provider == "openai":
         cfg = _PROVIDERS["openai"]
+        session = _login_sessions.get(provider)
+        if session and time.time() - session["started_at"] > LOGIN_TIMEOUT:
+            _cancel_login(provider)
+            return StatusResponse(
+                status="timed_out", reason="Login timed out",
+                error_code="authorization_timeout",
+            )
         env = _build_env("openai")
         try:
             result = subprocess.run(
@@ -448,15 +483,22 @@ def auth_status(provider: str):
                 capture_output=True, text=True, env=env, timeout=10,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
-            return StatusResponse(status="error", reason=str(exc))
+            status, reason = _failure_status(str(exc))
+            return StatusResponse(status=status, reason=reason, error_code=status)
+        clean = _ANSI_RE.sub("", result.stdout + result.stderr).strip()
         if result.returncode == 0:
             # Parse email/username from output if present
-            clean = _ANSI_RE.sub("", result.stdout + result.stderr).strip()
             username = next((l.strip() for l in clean.splitlines() if "@" in l or l.strip()), None)
             _cancel_login(provider)
             return StatusResponse(status="connected", username=username)
-        return StatusResponse(status="pending" if _login_sessions.get(provider) else "error",
-                              reason="not authenticated")
+        if session and session.get("proc") and session["proc"].poll() is None:
+            return StatusResponse(status="pending")
+        output = clean
+        if session:
+            output += " " + "".join(session.get("stderr", []) + session.get("stdout", []))
+            _cancel_login(provider)
+        status, reason = _failure_status(output or "not authenticated")
+        return StatusResponse(status=status, reason=reason, error_code=status)
 
     cfg     = _PROVIDERS[provider]
     session = _login_sessions.get(provider)
@@ -464,7 +506,10 @@ def auth_status(provider: str):
     # TTL check
     if session and time.time() - session["started_at"] > LOGIN_TIMEOUT:
         _cancel_login(provider)
-        return StatusResponse(status="error", reason="Login timed out")
+        return StatusResponse(
+            status="timed_out", reason="Login timed out",
+            error_code="authorization_timeout",
+        )
 
     env = _build_env(provider)
 
@@ -479,7 +524,8 @@ def auth_status(provider: str):
     except subprocess.TimeoutExpired:
         return StatusResponse(status="pending")
     except OSError as exc:
-        return StatusResponse(status="error", reason=str(exc))
+        status, reason = _failure_status(str(exc))
+        return StatusResponse(status=status, reason=reason, error_code=status)
 
     # Parse output — claude auth status returns JSON on stderr
     raw = (result.stdout + result.stderr).strip()
@@ -500,9 +546,27 @@ def auth_status(provider: str):
         return StatusResponse(status="connected", username=username)
 
     if session:
-        return StatusResponse(status="pending")
+        proc = session.get("proc")
+        if proc and proc.poll() is None:
+            return StatusResponse(status="pending")
+        output = raw + " " + "".join(
+            session.get("stderr", []) + session.get("stdout", [])
+        )
+        _cancel_login(provider)
+        status, reason = _failure_status(output)
+        return StatusResponse(status=status, reason=reason, error_code=status)
 
-    return StatusResponse(status="error", reason="not authenticated")
+    return StatusResponse(
+        status="failed", reason="not authenticated", error_code="not_authenticated"
+    )
+
+
+@app.post("/auth/{provider}/cancel")
+def auth_cancel(provider: str):
+    if provider not in _PROVIDERS:
+        raise HTTPException(status_code=404, detail=f"Unknown provider: {provider}")
+    _cancel_login(provider)
+    return {"status": "canceled"}
 
 
 # ── Auth: logout ───────────────────────────────────────────────────────────────
@@ -613,7 +677,7 @@ def tasks_run(req: TaskRequest):
             raise HTTPException(422, f"Disallowed arg: {arg}")
 
     # Verify authenticated
-    env = _build_env(req.provider)
+    env = _build_env(req.provider, req.api_key)
     cfg = _PROVIDERS[req.provider]
     try:
         probe = subprocess.run(cfg["whoami_args"], env=env, capture_output=True, timeout=10)

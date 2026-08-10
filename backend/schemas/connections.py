@@ -55,6 +55,30 @@ class OAuthStartResponse(BaseModel):
     device_code: Optional[str] = None  # set when flow == "device_code"
 
 
+class AgentAuthFlowResponse(_CamelModel):
+    flow_id: str
+    provider: str
+    flow_type: str  # "browser_callback" | "device_code"
+    status: str
+    authorization_url: Optional[str] = None
+    device_code: Optional[str] = None
+    username: Optional[str] = None
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    recovery: Optional[str] = None
+    expires_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+
+class AgentAuthCallbackRequest(_CamelModel):
+    callback_url: str = Field(min_length=1, max_length=4096)
+
+
+class ActiveAgentAuthFlowsResponse(_CamelModel):
+    flows: list[AgentAuthFlowResponse]
+
+
 class TestConnectionResponse(BaseModel):
     ok: bool
     detail: str

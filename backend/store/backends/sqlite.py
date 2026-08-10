@@ -30,6 +30,7 @@ from backend.store.crypto import (
 )
 from backend.store.locking import WorkspaceLock
 from backend.store.agent_sessions import AgentSessionStoreMixin
+from backend.store.connection_auth import ConnectionAuthStoreMixin
 from backend.store.schema import (
     SEED_USER_EMAIL as DEFAULT_SEED_USER_EMAIL,
     SEED_USER_HASH as DEFAULT_SEED_USER_HASH,
@@ -216,7 +217,7 @@ def _seed_articles() -> list[dict]:
 # ─── SQLiteStore ──────────────────────────────────────────────────────────────
 
 
-class SQLiteStore(AgentSessionStoreMixin):
+class SQLiteStore(ConnectionAuthStoreMixin, AgentSessionStoreMixin):
 
     def __init__(self, db_path: str, blobs_dir: str = "data/blobs") -> None:
         self._db_path = db_path
@@ -966,6 +967,7 @@ class SQLiteStore(AgentSessionStoreMixin):
                 DELETE FROM articles;
                 DELETE FROM jobs;
                 DELETE FROM connections;
+                DELETE FROM connection_auth_flows;
                 DELETE FROM sessions;
                 DELETE FROM users;
             """)
