@@ -925,6 +925,10 @@ async function loadArticle() {
     await loadChat();
     await loadConnectedProviders();
     await loadAgentSession();
+    if (new URLSearchParams(location.search).get('panel') === 'chat') {
+      openSection('chat');
+      document.getElementById('chat-input')?.focus();
+    }
   } catch (_e) {
     console.error('Failed to load article', _e);
   }
