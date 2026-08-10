@@ -13,6 +13,7 @@ services:
       - bloghub-credential-keys:/run/bloghub-keys
     environment:
       CLI_RUNNER_URL: http://cli-runner:8001
+      BLOGHUB_DISABLE_AUTH: "true"
       BLOGHUB_DB_PATH: /app/data/bloghub.db
       BLOGHUB_BLOBS_DIR: /app/data/blobs
       BLOGHUB_CREDENTIAL_KEY_FILE: /run/bloghub-keys/credential-keys.json

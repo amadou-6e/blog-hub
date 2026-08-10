@@ -109,13 +109,10 @@ def logout(request: Request, response: Response):
 
 @router.get("/me")
 def me(request: Request):
-    token = request.cookies.get(_COOKIE)
-    if not token:
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
-    session = store.get_session(token)
-    if not session:
-        raise HTTPException(status_code=401, detail="Session expired")
-    user = store.get_user_by_id(session["user_id"])
+    user = store.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     return {"id": user["id"], "email": user["email"], "created_at": user["created_at"]}
