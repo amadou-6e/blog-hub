@@ -43,7 +43,7 @@ for i in $(seq 1 30); do
   fi
 done
 
-# ── Start backend ─────────────────────────────────────────────────────────────
+# ── Start backend and worker ──────────────────────────────────────────────────
 echo ""
 echo "Starting backend on http://127.0.0.1:${PORT}"
 echo "Open: http://127.0.0.1:${PORT}/screens/overview/v3.html"
@@ -59,14 +59,21 @@ elif [[ -f ".venv/bin/activate" ]]; then
   source .venv/bin/activate
 fi
 
-# Trap Ctrl+C to also stop docker
+# Run queued work outside the API process so restarts do not lose jobs.
+python scripts/bloghub_worker.py &
+WORKER_PID=$!
+
 cleanup() {
+  status=$?
+  trap - EXIT INT TERM
   echo ""
-  echo "Stopping cli-runner..."
+  echo "Stopping worker and cli-runner..."
+  kill "$WORKER_PID" 2>/dev/null || true
+  wait "$WORKER_PID" 2>/dev/null || true
   docker compose stop cli-runner 2>/dev/null || true
-  exit 0
+  exit "$status"
 }
-trap cleanup INT TERM
+trap cleanup EXIT INT TERM
 
 python -m uvicorn backend.main:app \
   --host 127.0.0.1 \

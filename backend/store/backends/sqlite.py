@@ -24,6 +24,7 @@ from backend.store.backups import (
 from backend.store.crypto import decrypt_token, encrypt_token
 from backend.store.locking import WorkspaceLock
 from backend.store.agent_sessions import AgentSessionStoreMixin
+from backend.store.job_queue import DurableJobStoreMixin
 from backend.store.migrations import (
     SEED_USER_EMAIL as DEFAULT_SEED_USER_EMAIL,
     SEED_USER_HASH as DEFAULT_SEED_USER_HASH,
@@ -209,7 +210,7 @@ def _seed_articles() -> list[dict]:
 # ─── SQLiteStore ──────────────────────────────────────────────────────────────
 
 
-class SQLiteStore(AgentSessionStoreMixin):
+class SQLiteStore(DurableJobStoreMixin, AgentSessionStoreMixin):
 
     def __init__(self, db_path: str, blobs_dir: str = "data/blobs") -> None:
         self._db_path = db_path
@@ -797,50 +798,6 @@ class SQLiteStore(AgentSessionStoreMixin):
                 "username": conn.get("username") or pm.get("username"),
             })
         return result
-
-    # ── Jobs ─────────────────────────────────────────────────────────────────
-
-    def create_job(self, user_id: str, job_type: str, article_id: str) -> dict:
-        job_id = f"job_{uuid.uuid4().hex[:8]}"
-        now_s = _ts(_now())
-        self._con.execute(
-            "INSERT INTO jobs (job_id, kind, article_id, status, created_at, user_id) VALUES (?,?,?,?,?,?)",
-            (job_id, job_type, article_id, "running", now_s, user_id),
-        )
-        self._con.commit()
-        return {
-            "job_id": job_id,
-            "type": job_type,
-            "status": "running",
-            "article_id": article_id,
-            "result": None,
-            "error": None
-        }
-
-    def get_job(self, user_id: str, job_id: str) -> dict | None:
-        row = self._con.execute("SELECT * FROM jobs WHERE job_id=? AND user_id=?", (job_id, user_id)).fetchone()
-        if row is None:
-            return None
-        return {
-            "job_id": row["job_id"],
-            "type": row["kind"],
-            "status": row["status"],
-            "article_id": row["article_id"],
-            "result": json.loads(row["result"]) if row["result"] else None,
-            "error": row["error"],
-        }
-
-    def complete_job(self,
-                     user_id: str,
-                     job_id: str,
-                     result: dict | None = None,
-                     error: str | None = None) -> None:
-        status = "error" if error else "done"
-        self._con.execute(
-            "UPDATE jobs SET status=?, result=?, error=?, completed_at=? WHERE job_id=? AND user_id=?",
-            (status, json.dumps(result) if result else None, error, _ts(_now()), job_id, user_id),
-        )
-        self._con.commit()
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 

@@ -299,37 +299,24 @@ def push_article(request: Request, article_id: str, body: dict = {}):
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
 
+    idempotency_key = request.headers.get("Idempotency-Key")
+    existing = store.find_job_by_idempotency_key(user_id, "push", idempotency_key)
+    if existing:
+        return AsyncAccepted(jobId=existing["job_id"], status=existing["status"])
+
     platforms = body.get("platforms", list(article["destinations"].keys()))
     store.set_destinations_pending(user_id, article_id, platforms)
-    job = store.create_job(user_id, "push", article_id)
-
-    results = push_article_to_platforms(
-        article,
-        platforms,
-        get_connection_token=lambda conn_id: store.get_connection_token(user_id, conn_id),
+    job = store.create_job(
+        user_id,
+        "push",
+        article_id,
+        payload={"article_id": article_id, "platforms": platforms},
+        queue="publishing",
+        idempotency_key=idempotency_key,
+        max_attempts=4,
+        timeout_seconds=300,
     )
-    job_result: dict[str, dict] = {}
-    for platform, result in results.items():
-        store.apply_push_result(
-            user_id,
-            article_id,
-            platform,
-            success=result.success,
-            url=result.url,
-            error=result.error,
-            label=result.label,
-            draft_id=result.draft_id,
-        )
-        job_result[platform] = {
-            "status": result.status,
-            "label": result.label,
-            "url": result.url,
-            "error": result.error,
-            "draft_id": result.draft_id,
-        }
-    store.complete_job(user_id, job["job_id"], result=job_result)
-
-    return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
+    return AsyncAccepted(jobId=job["job_id"], status=JobStatus.queued)
 
 
 # ── Import ────────────────────────────────────────────────────────────────────
@@ -619,14 +606,12 @@ def inspect_article(request: Request, article_id: str):
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
 
-    job = store.create_job(user_id, "inspect", article_id)
-
-    # Simulate: word count >= 500 → pass, else warn
-    gate = "pass" if article["word_count"] >= 500 else "warn"
-    store.apply_inspect_result(user_id, article_id, gate)
-    store.complete_job(user_id, job["job_id"], result={"gate": gate})
-
-    return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
+    job = store.create_job(
+        user_id, "inspect", article_id,
+        payload={"article_id": article_id},
+        queue="default", max_attempts=2, timeout_seconds=60,
+    )
+    return AsyncAccepted(jobId=job["job_id"], status=JobStatus.queued)
 
 
 # ── Regenerate ────────────────────────────────────────────────────────────────
@@ -644,84 +629,24 @@ def regenerate_patches(request: Request, article_id: str):
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
 
-    comments = store.list_comments(user_id, article_id)
-    unresolved = [c for c in comments if not c["resolved"]]
+    idempotency_key = request.headers.get("Idempotency-Key")
+    existing = store.find_job_by_idempotency_key(
+        user_id, "regenerate", idempotency_key
+    )
+    if existing:
+        return AsyncAccepted(jobId=existing["job_id"], status=existing["status"])
 
-    job = store.create_job(user_id, "regenerate", article_id)
-
-    if not unresolved:
-        store.complete_job(user_id, job["job_id"], result={"patches_created": 0})
-        return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
-
-    # Build a prompt asking the AI to produce diff suggestions for each comment.
-    comment_lines = "\n".join(f"- [{c['id']}] {c['author']}: {c['text']}" for c in unresolved)
-    article_body = article.get("body", "")
-    prompt = ("You are an editor reviewing a technical blog article. "
-              "For each comment below, produce a concise patch suggestion.\n\n"
-              "Format each patch as:\n"
-              "PATCH_START\n"
-              "LABEL: <short label>\n"
-              "COMMENT_ID: <comment id>\n"
-              "REMOVED: <the existing text to replace — one or two sentences max>\n"
-              "ADDED: <the replacement text>\n"
-              "PATCH_END\n\n"
-              f"Article (excerpt, first 2000 chars):\n{article_body[:2000]}\n\n"
-              f"Comments to address:\n{comment_lines}\n\n"
-              "Output only PATCH_START…PATCH_END blocks, nothing else.")
-
-    # Determine which provider to use (prefer anthropic, fall back to openai).
-    provider = None
-    for p in ("anthropic", "openai"):
-        if store.get_connection_token(user_id, p):
-            provider = p
-            break
-
-    if provider is None:
-        store.complete_job(user_id, job["job_id"], error="No AI provider connected")
-        return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
-
-    api_key = store.get_connection_token(user_id, provider) if provider == "openai" else None
-    try:
-        result = runner.run_task(provider=provider,
-                                 task="generate",
-                                 article_md=prompt,
-                                 api_key=api_key)
-    except runner.RunnerUnavailable as exc:
-        store.complete_job(user_id, job["job_id"], error=str(exc))
-        return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
-
-    if result.get("exit_code", 1) != 0:
-        err = (result.get("stderr") or result.get("stdout") or "unknown error")[:500]
-        store.complete_job(user_id, job["job_id"], error=f"Regeneration failed: {err}")
-        return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
-
-    # Parse PATCH_START…PATCH_END blocks from the output.
-    import re as _re
-    raw_output = result.get("stdout", "")
-    patch_blocks = _re.findall(r"PATCH_START\s*(.*?)\s*PATCH_END", raw_output, _re.DOTALL)
-
-    store.delete_patches(user_id, article_id)
-    patches_created = 0
-    for block in patch_blocks:
-        fields: dict[str, str] = {}
-        for field in ("LABEL", "COMMENT_ID", "REMOVED", "ADDED"):
-            m = _re.search(rf"{field}:\s*(.+?)(?=\n(?:LABEL|COMMENT_ID|REMOVED|ADDED|$))", block,
-                           _re.DOTALL)
-            if m:
-                fields[field] = m.group(1).strip()
-        if "REMOVED" in fields and "ADDED" in fields:
-            store.add_patch(
-                user_id,
-                article_id=article_id,
-                label=fields.get("LABEL", "Suggested edit"),
-                removed=fields["REMOVED"],
-                added=fields["ADDED"],
-                comment_id=fields.get("COMMENT_ID") or None,
-            )
-            patches_created += 1
-
-    store.complete_job(user_id, job["job_id"], result={"patches_created": patches_created})
-    return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
+    job = store.create_job(
+        user_id,
+        "regenerate",
+        article_id,
+        payload={"article_id": article_id},
+        queue="agents",
+        idempotency_key=idempotency_key,
+        max_attempts=3,
+        timeout_seconds=300,
+    )
+    return AsyncAccepted(jobId=job["job_id"], status=JobStatus.queued)
 
 
 # ── Chat ──────────────────────────────────────────────────────────────────────

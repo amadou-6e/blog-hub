@@ -48,7 +48,7 @@ def _prepare_article_body(title: str, token: str) -> str:
 
 
 @pytest.mark.integration
-def test_push_devto_via_backend_api_full_chain(client: TestClient):
+def test_push_devto_via_backend_api_full_chain(client: TestClient, run_jobs):
     api_key = _read_secret("DEVTO_API_KEY")
     if not api_key:
         pytest.skip("DEVTO_API_KEY is not set")
@@ -63,6 +63,7 @@ def test_push_devto_via_backend_api_full_chain(client: TestClient):
     push_response = client.post(f"/api/articles/{article_id}/push", json={"platforms": ["devto"]})
     assert push_response.status_code == 202
     job_id = push_response.json()["jobId"]
+    run_jobs()
 
     job = client.get(f"/api/jobs/{job_id}").json()
     article_payload = next(
@@ -74,7 +75,7 @@ def test_push_devto_via_backend_api_full_chain(client: TestClient):
                                                                     encoding="utf-8")
 
     assert job["type"] == "push"
-    assert job["status"] == "done"
+    assert job["status"] == "completed"
     assert job["result"]["devto"]["status"] == "draft"
     assert isinstance(job["result"]["devto"]["url"], str) and \
         job["result"]["devto"]["url"].startswith("https://dev.to/")

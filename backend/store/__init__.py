@@ -122,8 +122,32 @@ def get_job(user_id: str, *a, **kw):
     return _backend.get_job(user_id, *a, **kw)
 
 
+def find_job_by_idempotency_key(user_id: str, *a, **kw):
+    return _backend.find_job_by_idempotency_key(user_id, *a, **kw)
+
+
 def complete_job(user_id: str, *a, **kw):
     return _backend.complete_job(user_id, *a, **kw)
+
+
+def list_jobs(user_id: str, *a, **kw):
+    return _backend.list_jobs(user_id, *a, **kw)
+
+
+def request_job_cancellation(user_id: str, *a, **kw):
+    return _backend.request_job_cancellation(user_id, *a, **kw)
+
+
+def retry_job(user_id: str, *a, **kw):
+    return _backend.retry_job(user_id, *a, **kw)
+
+
+def recover_orphaned_jobs(*a, **kw):
+    return _backend.recover_orphaned_jobs(*a, **kw)
+
+
+def queue_metrics(*a, **kw):
+    return _backend.queue_metrics(*a, **kw)
 
 
 # ── Agent sessions ───────────────────────────────────────────────────────────

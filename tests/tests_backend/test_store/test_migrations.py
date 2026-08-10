@@ -58,6 +58,7 @@ def test_fresh_database_is_migrated_to_latest_schema(tmp_path):
             (1, "create_current_schema"),
             (2, "add_query_indexes"),
             (3, "add_agent_session_persistence"),
+            (4, "upgrade_jobs_to_durable_queue"),
         ]
         tables = {
             row[0]
@@ -82,6 +83,8 @@ def test_fresh_database_is_migrated_to_latest_schema(tmp_path):
             "agent_approvals",
             "agent_checkpoints",
             "agent_session_outputs",
+            "job_attempts",
+            "job_effects",
         } <= tables
     finally:
         store.close()

@@ -130,13 +130,30 @@ class ArticleStore(Protocol):
 
     # ── Jobs ─────────────────────────────────────────────────────────────────
 
-    def create_job(self, user_id: str, job_type: str, article_id: str) -> dict:
+    def create_job(
+        self, user_id: str, job_type: str, article_id: str | None,
+        payload: dict | None = None, **kwargs: Any,
+    ) -> dict:
         ...
 
     def get_job(self, user_id: str, job_id: str) -> dict | None:
         ...
 
+    def find_job_by_idempotency_key(
+        self, user_id: str, job_type: str, idempotency_key: str | None,
+    ) -> dict | None:
+        ...
+
     def complete_job(self, user_id: str, job_id: str, result: dict | None = None, error: str | None = None) -> None:
+        ...
+
+    def list_jobs(self, user_id: str, **kwargs: Any) -> list[dict]:
+        ...
+
+    def request_job_cancellation(self, user_id: str, job_id: str) -> dict | None:
+        ...
+
+    def retry_job(self, user_id: str, job_id: str) -> dict | None:
         ...
 
     # ── Agent sessions ──────────────────────────────────────────────────────

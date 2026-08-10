@@ -330,10 +330,82 @@ def _create_agent_sessions(connection: sqlite3.Connection) -> None:
         connection.execute(statement)
 
 
+def _upgrade_jobs_to_durable_queue(connection: sqlite3.Connection) -> None:
+    columns = (
+        ("payload_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ("queue", "TEXT NOT NULL DEFAULT 'default'"),
+        ("priority", "INTEGER NOT NULL DEFAULT 0"),
+        ("idempotency_key", "TEXT"),
+        ("max_attempts", "INTEGER NOT NULL DEFAULT 3"),
+        ("attempt_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("available_at", "TEXT"),
+        ("claimed_by", "TEXT"),
+        ("lease_expires_at", "TEXT"),
+        ("heartbeat_at", "TEXT"),
+        ("timeout_seconds", "INTEGER NOT NULL DEFAULT 300"),
+        ("cancel_requested_at", "TEXT"),
+        ("checkpoint_json", "TEXT"),
+        ("updated_at", "TEXT"),
+        ("terminal_error", "TEXT"),
+        ("expires_at", "TEXT"),
+    )
+    for column, definition in columns:
+        _add_column(connection, "jobs", column, definition)
+
+    connection.execute(
+        """UPDATE jobs SET
+           status=CASE status WHEN 'done' THEN 'completed'
+                              WHEN 'error' THEN 'failed'
+                              WHEN 'running' THEN 'queued'
+                              ELSE status END,
+           available_at=COALESCE(available_at, created_at),
+           updated_at=COALESCE(updated_at, created_at),
+           terminal_error=COALESCE(terminal_error, error)"""
+    )
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS job_attempts (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id        TEXT NOT NULL REFERENCES jobs(job_id) ON DELETE CASCADE,
+            attempt       INTEGER NOT NULL,
+            worker_id     TEXT NOT NULL,
+            status        TEXT NOT NULL,
+            started_at    TEXT NOT NULL,
+            heartbeat_at  TEXT,
+            finished_at   TEXT,
+            error         TEXT,
+            UNIQUE(job_id, attempt)
+        )"""
+    )
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS job_effects (
+            job_id       TEXT NOT NULL REFERENCES jobs(job_id) ON DELETE CASCADE,
+            effect_key   TEXT NOT NULL,
+            status       TEXT NOT NULL,
+            attempt      INTEGER NOT NULL,
+            result_json  TEXT,
+            started_at   TEXT NOT NULL,
+            completed_at TEXT,
+            PRIMARY KEY(job_id, effect_key)
+        )"""
+    )
+    statements = (
+        "CREATE INDEX IF NOT EXISTS idx_jobs_queue_claim "
+        "ON jobs(queue, status, available_at, priority DESC, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_jobs_lease ON jobs(status, lease_expires_at)",
+        "CREATE INDEX IF NOT EXISTS idx_jobs_user_created ON jobs(user_id, created_at DESC)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_user_idempotency "
+        "ON jobs(user_id, kind, idempotency_key) WHERE idempotency_key IS NOT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_job_attempts_job ON job_attempts(job_id, attempt)",
+    )
+    for statement in statements:
+        connection.execute(statement)
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "create_current_schema", _create_current_schema),
     Migration(2, "add_query_indexes", _create_indexes),
     Migration(3, "add_agent_session_persistence", _create_agent_sessions),
+    Migration(4, "upgrade_jobs_to_durable_queue", _upgrade_jobs_to_durable_queue),
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
 
