@@ -16,22 +16,24 @@ data/backups/
 Override them with `BLOGHUB_DB_PATH`, `BLOGHUB_BLOBS_DIR`, and
 `BLOGHUB_BACKUP_DIR`.
 
-## Migrations
+## Schema
 
-Migrations run automatically when BlogHub opens the database. Applied versions are
-recorded in `schema_migrations` and mirrored in SQLite's `user_version` pragma.
-Each migration runs in an immediate transaction. BlogHub stops startup and reports
-the failed version and name if a migration cannot complete.
+The database shape is defined in `backend/store/sql/schema.sql`, isolated from
+Python so it can be read and reviewed on its own. BlogHub applies it automatically
+when it opens the database; every statement is idempotent, so re-applying it
+against an already-current database is a no-op.
 
-Check the current version and database integrity with:
+BlogHub does not migrate schemas in place. When `schema.sql` changes, delete the
+runtime database (`data/bloghub.db`) and let it be recreated fresh, instead of
+writing an upgrade path for the old shape. Bump `SCHEMA_VERSION` in
+`backend/store/schema.py` alongside a breaking schema change so `status` reports
+it.
+
+Check the current schema version and database integrity with:
 
 ```bash
 python scripts/bloghub_db.py status
 ```
-
-Never edit `schema_migrations` manually. Add a new ordered `Migration` entry in
-`backend/store/migrations.py` for every schema change and include upgrade tests for
-the oldest supported input schema.
 
 ## On-demand backups
 
@@ -101,6 +103,6 @@ replacement fails, it puts the previous database and blob directory back.
 - Copy backups to storage outside the BlogHub host.
 - Restrict access because backups contain articles, account data, and encrypted
   provider credentials.
-- Test a restore regularly; a backup is not considered healthy until verification
+- Test a restore regularly. A backup is not considered healthy until verification
   and restore checks pass.
 - Do not commit database files, WAL files, backup bundles, or blob contents.

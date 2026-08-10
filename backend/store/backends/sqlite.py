@@ -23,12 +23,11 @@ from backend.store.backups import (
 )
 from backend.store.crypto import decrypt_token, encrypt_token
 from backend.store.locking import WorkspaceLock
-from backend.store.migrations import (
+from backend.store.schema import (
     SEED_USER_EMAIL as DEFAULT_SEED_USER_EMAIL,
     SEED_USER_HASH as DEFAULT_SEED_USER_HASH,
     SEED_USER_ID as DEFAULT_SEED_USER_ID,
-    current_version,
-    run_migrations,
+    apply_schema,
 )
 
 # ─── Static metadata ──────────────────────────────────────────────────────────
@@ -225,7 +224,7 @@ class SQLiteStore:
         self._con.execute("PRAGMA journal_mode=WAL")
         self._con.execute("PRAGMA foreign_keys=ON")
         with self._workspace_lock.acquire():
-            run_migrations(self._con)
+            apply_schema(self._con)
             self._seed_if_empty()
         # Ephemeral — no need to persist across restarts
         self._oauth_pending: dict[str, dict] = {}
@@ -845,7 +844,7 @@ class SQLiteStore:
 
     @property
     def schema_version(self) -> int:
-        return current_version(self._con)
+        return self._con.execute("PRAGMA user_version").fetchone()[0]
 
     def create_backup(
         self,
