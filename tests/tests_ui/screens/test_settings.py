@@ -213,6 +213,45 @@ def test_callback_flow_uses_shared_contract_and_updates_without_reload(page):
     assert state["polls"] >= 1
 
 
+def test_callback_poll_does_not_erase_pasted_url(page):
+    waiting = {
+        "flowId": "auth_callback_1", "provider": "anthropic",
+        "flowType": "browser_callback", "status": "waiting_for_authorization",
+        "authorizationUrl": "https://provider.example/authorize", "deviceCode": None,
+        "username": None, "errorCode": None, "errorMessage": None, "recovery": None,
+        "expiresAt": "2026-08-10T10:05:00Z", "createdAt": "2026-08-10T10:00:00Z",
+        "updatedAt": "2026-08-10T10:00:00Z",
+    }
+    page.route(
+        f"{BASE_URL}/api/connections",
+        lambda route: route.fulfill(json=_connection_payload()),
+    )
+    page.route(
+        f"{BASE_URL}/api/connections/auth-flows/active",
+        lambda route: route.fulfill(json={"flows": []}),
+    )
+    page.route(
+        f"{BASE_URL}/api/connections/anthropic/auth-flows",
+        lambda route: route.fulfill(status=201, json=waiting),
+    )
+    page.route(
+        f"{BASE_URL}/api/connections/auth-flows/auth_callback_1",
+        lambda route: route.fulfill(json=waiting),
+    )
+
+    page.goto(SETTINGS_URL)
+    page.get_by_role("button", name="AI Providers").click()
+    page.evaluate("window.open = () => null")
+    page.locator("#ai-wrap-anthropic").get_by_role(
+        "button", name="Login with browser"
+    ).click()
+    callback = page.locator("#callback-input-anthropic")
+    callback.fill("http://localhost:54322/callback?code=secret&state=temporary")
+    page.wait_for_timeout(2500)
+
+    assert callback.input_value().endswith("code=secret&state=temporary")
+
+
 def test_device_code_flow_shows_code_and_updates_without_reload(page):
     state = {"connected": False}
 

@@ -653,7 +653,10 @@ function pollAgentAuthFlow(flow) {
       const res = await fetch(`/api/connections/auth-flows/${flow.flowId}`);
       const current = await res.json();
       if (!res.ok) throw new Error(current.detail || `HTTP ${res.status}`);
-      renderAgentAuthFlow(current);
+      const row = document.getElementById('auth-flow-row-' + flow.provider);
+      if (!row || row.dataset.status !== current.status) {
+        renderAgentAuthFlow(current);
+      }
       if (current.status !== 'waiting_for_authorization') {
         clearInterval(timer);
         _authTimers.delete(flow.flowId);

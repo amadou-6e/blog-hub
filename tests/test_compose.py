@@ -17,3 +17,11 @@ def test_compose_wires_backend_to_healthy_runner_and_separate_storage():
     assert "bloghub-credential-keys:/run/bloghub-keys" in backend["volumes"]
     assert services["cli-runner"]["healthcheck"]
     assert services["backend"]["healthcheck"]
+
+
+def test_cli_runner_installs_callback_http_client():
+    requirements = (ROOT / "cli-runner" / "requirements.txt").read_text(
+        encoding="utf-8"
+    ).splitlines()
+
+    assert any(requirement.startswith("httpx") for requirement in requirements)
