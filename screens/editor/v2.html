@@ -54,6 +54,11 @@
     .chat-msg.user .bubble{background:#1a1f38;border:1px solid #2a2e50;color:#e8eaf2;align-self:flex-end;border-radius:7px 7px 2px 7px}
     .chat-msg.bot  .bubble{background:#181c27;border:1px solid #252a38;color:#c9cfe0;font-family:'JetBrains Mono',monospace;font-size:11px;align-self:flex-start;border-radius:7px 7px 7px 2px}
     .chat-label{font-size:10px;color:#5a6080;padding:0 3px}
+    .agent-tool{border:1px solid #30364a;background:#131722;border-radius:6px;padding:7px 8px;margin:6px 0;font-size:10px;font-family:'JetBrains Mono',monospace}
+    .agent-tool-head{display:flex;align-items:center;gap:6px;color:#aab2cc}
+    .agent-tool-dot{width:6px;height:6px;border-radius:50%;background:#6366f1;flex-shrink:0}
+    .agent-tool.completed .agent-tool-dot{background:#4ade80}.agent-tool.failed .agent-tool-dot{background:#f87171}
+    .approval-card{border:1px solid #5b4a1f;background:#211d12;border-radius:6px;padding:8px;margin:7px 0;font-size:11px}
 
     input[type=text]{font-family:'JetBrains Mono',monospace}
     .diff-removed{background:#2d1a1a;color:#f87171;padding:7px 10px}
@@ -62,7 +67,7 @@
     #left-panel{flex-shrink:0;border-right:1px solid #252a38;background:#181c27;display:flex;flex-direction:row;overflow:hidden}
     #panel-strip{width:12px;flex-shrink:0;border-left:1px solid #252a38;display:flex;align-items:center;justify-content:center;cursor:pointer;background:#181c27;transition:background 100ms;}
     #panel-strip:hover{background:#1e2235}
-    #panel-content{width:260px;flex-shrink:0;overflow-y:auto;}
+    #panel-content{width:320px;flex-shrink:0;overflow-y:auto;}
 
     #preview-pane{display:flex;flex-direction:row;overflow:hidden;background:#0d1019;flex:1;min-width:12px;}
     #preview-strip{width:12px;flex-shrink:0;border-right:1px solid #252a38;display:flex;align-items:center;justify-content:center;cursor:pointer;background:#0d1019;transition:background 100ms;}
@@ -277,6 +282,9 @@ let PATCHES  = [];
 
 let CHAT_HISTORY = [];
 let AGENT_SESSION = null;
+let CONNECTED_PROVIDERS = [];
+let CHAT_PROVIDER = localStorage.getItem('bloghub-chat-provider') || 'anthropic';
+let CHAT_POLL = null;
 
 
 
@@ -328,6 +336,7 @@ function onInput() {
   // update word count
   const words = ta.value.trim().split(/\s+/).filter(Boolean).length;
   document.getElementById('word-count').textContent = words.toLocaleString() + ' words';
+  renderPreview();
 
   saveTimer = setTimeout(async () => {
     setSave('saving');
@@ -395,6 +404,7 @@ async function _pollJob(jobId) {
 // ── Left panel accordion ─────────────────────────────────────────────────────
 function toggleSection(id) {
   accOpen[id] = !accOpen[id];
+  if (id === 'chat' && accOpen[id]) collapseOtherSections(id);
   const body = document.getElementById('abody-' + id);
   const chev = document.getElementById('achev-' + id);
   body.style.display = accOpen[id] ? '' : 'none';
@@ -404,6 +414,7 @@ function toggleSection(id) {
 
 function openSection(id) {
   if (!leftOpen) toggleLeft();
+  if (id === 'chat') collapseOtherSections(id);
   if (!accOpen[id]) {
     accOpen[id] = true;
     document.getElementById('abody-' + id).style.display = '';
@@ -411,6 +422,17 @@ function openSection(id) {
   }
   renderSection(id);
   document.getElementById('abody-' + id).parentElement.scrollIntoView({ behavior:'smooth', block:'nearest' });
+}
+
+function collapseOtherSections(activeId) {
+  Object.keys(accOpen).forEach(id => {
+    if (id === activeId) return;
+    accOpen[id] = false;
+    const body = document.getElementById('abody-' + id);
+    const chev = document.getElementById('achev-' + id);
+    if (body) body.style.display = 'none';
+    if (chev) chev.classList.add('closed');
+  });
 }
 
 function renderSection(id) {
@@ -463,20 +485,19 @@ function renderPreview() {
   } else {
     extLink.style.display = 'none';
   }
-  const core = `<div class="rendered-preview">
-    <h1>Zero-downtime Postgres Migration</h1>
-    <p>Migrating a production Postgres database without downtime requires careful coordination between schema changes, application deployments, and traffic routing.</p>
-    <h2>Phase 1 — Baseline and snapshot</h2>
-    <p>Before touching any schema, capture a full logical backup and establish your rollback threshold.</p>
-    <blockquote><p>A dry run in staging is mandatory. Skipping this has caused three incidents in our post-mortem history.</p></blockquote>
-    <h2>Phase 2 — Schema expansion</h2>
-    <pre><code><span class="cm-c">-- Safe: add nullable column first</span>
-<span class="kw">ALTER TABLE</span> orders <span class="kw">ADD COLUMN</span> retry_count <span class="kw">INTEGER</span>;
-<span class="kw">UPDATE</span> orders <span class="kw">SET</span> retry_count = 0 <span class="kw">WHERE</span> retry_count <span class="kw">IS NULL</span>;</code></pre>
-    <h2>Phase 3 — Cutover</h2>
-    <p>Health checks must run before and after each migration step. Lock timeout: 5 seconds.</p>
-    <pre><code><span class="kw">CREATE INDEX CONCURRENTLY</span> idx_orders_retry <span class="kw">ON</span> orders(retry_count);</code></pre>
-  </div>`;
+  const source = document.getElementById('raw-editor').value;
+  const blocks = source.split(/\n{2,}/).map(block => {
+    const value = block.trim();
+    if (!value) return '';
+    if (value.startsWith('```')) {
+      return `<pre><code>${esc(value.replace(/^```[^\n]*\n?/, '').replace(/```$/, ''))}</code></pre>`;
+    }
+    if (value.startsWith('# ')) return `<h1>${esc(value.slice(2))}</h1>`;
+    if (value.startsWith('## ')) return `<h2>${esc(value.slice(3))}</h2>`;
+    if (value.startsWith('> ')) return `<blockquote><p>${esc(value.replace(/^> ?/gm, ''))}</p></blockquote>`;
+    return `<p>${esc(value).replace(/\n/g, '<br>')}</p>`;
+  }).join('');
+  const core = `<div class="rendered-preview">${blocks}</div>`;
   const body = document.getElementById('preview-body');
   if (platform === 'rendered') { body.innerHTML = core; return; }
   const name = { medium:'Medium', hashnode:'Hashnode', devto:'Dev.to' }[platform];
@@ -563,24 +584,44 @@ function buildChat() {
       <div class="chat-label">${m.role === 'user' ? 'You' : 'bloghub'}</div>
       <div class="bubble">${esc(m.text)}</div>
     </div>`).join('');
-  const status = AGENT_SESSION ? AGENT_SESSION.status.replaceAll('_', ' ') : 'new session';
-  const resumable = AGENT_SESSION && ['waiting_for_input','waiting_for_resume','failed'].includes(AGENT_SESSION.status);
-  const cancelable = AGENT_SESSION && ['running','waiting_for_input','waiting_for_approval','waiting_for_resume'].includes(AGENT_SESSION.status);
+  const tools = (AGENT_SESSION?.tool_calls || []).map(tool => `
+    <div class="agent-tool ${esc(tool.status)}">
+      <div class="agent-tool-head"><span class="agent-tool-dot"></span><span>${esc(tool.name)}</span><span style="margin-left:auto;color:#5a6080;">${esc(tool.status)}</span></div>
+      ${tool.arguments && Object.values(tool.arguments).some(Boolean) ? `<div style="color:#69718d;margin-top:5px;white-space:pre-wrap;overflow-wrap:anywhere;">${esc(JSON.stringify(tool.arguments, null, 2))}</div>` : ''}
+    </div>`).join('');
+  const approvals = (AGENT_SESSION?.approvals || []).map(approval => `
+    <div class="approval-card">
+      <div style="color:#f5d06f;margin-bottom:6px;">Approval requested</div>
+      <div style="color:#aab2cc;font-family:'JetBrains Mono',monospace;font-size:10px;white-space:pre-wrap;overflow-wrap:anywhere;">${esc(JSON.stringify(approval.request, null, 2))}</div>
+      ${approval.status === 'pending' ? `<div style="display:flex;gap:6px;margin-top:8px;"><button onclick="resolveAgentApproval('${approval.id}',true)" class="ai-btn hl">Approve</button><button onclick="resolveAgentApproval('${approval.id}',false)" class="ai-btn">Deny</button></div>` : `<div style="margin-top:6px;color:#737b98;">${esc(approval.status)}</div>`}
+    </div>`).join('');
+  const sessionEvents = AGENT_SESSION?.events || [];
+  const lastTurnId = sessionEvents.filter(event => event.kind === 'turn_started').at(-1)?.id || 0;
+  const deltas = sessionEvents.filter(
+    event => event.kind === 'assistant_delta' && event.id > lastTurnId
+  ).map(event => event.data?.text || '').join('');
+  const status = AGENT_SESSION ? AGENT_SESSION.status.replaceAll('_', ' ') : 'new thread';
+  const resumable = AGENT_SESSION && ['waiting_for_resume','failed'].includes(AGENT_SESSION.status);
+  const cancelable = AGENT_SESSION && AGENT_SESSION.status === 'running';
+  const options = CONNECTED_PROVIDERS.map(provider => `<option value="${provider.id}" ${provider.id === CHAT_PROVIDER ? 'selected' : ''}>${esc(provider.label)}</option>`).join('');
   return `<div>
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:9px;">
+      <select id="chat-provider" onchange="switchChatProvider(this.value)" aria-label="Chat provider" style="flex:1;min-width:0;background:#111520;border:1px solid #343a50;border-radius:5px;color:#c9cfe0;padding:5px 7px;font-size:11px;outline:none;">${options || '<option>No provider connected</option>'}</select>
+      <button onclick="newAgentThread()" class="icon-btn" title="New chat" style="width:27px;height:27px;">+</button>
+    </div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;font-size:10px;color:#737b98;font-family:'JetBrains Mono',monospace;">
-      <span>${esc(status)}</span>
+      <span><span style="color:${status === 'running' ? '#a5b4fc' : '#737b98'}">●</span> ${esc(status)}</span>
       <span style="display:flex;gap:5px;">
         ${resumable ? `<button onclick="resumeAgentSession()" style="font-size:10px;padding:2px 7px;border:1px solid #343a50;border-radius:4px;background:transparent;color:#c9cfe0;cursor:pointer;">Resume</button>` : ''}
         ${cancelable ? `<button onclick="cancelAgentSession()" style="font-size:10px;padding:2px 7px;border:1px solid #343a50;border-radius:4px;background:transparent;color:#737b98;cursor:pointer;">Cancel</button>` : ''}
       </span>
     </div>
-    <div id="chat-msgs" style="max-height:200px;overflow-y:auto;margin-bottom:8px;">${msgs}</div>
+    <div id="chat-msgs" style="max-height:310px;overflow-y:auto;margin-bottom:8px;">${tools}${approvals}${msgs}${deltas && AGENT_SESSION?.status === 'running' ? `<div class="chat-msg bot"><div class="chat-label">${esc(CHAT_PROVIDER)} · streaming</div><div class="bubble">${esc(deltas)}</div></div>` : ''}</div>
     <div style="border-top:1px solid #252a38;padding-top:8px;display:flex;gap:6px;align-items:center;">
-      <span style="font-size:11px;color:#6366f1;font-family:'JetBrains Mono',monospace;flex-shrink:0;">$</span>
-      <input id="chat-input" type="text" placeholder="type a command…"
+      <input id="chat-input" type="text" placeholder="Ask about this article…" ${!CONNECTED_PROVIDERS.length || cancelable ? 'disabled' : ''}
         onkeydown="if(event.key==='Enter')sendChat()"
         style="flex:1;background:transparent;border:none;outline:none;color:#e8eaf2;font-size:12px;min-width:0;"/>
-      <button onclick="sendChat()" style="font-size:11px;padding:3px 9px;border-radius:4px;border:1px solid #252a38;background:transparent;color:#5a6080;cursor:pointer;flex-shrink:0;">↵</button>
+      <button onclick="sendChat()" class="icon-btn" title="Send" style="width:27px;height:27px;color:#a5b4fc;">↑</button>
     </div>
   </div>`;
 }
@@ -597,32 +638,18 @@ async function sendChat() {
     return;
   }
   CHAT_HISTORY.push({ role:'user', text });
-  if (AGENT_SESSION) {
-    await fetch(`/api/agent-sessions/${AGENT_SESSION.id}/messages`, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ role:'user', content:text })
-    });
-  }
+  AGENT_SESSION.status = 'running';
   renderSection('chat');
   try {
-    const r = await fetch(`/api/articles/${ARTICLE_ID}/chat`, {
+    const r = await fetch(`/api/agent-sessions/${AGENT_SESSION.id}/turns`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ command: text })
+      body: JSON.stringify({ content: text })
     });
-    if (r.ok) {
-      const data = await r.json();
-      CHAT_HISTORY.push({ role:'bot', text: data.reply });
-      if (AGENT_SESSION) {
-        await fetch(`/api/agent-sessions/${AGENT_SESSION.id}/messages`, {
-          method: 'POST', headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ role:'assistant', content:data.reply })
-        });
-      }
-    } else {
-      CHAT_HISTORY.push({ role:'bot', text: 'Error: server returned ' + r.status });
-    }
+    if (!r.ok) throw new Error((await r.json()).detail || `HTTP ${r.status}`);
+    startChatPolling();
   } catch (e) {
     CHAT_HISTORY.push({ role:'bot', text: 'Error: ' + e.message });
+    AGENT_SESSION.status = 'failed';
   }
   renderSection('chat');
 }
@@ -642,12 +669,56 @@ async function ensureAgentSession() {
   const r = await fetch('/api/agent-sessions', {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({
-      provider:'bloghub', articleId:ARTICLE_ID, title:'Editor chat',
+      provider:CHAT_PROVIDER, articleId:ARTICLE_ID, title:'Editor chat',
       metadata:{ surface:'editor' }
     })
   });
   if (r.ok) AGENT_SESSION = await r.json();
   return AGENT_SESSION;
+}
+
+async function refreshAgentSession() {
+  if (!AGENT_SESSION) return;
+  const response = await fetch(`/api/agent-sessions/${AGENT_SESSION.id}`);
+  if (!response.ok) return;
+  AGENT_SESSION = await response.json();
+  AGENT_SESSION_HISTORY = AGENT_SESSION.messages
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .map(m => ({ role:m.role === 'assistant' ? 'bot' : 'user', text:m.content, created_at:m.created_at }));
+  mergeChatHistory();
+  renderSection('chat');
+}
+
+function startChatPolling() {
+  clearInterval(CHAT_POLL);
+  CHAT_POLL = setInterval(async () => {
+    await refreshAgentSession();
+    if (!AGENT_SESSION || AGENT_SESSION.status !== 'running') {
+      clearInterval(CHAT_POLL); CHAT_POLL = null;
+    }
+  }, 700);
+}
+
+async function switchChatProvider(provider) {
+  CHAT_PROVIDER = provider;
+  localStorage.setItem('bloghub-chat-provider', provider);
+  AGENT_SESSION = null; AGENT_SESSION_HISTORY = [];
+  await loadAgentSession();
+  renderSection('chat');
+}
+
+function newAgentThread() {
+  AGENT_SESSION = null; AGENT_SESSION_HISTORY = [];
+  mergeChatHistory(); renderSection('chat');
+}
+
+async function resolveAgentApproval(approvalId, approved) {
+  if (!AGENT_SESSION) return;
+  await fetch(`/api/agent-sessions/${AGENT_SESSION.id}/approvals/${approvalId}/resolve`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({approved, response:{surface:'editor'}})
+  });
+  await refreshAgentSession();
 }
 
 async function resumeAgentSession() {
@@ -852,6 +923,7 @@ async function loadArticle() {
     await loadComments();
     await loadPatches();
     await loadChat();
+    await loadConnectedProviders();
     await loadAgentSession();
   } catch (_e) {
     console.error('Failed to load article', _e);
@@ -908,12 +980,13 @@ async function loadChat() {
 async function loadAgentSession() {
   try {
     const listResponse = await fetch(
-      `/api/agent-sessions?articleId=${encodeURIComponent(ARTICLE_ID)}&includeArchived=true&limit=1`
+      `/api/agent-sessions?articleId=${encodeURIComponent(ARTICLE_ID)}&includeArchived=true&limit=50`
     );
     if (!listResponse.ok) return;
     const list = await listResponse.json();
-    if (!list.sessions.length) return;
-    const detailResponse = await fetch(`/api/agent-sessions/${list.sessions[0].id}`);
+    const selected = list.sessions.find(session => session.provider === CHAT_PROVIDER);
+    if (!selected) return;
+    const detailResponse = await fetch(`/api/agent-sessions/${selected.id}`);
     if (!detailResponse.ok) return;
     AGENT_SESSION = await detailResponse.json();
     AGENT_SESSION_HISTORY = AGENT_SESSION.messages
@@ -921,7 +994,22 @@ async function loadAgentSession() {
       .map(m => ({ role: m.role === 'assistant' ? 'bot' : 'user', text: m.content, created_at: m.created_at }));
     mergeChatHistory();
     renderSection('chat');
+    if (AGENT_SESSION.status === 'running') startChatPolling();
   } catch (_e) { /* silently ignore */ }
+}
+
+async function loadConnectedProviders() {
+  try {
+    const response = await fetch('/api/connections');
+    if (!response.ok) return;
+    const data = await response.json();
+    CONNECTED_PROVIDERS = data.connections.filter(
+      item => ['anthropic','openai'].includes(item.id) && item.status === 'connected'
+    );
+    if (!CONNECTED_PROVIDERS.some(item => item.id === CHAT_PROVIDER) && CONNECTED_PROVIDERS.length) {
+      CHAT_PROVIDER = CONNECTED_PROVIDERS[0].id;
+    }
+  } catch (_e) { /* surfaced as an empty provider selector */ }
 }
 
 async function triggerInspect() {

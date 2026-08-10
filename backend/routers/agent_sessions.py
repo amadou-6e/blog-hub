@@ -1,14 +1,17 @@
 """Lifecycle and recovery API for durable agent sessions."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 
 import backend.store as store
+import backend.services.agent_chat as agent_chat
+import backend.services.cli_runner as runner
 from backend.schemas.agent_sessions import (
     AddCheckpointRequest,
     AddMessageRequest,
     AddOutputRequest,
+    ChatTurnRequest,
     CompleteToolCallRequest,
     CreateAgentSessionRequest,
     RecordToolCallRequest,
@@ -71,6 +74,40 @@ def add_message(request: Request, session_id: str, body: AddMessageRequest):
         raise _not_found(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/{session_id}/turns", status_code=202)
+def run_chat_turn(
+    request: Request, session_id: str, body: ChatTurnRequest,
+    background_tasks: BackgroundTasks,
+):
+    user_id = request.state.user_id
+    session = store.get_agent_session(user_id, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Agent session not found")
+    if session["provider"] not in {"anthropic", "openai"}:
+        raise HTTPException(status_code=422, detail="Select Anthropic or OpenAI")
+    connection = next(
+        (item for item in store.list_connections(user_id)
+         if item["id"] == session["provider"]), None
+    )
+    if not connection or connection["status"] != "connected":
+        raise HTTPException(status_code=409, detail="Selected provider is not connected")
+    if session["status"] in {"waiting_for_input", "waiting_for_resume", "failed"}:
+        store.resume_agent_session(user_id, session_id)
+    elif session["status"] != "running":
+        raise HTTPException(
+            status_code=409, detail=f"Session is {session['status'].replace('_', ' ')}"
+        )
+    if any(event["kind"] == "turn_started" for event in session.get("events", [])[-2:]):
+        raise HTTPException(status_code=409, detail="A response is already running")
+
+    message = store.add_agent_message(user_id, session_id, "user", body.content)
+    store.add_agent_event(user_id, session_id, "turn_started", {"message_id": message["id"]})
+    background_tasks.add_task(
+        agent_chat.run_turn, user_id=user_id, session_id=session_id
+    )
+    return {"sessionId": session_id, "status": "running", "message": message}
 
 
 @router.post("/{session_id}/tool-calls")
@@ -176,6 +213,10 @@ def resume_session(request: Request, session_id: str):
 @router.post("/{session_id}/cancel")
 def cancel_session(request: Request, session_id: str):
     try:
+        try:
+            runner.cancel_chat(session_id)
+        except runner.RunnerUnavailable:
+            pass
         return store.cancel_agent_session(request.state.user_id, session_id)
     except KeyError as exc:
         raise _not_found(exc) from exc

@@ -39,3 +39,50 @@ def test_task_request_accepts_an_ephemeral_api_key():
         provider="openai", task="generate", article_md="prompt", api_key="secret"
     )
     assert request.api_key == "secret"
+
+
+def test_runner_normalizes_claude_text_tools_and_permission_requests():
+    runner = _runner_module()
+    started = runner._normalize_chat_event("anthropic", {
+        "type": "stream_event", "event": {
+            "type": "content_block_start",
+            "content_block": {"type": "tool_use", "id": "read-1", "name": "Read"},
+        },
+    })
+    delta = runner._normalize_chat_event("anthropic", {
+        "type": "stream_event", "event": {
+            "type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hello"},
+        },
+    })
+    result = runner._normalize_chat_event("anthropic", {
+        "type": "result", "result": "Hello", "session_id": "native-1",
+        "permission_denials": [{"tool_name": "Edit", "path": "article.md"}],
+    })
+
+    assert started[0]["name"] == "Read"
+    assert delta == [{"type": "assistant_delta", "text": "Hello"}]
+    assert {event["type"] for event in result} == {
+        "assistant_message", "approval_required", "checkpoint"
+    }
+
+
+def test_runner_normalizes_codex_tool_and_message_events():
+    runner = _runner_module()
+    tool = {"id": "cmd-1", "type": "command_execution", "command": "cat article.md"}
+    assert runner._normalize_chat_event(
+        "openai", {"type": "item.started", "item": tool}
+    )[0]["type"] == "tool_started"
+    assert runner._normalize_chat_event("openai", {
+        "type": "item.completed", "item": {"type": "agent_message", "text": "Done"},
+    }) == [{"type": "assistant_message", "text": "Done"}]
+
+
+def test_codex_receives_article_from_audited_runner_tool_without_shell_requirement():
+    runner = _runner_module()
+    prompt = runner._chat_prompt(
+        "openai", "/tmp/chat/article.md", "# Synthetic\n\nSafe content.",
+        [{"role": "user", "content": "Review it"}],
+    )
+    assert "audited read_article tool" in prompt
+    assert "# Synthetic" in prompt
+    assert "Do not invoke command execution" in prompt

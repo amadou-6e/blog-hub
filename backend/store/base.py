@@ -180,6 +180,11 @@ class ArticleStore(Protocol):
     ) -> dict:
         ...
 
+    def add_agent_event(
+        self, user_id: str, session_id: str, kind: str, data: Any = None,
+    ) -> dict:
+        ...
+
     def record_agent_tool_call(
         self, user_id: str, session_id: str, **kwargs: Any,
     ) -> tuple[dict, bool]:

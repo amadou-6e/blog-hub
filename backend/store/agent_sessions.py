@@ -101,6 +101,19 @@ class AgentSessionStoreMixin:
             "WHERE id=?", (now, now, session_id),
         )
 
+    def add_agent_event(
+        self, user_id: str, session_id: str, kind: str, data: Any = None,
+    ) -> dict:
+        self._require_session(user_id, session_id)
+        with self._con:
+            self._event(session_id, kind, data)
+            self._touch_session(session_id)
+        row = self._con.execute(
+            "SELECT * FROM agent_session_events WHERE session_id=? ORDER BY id DESC LIMIT 1",
+            (session_id,),
+        ).fetchone()
+        return _row(row)
+
     def create_agent_session(
         self, user_id: str, *, provider: str, model: str | None = None,
         article_id: str | None = None, workspace_id: str = "default",
