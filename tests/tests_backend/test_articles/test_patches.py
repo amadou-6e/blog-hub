@@ -45,6 +45,7 @@ class TestPatches:
         assert p["state"] == "pending"
         assert "id" in p
         assert "createdAt" in p
+        assert p["baseRevisionId"].startswith("rev_")
 
     # ── Accept ────────────────────────────────────────────────────────────────
 
@@ -93,3 +94,4 @@ class TestPatches:
         assert "added" in body
         assert "state" in body
         assert "createdAt" in body
+        assert "baseRevisionId" in body

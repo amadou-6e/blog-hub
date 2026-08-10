@@ -90,6 +90,7 @@ def _database_summary(database_path: Path, blobs_path: Path) -> dict:
             "users",
             "articles",
             "article_assets",
+            "article_revisions",
             "connections",
             "jobs",
             "sessions",

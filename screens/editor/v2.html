@@ -82,6 +82,17 @@
     .sp-btn.sp-accent{color:#a5b4fc;background:#1a1f3a;border:1px solid #2a2e50;}
     .sp-btn.sp-accent:hover{background:#20264a;border-color:#6366f1;}
     .sp-sep{width:1px;height:16px;background:#3a3f52;flex-shrink:0;margin:0 2px;}
+
+    @media (max-width:700px){
+      #left-panel{flex:0 0 12px;width:12px;position:relative;z-index:42;}
+      #panel-content{display:none;position:fixed;left:0;top:150px;bottom:0;width:min(320px,calc(100vw - 28px));background:#181c27;box-shadow:12px 0 30px #0009;z-index:43;}
+      #left-panel.mobile-open #panel-content{display:block!important;}
+      #left-panel.mobile-open #panel-strip{position:fixed;left:min(320px,calc(100vw - 28px));top:150px;bottom:0;height:auto;z-index:44;}
+      #editor-pane{min-width:0!important;flex:1!important;}
+      #preview-pane{display:none!important;}
+      #conflict-versions{grid-template-columns:1fr!important;}
+      #conflict-versions pre{height:120px!important;}
+    }
   </style>
 </head>
 <body>
@@ -117,6 +128,23 @@
   </div>
 </div>
 
+<!-- Save conflict overlay -->
+<div id="conflict-overlay" style="display:none;position:fixed;inset:0;z-index:110;background:rgba(8,10,15,.88);align-items:center;justify-content:center;padding:24px;">
+  <div style="width:min(760px,100%);max-height:90vh;overflow:auto;background:#181c27;border:1px solid #4d3f2a;border-radius:8px;padding:20px;box-shadow:0 18px 60px #0009;">
+    <div style="font-size:15px;font-weight:600;color:#f5d06f;margin-bottom:6px;">This article changed elsewhere</div>
+    <div style="font-size:12px;color:#9ba3bc;line-height:1.5;margin-bottom:14px;">Your recovered draft is safe. Choose which version to continue from, or place both versions in the editor for manual merging.</div>
+    <div id="conflict-versions" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+      <div style="min-width:0;"><div style="font-size:10px;color:#f5d06f;text-transform:uppercase;margin-bottom:5px;">Your draft</div><pre id="conflict-local" style="height:180px;overflow:auto;margin:0;padding:10px;background:#10131b;border:1px solid #343a50;border-radius:5px;color:#c9cfe0;font-size:10px;white-space:pre-wrap;"></pre></div>
+      <div style="min-width:0;"><div style="font-size:10px;color:#7dd3fc;text-transform:uppercase;margin-bottom:5px;">Latest saved</div><pre id="conflict-server" style="height:180px;overflow:auto;margin:0;padding:10px;background:#10131b;border:1px solid #343a50;border-radius:5px;color:#c9cfe0;font-size:10px;white-space:pre-wrap;"></pre></div>
+    </div>
+    <div style="display:flex;gap:7px;justify-content:flex-end;flex-wrap:wrap;">
+      <button class="nav-btn" onclick="useLatestConflict()">Use latest saved</button>
+      <button class="nav-btn" onclick="mergeConflictManually()">Merge manually</button>
+      <button class="nav-btn accent" onclick="keepLocalConflict()">Keep my draft</button>
+    </div>
+  </div>
+</div>
+
 <!-- Zone A: Nav -->
 <div style="height:48px;background:#0f1117;border-bottom:1px solid #252a38;display:flex;align-items:center;padding:0 14px;gap:8px;flex-shrink:0;z-index:30;">
   <button class="icon-btn" title="Back to overview" style="color:#5a6080;" onclick="location.href='../overview/v3.html'">
@@ -146,7 +174,7 @@
     <button class="ai-btn" onclick="openSection('patches')">
       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>View Diff
     </button>
-    <button class="ai-btn">
+    <button class="ai-btn" onclick="openSection('history')">
       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>Revert
     </button>
     <button class="ai-btn" onclick="openSection('chat')">
@@ -201,6 +229,15 @@
       </div>
 
       <div class="acc-section">
+        <div class="acc-hdr" onclick="toggleSection('history')">
+          <svg class="acc-chev closed" id="achev-history" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+          <span>History</span>
+          <span id="history-badge" style="font-size:10px;color:#5a6080;font-family:'JetBrains Mono',monospace;margin-left:auto;">0</span>
+        </div>
+        <div class="acc-body" id="abody-history" style="display:none;"></div>
+      </div>
+
+      <div class="acc-section">
         <div class="acc-hdr" onclick="toggleSection('destinations')">
           <svg class="acc-chev closed" id="achev-destinations" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
           <span>Destinations</span>
@@ -232,7 +269,7 @@
   </div>
 
   <!-- Editor pane -->
-  <div style="flex:1;min-width:320px;display:flex;flex-direction:column;overflow:hidden;border-right:1px solid #252a38;">
+  <div id="editor-pane" style="flex:1;min-width:320px;display:flex;flex-direction:column;overflow:hidden;border-right:1px solid #252a38;">
     <div style="padding:4px 12px;background:#0d1019;border-bottom:1px solid #252a38;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
       <span id="file-label" style="font-size:10px;color:#5a6080;font-family:'JetBrains Mono',monospace;">loading…</span>
       <span id="word-count" style="font-size:10px;color:#3a3f52;">1 844 words</span>
@@ -285,13 +322,18 @@ let AGENT_SESSION = null;
 let CONNECTED_PROVIDERS = [];
 let CHAT_PROVIDER = localStorage.getItem('bloghub-chat-provider') || 'anthropic';
 let CHAT_POLL = null;
+let CURRENT_REVISION_ID = null;
+let CURRENT_REVISION_NUMBER = 0;
+let REVISIONS = [];
+let HISTORY_DIFF = null;
+let PENDING_CONFLICT = null;
 
 
 
 
 // ── State ─────────────────────────────────────────────────────────────────────
-const accOpen = { comments:true, patches:false, destinations:false, chat:false, rules:false };
-let leftOpen = true;
+const accOpen = { comments:true, patches:false, history:false, destinations:false, chat:false, rules:false };
+let leftOpen = window.innerWidth > 700;
 let previewOpen = true;
 let patchStates = {};
 let commentN = 1;
@@ -302,7 +344,32 @@ function setSave(s) {
   const el = document.getElementById('save-indicator');
   if (s === 'unsaved') el.innerHTML = `<span style="width:7px;height:7px;border-radius:50%;background:#fbbf24;display:block;" title="Unsaved"></span>`;
   else if (s === 'saving') el.innerHTML = `<svg class="spin" width="12" height="12" viewBox="0 0 24 24" fill="none" title="Saving"><circle cx="12" cy="12" r="10" stroke="#fbbf2440" stroke-width="3"/><path d="M12 2a10 10 0 0 1 10 10" stroke="#fbbf24" stroke-width="3" stroke-linecap="round"/></svg>`;
+  else if (s === 'offline') el.innerHTML = `<span style="font-size:10px;color:#f5d06f;font-family:'JetBrains Mono',monospace;" title="Saved locally; waiting for connection">offline · local</span>`;
+  else if (s === 'conflict') el.innerHTML = `<span style="font-size:10px;color:#f87171;font-family:'JetBrains Mono',monospace;" title="Resolve save conflict">conflict</span>`;
+  else if (s === 'error') el.innerHTML = `<span style="font-size:10px;color:#f87171;font-family:'JetBrains Mono',monospace;" title="Save failed; local draft retained">save failed</span>`;
   else el.innerHTML = `<span style="font-size:10px;color:#5a6080;font-family:'JetBrains Mono',monospace;" title="Saved">saved</span>`;
+}
+
+function localDraftKey() { return `bloghub-draft:${ARTICLE_ID}`; }
+function currentDraft() {
+  return {
+    title: document.getElementById('article-title').textContent.trim(),
+    content: document.getElementById('raw-editor').value,
+    base_revision_id: CURRENT_REVISION_ID,
+    saved_at: new Date().toISOString(),
+  };
+}
+function persistLocalDraft() {
+  try { localStorage.setItem(localDraftKey(), JSON.stringify(currentDraft())); } catch (_e) {}
+}
+function readLocalDraft() {
+  try { return JSON.parse(localStorage.getItem(localDraftKey()) || 'null'); } catch (_e) { return null; }
+}
+function clearLocalDraftIfMatches(draft) {
+  const stored = readLocalDraft();
+  if (stored && stored.title === draft.title && stored.content === draft.content) {
+    localStorage.removeItem(localDraftKey());
+  }
 }
 
 // ── Editor input ──────────────────────────────────────────────────────────────
@@ -337,28 +404,85 @@ function onInput() {
   const words = ta.value.trim().split(/\s+/).filter(Boolean).length;
   document.getElementById('word-count').textContent = words.toLocaleString() + ' words';
   renderPreview();
+  persistLocalDraft();
+  saveTimer = setTimeout(saveDraft, 2000);
+}
 
-  saveTimer = setTimeout(async () => {
-    setSave('saving');
-    try {
-      const ta = document.getElementById('raw-editor');
-      const title = document.getElementById('article-title').textContent.trim();
-      const r = await fetch(`/api/articles/${ARTICLE_ID}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: ta.value, title }),
-      });
-      if (r.ok) {
-        const data = await r.json();
-        document.getElementById('word-count').textContent = data.word_count.toLocaleString() + ' words';
-        setSave('saved');
-      } else {
-        setSave('unsaved');
-      }
-    } catch (_e) {
-      setSave('unsaved');
+async function saveDraft() {
+  clearTimeout(saveTimer);
+  const draft = currentDraft();
+  persistLocalDraft();
+  if (!navigator.onLine) { setSave('offline'); return; }
+  setSave('saving');
+  try {
+    const r = await fetch(`/api/articles/${ARTICLE_ID}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: draft.content,
+        title: draft.title,
+        base_revision_id: draft.base_revision_id,
+      }),
+    });
+    const data = await r.json();
+    if (r.status === 409 && data.detail?.code === 'revision_conflict') {
+      showConflict(data.detail.current, draft);
+      return;
     }
-  }, 2000);
+    if (!r.ok) { setSave('error'); return; }
+    CURRENT_REVISION_ID = data.revision_id;
+    CURRENT_REVISION_NUMBER = data.revision_number;
+    document.getElementById('word-count').textContent = data.word_count.toLocaleString() + ' words';
+    clearLocalDraftIfMatches(draft);
+    setSave('saved');
+    await loadRevisions();
+  } catch (_e) {
+    setSave(navigator.onLine ? 'error' : 'offline');
+  }
+}
+
+function showConflict(current, local=currentDraft()) {
+  PENDING_CONFLICT = { current, local };
+  setSave('conflict');
+  document.getElementById('conflict-local').textContent = `# ${local.title}\n\n${local.content}`;
+  document.getElementById('conflict-server').textContent = `# ${current.title}\n\n${current.content}`;
+  document.getElementById('conflict-overlay').style.display = 'flex';
+}
+function closeConflict() { document.getElementById('conflict-overlay').style.display = 'none'; }
+function useLatestConflict() {
+  if (!PENDING_CONFLICT) return;
+  const { current } = PENDING_CONFLICT;
+  document.getElementById('article-title').textContent = current.title;
+  document.getElementById('raw-editor').value = current.content;
+  CURRENT_REVISION_ID = current.id;
+  CURRENT_REVISION_NUMBER = current.revision_number;
+  localStorage.removeItem(localDraftKey());
+  PENDING_CONFLICT = null;
+  closeConflict();
+  setSave('saved');
+  renderPreview();
+  loadRevisions();
+}
+function keepLocalConflict() {
+  if (!PENDING_CONFLICT) return;
+  CURRENT_REVISION_ID = PENDING_CONFLICT.current.id;
+  PENDING_CONFLICT = null;
+  closeConflict();
+  persistLocalDraft();
+  saveDraft();
+}
+function mergeConflictManually() {
+  if (!PENDING_CONFLICT) return;
+  const { current, local } = PENDING_CONFLICT;
+  document.getElementById('article-title').textContent = local.title;
+  document.getElementById('raw-editor').value = `<<<<<<< YOUR DRAFT\n${local.content}\n=======\n${current.content}\n>>>>>>> LATEST SAVED`;
+  CURRENT_REVISION_ID = current.id;
+  CURRENT_REVISION_NUMBER = current.revision_number;
+  PENDING_CONFLICT = null;
+  closeConflict();
+  persistLocalDraft();
+  setSave('unsaved');
+  renderPreview();
 }
 
 function insertCommentCmd() {
@@ -440,6 +564,7 @@ function renderSection(id) {
   if (!el) return;
   if (id === 'comments')     { el.innerHTML = buildComments(); document.getElementById('acount-comments').textContent = COMMENTS.filter(c=>!c.resolved).length; }
   else if (id === 'patches')      { el.innerHTML = buildPatches(); updatePatchBadge(); }
+  else if (id === 'history')      el.innerHTML = buildHistory();
   else if (id === 'destinations') el.innerHTML = buildDestinations();
   else if (id === 'chat')         { el.innerHTML = buildChat(); const m=document.getElementById('chat-msgs'); if(m) m.scrollTop=9999; }
   else if (id === 'rules')        el.innerHTML = buildRules();
@@ -447,11 +572,17 @@ function renderSection(id) {
 
 function toggleLeft() {
   leftOpen = !leftOpen;
+  document.getElementById('left-panel').classList.toggle('mobile-open', leftOpen);
   document.getElementById('panel-content').style.display = leftOpen ? '' : 'none';
   const arr = document.getElementById('strip-arrow');
   arr.innerHTML = leftOpen
     ? '<polyline points="15 18 9 12 15 6"/>'
     : '<polyline points="9 18 15 12 9 6"/>';
+}
+
+if (!leftOpen) {
+  document.getElementById('panel-content').style.display = 'none';
+  document.getElementById('strip-arrow').innerHTML = '<polyline points="9 18 15 12 9 6"/>';
 }
 
 // ── Preview ───────────────────────────────────────────────────────────────────
@@ -555,6 +686,87 @@ function buildPatches() {
   }).join('');
   const done = PATCHES.every(p => patchStates[p.id] !== 'pending');
   return all + (done ? `<div style="font-size:12px;color:#5a6080;padding-top:4px;">All patches resolved.</div>` : '');
+}
+
+function historySourceLabel(source) {
+  return { user:'You', agent:'AI agent', import:'Import', restore:'Restore', system:'Initial' }[source] || source;
+}
+function renderDiffText(diff) {
+  if (!diff) return '<div style="color:#5a6080;">No textual changes from the current revision.</div>';
+  return diff.split('\n').map(line => {
+    const color = line.startsWith('+') && !line.startsWith('+++') ? '#86efac'
+      : line.startsWith('-') && !line.startsWith('---') ? '#fca5a5' : '#8b93ac';
+    return `<div style="color:${color};">${esc(line)}</div>`;
+  }).join('');
+}
+function buildHistory() {
+  const checkpoint = `<button onclick="createCheckpoint()" style="width:100%;font-size:11px;padding:6px 9px;margin-bottom:10px;border-radius:5px;border:1px solid #343a50;background:#171b27;color:#c9cfe0;cursor:pointer;">Create checkpoint</button>`;
+  if (!REVISIONS.length) return checkpoint + '<div style="font-size:11px;color:#5a6080;">No revisions loaded.</div>';
+  const rows = REVISIONS.map(rev => {
+    const current = rev.id === CURRENT_REVISION_ID;
+    const expanded = HISTORY_DIFF?.revision?.id === rev.id;
+    return `<div style="padding:9px 0;border-top:1px solid #252a38;">
+      <div style="display:flex;align-items:flex-start;gap:7px;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:11px;color:#e8eaf2;display:flex;gap:6px;align-items:center;"><span style="font-family:'JetBrains Mono',monospace;color:#a5b4fc;">v${rev.revision_number}</span>${current ? '<span style="font-size:9px;color:#4ade80;">CURRENT</span>' : ''}</div>
+          <div style="font-size:10px;color:#737b98;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(rev.description || historySourceLabel(rev.source))}</div>
+          <div style="font-size:9px;color:#4d5368;margin-top:2px;">${esc(historySourceLabel(rev.source))} · ${new Date(rev.created_at).toLocaleString()}</div>
+        </div>
+        ${current ? '' : `<button onclick="showRevisionDiff('${rev.id}')" class="icon-btn" title="Compare revision" style="width:25px;height:25px;">±</button>`}
+      </div>
+      ${expanded ? `<div style="margin-top:8px;"><pre style="max-height:210px;overflow:auto;margin:0;padding:8px;background:#0d1019;border:1px solid #252a38;border-radius:4px;font:9px/1.45 'JetBrains Mono',monospace;white-space:pre-wrap;">${renderDiffText(HISTORY_DIFF.diff)}</pre><button onclick="restoreRevision('${rev.id}')" style="margin-top:7px;font-size:10px;padding:4px 9px;border-radius:4px;border:1px solid #4d3f2a;background:#251f18;color:#f5d06f;cursor:pointer;">Restore as new revision</button></div>` : ''}
+    </div>`;
+  }).join('');
+  return checkpoint + rows;
+}
+
+async function loadRevisions() {
+  try {
+    const r = await fetch(`/api/articles/${ARTICLE_ID}/revisions`);
+    if (!r.ok) return;
+    REVISIONS = (await r.json()).revisions;
+    document.getElementById('history-badge').textContent = REVISIONS.length;
+    if (accOpen.history) renderSection('history');
+  } catch (_e) {}
+}
+async function showRevisionDiff(revisionId) {
+  const r = await fetch(`/api/articles/${ARTICLE_ID}/revisions/${revisionId}/diff`);
+  if (!r.ok) return;
+  HISTORY_DIFF = await r.json();
+  renderSection('history');
+}
+async function createCheckpoint() {
+  const description = prompt('Checkpoint description', 'Manual checkpoint');
+  if (description === null) return;
+  const r = await fetch(`/api/articles/${ARTICLE_ID}/checkpoints`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ base_revision_id:CURRENT_REVISION_ID, description:description.trim() || 'Manual checkpoint' }),
+  });
+  const data = await r.json();
+  if (r.status === 409) { showConflict(data.detail.current); return; }
+  if (!r.ok) { setSave('error'); return; }
+  CURRENT_REVISION_ID = data.id;
+  CURRENT_REVISION_NUMBER = data.revision_number;
+  setSave('saved');
+  await loadRevisions();
+}
+async function restoreRevision(revisionId) {
+  const r = await fetch(`/api/articles/${ARTICLE_ID}/revisions/${revisionId}/restore`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ base_revision_id:CURRENT_REVISION_ID }),
+  });
+  const data = await r.json();
+  if (r.status === 409) { showConflict(data.detail.current); return; }
+  if (!r.ok) { setSave('error'); return; }
+  CURRENT_REVISION_ID = data.id;
+  CURRENT_REVISION_NUMBER = data.revision_number;
+  document.getElementById('article-title').textContent = data.title;
+  document.getElementById('raw-editor').value = data.content;
+  localStorage.removeItem(localDraftKey());
+  HISTORY_DIFF = null;
+  setSave('saved');
+  renderPreview();
+  await loadRevisions();
 }
 
 function buildDestinations() {
@@ -907,6 +1119,8 @@ async function loadArticle() {
     const a = await r.json();
     document.getElementById('raw-editor').value = a.content;
     document.getElementById('article-title').textContent = a.title;
+    CURRENT_REVISION_ID = a.revision_id;
+    CURRENT_REVISION_NUMBER = a.revision_number;
     document.getElementById('word-count').textContent = a.word_count.toLocaleString() + ' words';
     document.getElementById('file-label').textContent = a.id + '.md';
     const platformNames = { medium: 'Medium', hashnode: 'Hashnode', devto: 'Dev.to' };
@@ -920,8 +1134,10 @@ async function loadArticle() {
     }));
     setSave('saved');
     renderPreview();
+    recoverLocalDraft(a);
     await loadComments();
     await loadPatches();
+    await loadRevisions();
     await loadChat();
     await loadConnectedProviders();
     await loadAgentSession();
@@ -933,6 +1149,32 @@ async function loadArticle() {
     console.error('Failed to load article', _e);
   }
 }
+
+function recoverLocalDraft(server) {
+  const local = readLocalDraft();
+  if (!local || (local.title === server.title && local.content === server.content)) {
+    if (local) localStorage.removeItem(localDraftKey());
+    return;
+  }
+  if (local.base_revision_id === server.revision_id) {
+    document.getElementById('article-title').textContent = local.title;
+    document.getElementById('raw-editor').value = local.content;
+    renderPreview();
+    setSave(navigator.onLine ? 'unsaved' : 'offline');
+    if (navigator.onLine) saveTimer = setTimeout(saveDraft, 250);
+    return;
+  }
+  showConflict({
+    id:server.revision_id,
+    revision_number:server.revision_number,
+    title:server.title,
+    content:server.content,
+  }, local);
+}
+
+window.addEventListener('online', () => {
+  if (readLocalDraft() && !PENDING_CONFLICT) saveDraft();
+});
 
 async function loadComments() {
   try {

@@ -21,6 +21,7 @@ class PatchOut(BaseModel):
     added: str
     state: str
     createdAt: str
+    baseRevisionId: Optional[str]
 
 
 def _to_out(p: dict) -> PatchOut:
@@ -33,6 +34,7 @@ def _to_out(p: dict) -> PatchOut:
         added=p["added"],
         state=p["state"],
         createdAt=p["created_at"],
+        baseRevisionId=p.get("base_revision_id"),
     )
 
 
