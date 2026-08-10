@@ -210,7 +210,10 @@ def main(argv: list[str] | None = None) -> int:
                     "and enable integration for this WSL distribution"
                 )
             port = args.port or 8082
-            print(f"\n  BlogHub stack: http://127.0.0.1:{port}/screens/settings/v2.html")
+            print(
+                f"\n  BlogHub stack: http://127.0.0.1:{port}/screens/login/v1.html"
+                "?next=%2Fscreens%2Fsettings%2Fv2.html"
+            )
             print("  Runtime:       Docker Compose (backend + cli-runner)\n")
             return run_compose_stack(compose_command, port)
 
@@ -222,7 +225,10 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         port = args.port or find_free_port()
-        page_url = f"http://127.0.0.1:{port}/screens/settings/v2.html"
+        page_url = (
+            f"http://127.0.0.1:{port}/screens/login/v1.html"
+            "?next=%2Fscreens%2Fsettings%2Fv2.html"
+        )
         runner_summary = "disabled" if args.runner == "off" else ", ".join(providers)
         print(f"\n  CLI runner: {runner_url} ({runner_summary})")
         print(f"  BlogHub:    {page_url}\n")

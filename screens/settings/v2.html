@@ -603,6 +603,11 @@ async function doOAuth(id) {
   if (providerTab) providerTab.opener = null;
   try {
     const res = await fetch(`/api/connections/${id}/auth-flows`, { method: 'POST' });
+    if (res.status === 401) {
+      providerTab?.close();
+      redirectToLogin();
+      return;
+    }
     const flow = await res.json();
     if (!res.ok) throw new Error(flow.detail || `HTTP ${res.status}`);
     if (flow.authorizationUrl && providerTab) providerTab.location.href = flow.authorizationUrl;
@@ -777,7 +782,23 @@ document.addEventListener('click', (e) => {
 });
 
 // ─── Init ──────────────────────────────────────────────────────────────────────
-loadConnections();
+function redirectToLogin() {
+  const next = window.location.pathname + window.location.search + window.location.hash;
+  window.location.replace('/screens/login/v1.html?next=' + encodeURIComponent(next));
+}
+
+async function initSettings() {
+  try {
+    const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
+    if (res.status === 401) {
+      redirectToLogin();
+      return;
+    }
+  } catch { /* loadConnections renders its offline fallback. */ }
+  await loadConnections();
+}
+
+initSettings();
 </script>
 </body>
 </html>

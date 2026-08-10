@@ -114,6 +114,18 @@ class TestLoginHappyPath:
         page.wait_for_url("**/overview/v3.html", timeout=6000)
         assert "/overview/v3.html" in page.url
 
+    def test_login_returns_to_requested_local_page(self, page):
+        page.goto(f"{LOGIN_URL}?next=%2Fscreens%2Fsettings%2Fv2.html")
+        _fill_login(page, _SEED_EMAIL, _SEED_PASSWORD)
+        _submit(page)
+        page.wait_for_url("**/screens/settings/v2.html", timeout=8000)
+
+    def test_login_rejects_external_return_destination(self, page):
+        page.goto(f"{LOGIN_URL}?next=https%3A%2F%2Fexample.com")
+        _fill_login(page, _SEED_EMAIL, _SEED_PASSWORD)
+        _submit(page)
+        page.wait_for_url("**/screens/overview/v3.html", timeout=8000)
+
 
 # ── Happy path — Register ─────────────────────────────────────────────────────
 

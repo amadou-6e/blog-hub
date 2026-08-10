@@ -26,6 +26,14 @@ pytestmark = pytest.mark.browser
 # ── 1. Initial load ────────────────────────────────────────────────────────────
 
 
+def test_unauthenticated_settings_redirects_to_login(page):
+    page.goto(SETTINGS_URL)
+    page.wait_for_url("**/screens/login/v1.html?next=**")
+    assert page.url.endswith(
+        "/screens/login/v1.html?next=%2Fscreens%2Fsettings%2Fv2.html"
+    )
+
+
 def test_renders_platforms_section_by_default(settings_page):
     settings_page.get_by_role("heading", name="Publishing Platforms").wait_for()
 
