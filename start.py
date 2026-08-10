@@ -27,7 +27,6 @@ class LauncherError(RuntimeError):
 class RunnerHandle:
     kind: str
     process: subprocess.Popen | None = None
-    compose_command: list[str] | None = None
 
 
 def find_free_port(start: int = 8082, end: int = 8090) -> int:
@@ -93,13 +92,16 @@ def find_compose_command() -> list[str] | None:
     return None
 
 
-def start_docker_runner(compose_command: list[str]) -> RunnerHandle:
+def run_compose_stack(compose_command: list[str], port: int) -> int:
+    env = dict(os.environ)
+    env["BLOGHUB_PORT"] = str(port)
     result = subprocess.run(
-        [*compose_command, "up", "-d", "cli-runner"], cwd=ROOT, check=False
+        [*compose_command, "up", "--build"],
+        cwd=ROOT,
+        env=env,
+        check=False,
     )
-    if result.returncode != 0:
-        raise LauncherError("Docker Compose could not start cli-runner")
-    return RunnerHandle(kind="docker", compose_command=compose_command)
+    return result.returncode
 
 
 def local_runner_environment(base: dict[str, str] | None = None) -> dict[str, str]:
@@ -156,12 +158,6 @@ def stop_runner(handle: RunnerHandle | None) -> None:
             except subprocess.TimeoutExpired:
                 handle.process.kill()
                 handle.process.wait(timeout=5)
-    elif handle.kind == "docker" and handle.compose_command:
-        subprocess.run(
-            [*handle.compose_command, "stop", "cli-runner"],
-            cwd=ROOT,
-            check=False,
-        )
 
 
 def ensure_runner(runner_url: str, mode: str) -> tuple[RunnerHandle | None, dict | None]:
@@ -173,19 +169,8 @@ def ensure_runner(runner_url: str, mode: str) -> tuple[RunnerHandle | None, dict
         return RunnerHandle(kind="external"), health
     if mode == "external":
         raise LauncherError(f"No CLI runner is reachable at {runner_url}")
-
-    if mode in {"auto", "docker"}:
-        compose_command = find_compose_command()
-        if compose_command:
-            handle = start_docker_runner(compose_command)
-            try:
-                return handle, wait_for_runner(runner_url)
-            except LauncherError:
-                stop_runner(handle)
-                if mode == "docker":
-                    raise
-        elif mode == "docker":
-            raise LauncherError("Docker Compose is not available")
+    if mode != "local":
+        raise LauncherError("Local runner startup requires --runner local")
 
     handle = start_local_runner(runner_url)
     try:
@@ -200,10 +185,11 @@ def parse_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument("--port", type=int, help="backend port (default: first free from 8082)")
     parser.add_argument(
         "--runner",
-        choices=("auto", "docker", "local", "external", "off"),
+        choices=("auto", "compose", "docker", "local", "external", "off"),
         default=os.environ.get("BLOGHUB_RUNNER_MODE", "auto"),
-        help="runner startup mode (default: auto)",
+        help="stack mode; auto, compose, and docker use Docker Compose (default: auto)",
     )
+    parser.add_argument("--reload", action="store_true", help="reload a local backend")
     return parser.parse_known_args(argv)
 
 
@@ -212,6 +198,22 @@ def main(argv: list[str] | None = None) -> int:
     runner_url = os.environ.get("CLI_RUNNER_URL", DEFAULT_RUNNER_URL).rstrip("/")
     handle: RunnerHandle | None = None
     try:
+        if args.runner in {"auto", "compose", "docker"}:
+            if uvicorn_args:
+                raise LauncherError(
+                    "Uvicorn arguments are only supported with local, external, or off mode"
+                )
+            compose_command = find_compose_command()
+            if not compose_command:
+                raise LauncherError(
+                    "Docker Compose is required for common startup. Install Docker Desktop "
+                    "and enable integration for this WSL distribution"
+                )
+            port = args.port or 8082
+            print(f"\n  BlogHub stack: http://127.0.0.1:{port}/screens/settings/v2.html")
+            print("  Runtime:       Docker Compose (backend + cli-runner)\n")
+            return run_compose_stack(compose_command, port)
+
         handle, health = ensure_runner(runner_url, args.runner)
         providers = available_providers(health)
         if args.runner != "off" and not providers:
@@ -227,18 +229,21 @@ def main(argv: list[str] | None = None) -> int:
 
         backend_env = dict(os.environ)
         backend_env["CLI_RUNNER_URL"] = runner_url
+        command = [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "backend.main:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+        ]
+        if args.reload:
+            command.append("--reload")
+        command.extend(uvicorn_args)
         result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "uvicorn",
-                "backend.main:app",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                str(port),
-                *uvicorn_args,
-            ],
+            command,
             cwd=ROOT,
             env=backend_env,
             check=False,
@@ -246,7 +251,11 @@ def main(argv: list[str] | None = None) -> int:
         return result.returncode
     except LauncherError as exc:
         print(f"BlogHub startup failed: {exc}", file=sys.stderr)
-        print("Use --runner off only when agent features are intentionally disabled.", file=sys.stderr)
+        print(
+            "Use --runner local only for explicit host-CLI troubleshooting, or "
+            "--runner off when agent features are intentionally disabled.",
+            file=sys.stderr,
+        )
         return 1
     except KeyboardInterrupt:
         return 130

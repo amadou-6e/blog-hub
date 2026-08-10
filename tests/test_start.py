@@ -32,11 +32,10 @@ def test_auto_mode_reuses_a_healthy_runner(monkeypatch):
     assert result == health
 
 
-def test_auto_mode_falls_back_to_local_runner(monkeypatch):
+def test_local_mode_starts_local_runner(monkeypatch):
     handle = start.RunnerHandle(kind="local", process=SimpleNamespace())
     health = {"status": "ok", "providers": {"openai": "available"}}
     monkeypatch.setattr(start, "runner_health", lambda url: None)
-    monkeypatch.setattr(start, "find_compose_command", lambda: None)
     monkeypatch.setattr(start, "start_local_runner", lambda url: handle)
     monkeypatch.setattr(
         start,
@@ -45,11 +44,68 @@ def test_auto_mode_falls_back_to_local_runner(monkeypatch):
     )
 
     result_handle, result_health = start.ensure_runner(
-        start.DEFAULT_RUNNER_URL, "auto"
+        start.DEFAULT_RUNNER_URL, "local"
     )
 
     assert result_handle is handle
     assert result_health == health
+
+
+def test_common_startup_requires_compose_without_local_fallback(monkeypatch):
+    monkeypatch.setattr(start, "find_compose_command", lambda: None)
+    monkeypatch.setattr(
+        start,
+        "ensure_runner",
+        lambda *args: (_ for _ in ()).throw(AssertionError("local fallback used")),
+    )
+
+    assert start.main([]) == 1
+
+
+def test_runner_orchestrator_rejects_implicit_local_fallback(monkeypatch):
+    monkeypatch.setattr(start, "runner_health", lambda url: None)
+    monkeypatch.setattr(
+        start,
+        "start_local_runner",
+        lambda *args: (_ for _ in ()).throw(AssertionError("local fallback used")),
+    )
+
+    try:
+        start.ensure_runner(start.DEFAULT_RUNNER_URL, "auto")
+    except start.LauncherError as exc:
+        assert "--runner local" in str(exc)
+    else:
+        raise AssertionError("implicit local fallback was accepted")
+
+
+def test_common_startup_runs_complete_compose_stack(monkeypatch):
+    command = ["docker", "compose"]
+    calls = []
+    monkeypatch.setattr(start, "find_compose_command", lambda: command)
+    monkeypatch.setattr(
+        start,
+        "run_compose_stack",
+        lambda compose, port: calls.append((compose, port)) or 0,
+    )
+
+    assert start.main(["--port", "8090"]) == 0
+    assert calls == [(command, 8090)]
+
+
+def test_compose_stack_passes_port_to_compose(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        start.subprocess,
+        "run",
+        lambda command, **kwargs: calls.append((command, kwargs))
+        or SimpleNamespace(returncode=0),
+    )
+
+    assert start.run_compose_stack(["docker", "compose"], 8090) == 0
+    command, kwargs = calls[0]
+    assert command == ["docker", "compose", "up", "--build"]
+    assert kwargs["env"]["BLOGHUB_PORT"] == "8090"
+    assert kwargs["cwd"] == start.ROOT
 
 
 def test_main_fails_before_backend_when_runner_has_no_provider(monkeypatch):
@@ -69,5 +125,5 @@ def test_main_fails_before_backend_when_runner_has_no_provider(monkeypatch):
         lambda *args, **kwargs: backend_started.append(args) or SimpleNamespace(returncode=0),
     )
 
-    assert start.main([]) == 1
+    assert start.main(["--runner", "external"]) == 1
     assert backend_started == []

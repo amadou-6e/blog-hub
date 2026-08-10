@@ -1,26 +1,61 @@
 services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "${BLOGHUB_PORT:-8082}:8000"
+    volumes:
+      - .:/app
+      - bloghub-data:/app/data
+      - bloghub-previews:/app/generated_previews
+      - bloghub-credential-keys:/run/bloghub-keys
+    environment:
+      CLI_RUNNER_URL: http://cli-runner:8001
+      BLOGHUB_DB_PATH: /app/data/bloghub.db
+      BLOGHUB_BLOBS_DIR: /app/data/blobs
+      BLOGHUB_CREDENTIAL_KEY_FILE: /run/bloghub-keys/credential-keys.json
+    depends_on:
+      cli-runner:
+        condition: service_healthy
+    init: true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   cli-runner:
     build: ./cli-runner
     ports:
-      - "8001:8001"      # runner REST API (BlogHub backend talks here)
-      - "54322:54322"    # claude login loopback callback
-      - "54323:54323"    # openai login loopback callback
+      - "8001:8001"
     volumes:
       - claude-config:/root/.claude
       - codex-config:/root/.codex
     environment:
-      - RUNNER_TASK_TIMEOUT=180
-      - RUNNER_LOGIN_TIMEOUT=300
-      - RUNNER_MAX_OUTPUT_BYTES=524288
-      - CLAUDE_CALLBACK_PORT=54322
-      - CLAUDE_CONFIG_DIR=/root/.claude
+      RUNNER_HOME: /root
+      RUNNER_TASK_TIMEOUT: "180"
+      RUNNER_LOGIN_TIMEOUT: "300"
+      RUNNER_MAX_OUTPUT_BYTES: "524288"
+      CLAUDE_CALLBACK_PORT: "54322"
+      CLAUDE_CONFIG_DIR: /root/.claude
+      CODEX_CONFIG_DIR: /root/.codex
+    init: true
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
 volumes:
+  bloghub-data:
+  bloghub-previews:
+  bloghub-credential-keys:
   claude-config:
   codex-config:

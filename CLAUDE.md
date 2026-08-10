@@ -15,18 +15,23 @@ blog-hub/
 Start the complete development stack:
 ```
 cd blog-hub
-python start.py --reload
+python start.py
 ```
 
-The launcher reuses a healthy runner, tries Docker Compose, and then falls back
-to a local runner when a provider CLI is installed. Local CLI credentials are
-kept under ignored `data/agent-config/`. Startup fails if no agent provider is
-available; use `--runner off` only when intentionally developing without agents.
+Docker Compose starts both the backend and CLI runner, waits for runner health,
+and keeps application data, credential keys, Claude credentials, and Codex
+credentials in separate named volumes. The backend reaches the runner through
+the internal `http://cli-runner:8001` service URL.
 
-Force a specific runner mode with `--runner docker`, `--runner local`, or
-`--runner external`. Rebuild the Docker runner after changing its image:
+There is no implicit host-CLI fallback. If Compose is unavailable, startup fails
+with instructions to install Docker Desktop and enable WSL integration. Use
+`--runner local` only as an explicit troubleshooting mode; its credentials are
+kept under ignored `data/agent-config/`. `--runner external` and `--runner off`
+are also explicit development modes.
+
+Rebuild the stack after changing either image with:
 ```
-docker compose build cli-runner
+docker compose build
 ```
 
 ---

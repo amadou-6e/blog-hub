@@ -48,11 +48,13 @@ the same value.
 
 ## Development startup
 
-Run `python start.py --reload` to start both the runner and backend. The launcher
-first reuses a healthy runner, then tries Docker Compose, and finally starts the
-runner locally when an installed `claude` or `codex` binary is available. Local
-runner credentials persist under ignored `data/agent-config/` by default.
+Run `python start.py` for the canonical development stack. Docker Compose starts
+the backend and runner together, waits for runner health, and stores application
+data, encryption keys, Claude credentials, and Codex credentials in separate
+named volumes. The backend uses the internal `http://cli-runner:8001` service
+address.
 
-Use `--runner docker`, `--runner local`, or `--runner external` to require one
-mode. `--runner off` deliberately disables agent features. Normal startup fails
-instead of silently serving a broken login UI when no provider CLI is available.
+There is no implicit local fallback. Missing Docker Compose or disabled WSL
+integration fails startup with an actionable error. `--runner local` remains an
+explicit troubleshooting mode and stores credentials under ignored
+`data/agent-config/`; `--runner external` and `--runner off` are also explicit.
