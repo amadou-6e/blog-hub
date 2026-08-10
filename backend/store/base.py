@@ -7,6 +7,8 @@ before it ships.
 """
 from __future__ import annotations
 
+from datetime import timedelta
+from pathlib import Path
 from typing import Protocol
 
 
@@ -138,6 +140,27 @@ class ArticleStore(Protocol):
         ...
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
+
+    @property
+    def schema_version(self) -> int:
+        ...
+
+    def create_backup(
+        self, backup_dir: str | None = None, *, retain: int = 14
+    ) -> Path:
+        ...
+
+    def create_backup_if_due(
+        self,
+        interval: timedelta,
+        backup_dir: str | None = None,
+        *,
+        retain: int = 14,
+    ) -> Path | None:
+        ...
+
+    def close(self) -> None:
+        ...
 
     def reset(self) -> None:
         ...
