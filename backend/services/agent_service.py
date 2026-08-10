@@ -65,6 +65,7 @@ def run_generation(
     word_count: int,
     context_text: str | None,
     destinations: list[str],
+    session_id: str | None = None,
 ) -> None:
     """
     Called as a FastAPI BackgroundTask after POST /api/agent/generate returns 202.
@@ -95,16 +96,26 @@ def run_generation(
         )
     except runner.RunnerUnavailable as exc:
         store.complete_job(user_id, job_id, error=str(exc))
+        if session_id:
+            store.update_agent_session_status(user_id, session_id, "failed", str(exc))
         return
 
     if result.get("exit_code", 1) != 0:
         err = (result.get("stderr") or result.get("stdout") or "unknown error")[:500]
         store.complete_job(user_id, job_id, error=f"Generation failed: {err}")
+        if session_id:
+            store.update_agent_session_status(
+                user_id, session_id, "failed", f"Generation failed: {err}"
+            )
         return
 
     generated_md: str = result.get("stdout", "")
     if not generated_md.strip():
         store.complete_job(user_id, job_id, error="Generation produced empty output")
+        if session_id:
+            store.update_agent_session_status(
+                user_id, session_id, "failed", "Generation produced empty output"
+            )
         return
 
     title = _extract_title(generated_md)
@@ -117,3 +128,10 @@ def run_generation(
 
     word_count_actual = len(generated_md.split())
     store.complete_job(user_id, job_id, result={"wordCount": word_count_actual, "title": title})
+    if session_id:
+        store.add_agent_message(user_id, session_id, "assistant", generated_md)
+        store.add_agent_output(
+            user_id, session_id, kind="article", reference=article_id,
+            metadata={"word_count": word_count_actual, "title": title},
+        )
+        store.update_agent_session_status(user_id, session_id, "completed")

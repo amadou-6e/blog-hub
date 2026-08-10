@@ -118,6 +118,90 @@ CREATE TABLE IF NOT EXISTS article_chat_log (
     created_at  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS agent_sessions (
+    id               TEXT PRIMARY KEY,
+    user_id          TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    article_id       TEXT REFERENCES articles(id) ON DELETE SET NULL,
+    workspace_id     TEXT NOT NULL DEFAULT 'default',
+    provider         TEXT NOT NULL,
+    model            TEXT,
+    title            TEXT,
+    status           TEXT NOT NULL,
+    metadata_json    TEXT NOT NULL DEFAULT '{}',
+    error            TEXT,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL,
+    last_activity_at TEXT NOT NULL,
+    expires_at       TEXT,
+    completed_at     TEXT,
+    archived_at      TEXT,
+    version          INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS agent_session_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL,
+    data_json   TEXT NOT NULL DEFAULT '{}',
+    created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS agent_session_messages (
+    id            TEXT PRIMARY KEY,
+    session_id    TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    sequence      INTEGER NOT NULL,
+    role          TEXT NOT NULL,
+    content       TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at    TEXT NOT NULL,
+    UNIQUE(session_id, sequence)
+);
+
+CREATE TABLE IF NOT EXISTS agent_tool_calls (
+    id               TEXT PRIMARY KEY,
+    session_id       TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    idempotency_key  TEXT NOT NULL,
+    name             TEXT NOT NULL,
+    arguments_json   TEXT NOT NULL DEFAULT '{}',
+    status           TEXT NOT NULL DEFAULT 'pending',
+    result_json      TEXT,
+    error            TEXT,
+    created_at       TEXT NOT NULL,
+    started_at       TEXT,
+    completed_at     TEXT,
+    UNIQUE(session_id, idempotency_key)
+);
+
+CREATE TABLE IF NOT EXISTS agent_approvals (
+    id             TEXT PRIMARY KEY,
+    session_id     TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    tool_call_id   TEXT REFERENCES agent_tool_calls(id) ON DELETE CASCADE,
+    status         TEXT NOT NULL DEFAULT 'pending',
+    request_json   TEXT NOT NULL DEFAULT '{}',
+    response_json  TEXT,
+    requested_at   TEXT NOT NULL,
+    resolved_at    TEXT,
+    resolved_by    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS agent_checkpoints (
+    id          TEXT PRIMARY KEY,
+    session_id  TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    sequence    INTEGER NOT NULL,
+    state_json  TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    UNIQUE(session_id, sequence)
+);
+
+CREATE TABLE IF NOT EXISTS agent_session_outputs (
+    id            TEXT PRIMARY KEY,
+    session_id    TEXT NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    kind          TEXT NOT NULL,
+    reference     TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at    TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_articles_user_updated
     ON articles(user_id, updated_at DESC);
 
@@ -141,3 +225,30 @@ CREATE INDEX IF NOT EXISTS idx_article_patches_article
 
 CREATE INDEX IF NOT EXISTS idx_article_chat_article
     ON article_chat_log(article_id, id);
+
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_user_activity
+    ON agent_sessions(user_id, last_activity_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_article
+    ON agent_sessions(user_id, article_id);
+
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_status
+    ON agent_sessions(status, expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_agent_events_session
+    ON agent_session_events(session_id, id);
+
+CREATE INDEX IF NOT EXISTS idx_agent_messages_session
+    ON agent_session_messages(session_id, sequence);
+
+CREATE INDEX IF NOT EXISTS idx_agent_tools_session
+    ON agent_tool_calls(session_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_agent_approvals_session
+    ON agent_approvals(session_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_session
+    ON agent_checkpoints(session_id, sequence);
+
+CREATE INDEX IF NOT EXISTS idx_agent_outputs_session
+    ON agent_session_outputs(session_id, created_at);

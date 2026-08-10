@@ -29,6 +29,7 @@ from backend.store.crypto import (
     needs_reencryption,
 )
 from backend.store.locking import WorkspaceLock
+from backend.store.agent_sessions import AgentSessionStoreMixin
 from backend.store.schema import (
     SEED_USER_EMAIL as DEFAULT_SEED_USER_EMAIL,
     SEED_USER_HASH as DEFAULT_SEED_USER_HASH,
@@ -215,7 +216,7 @@ def _seed_articles() -> list[dict]:
 # ─── SQLiteStore ──────────────────────────────────────────────────────────────
 
 
-class SQLiteStore:
+class SQLiteStore(AgentSessionStoreMixin):
 
     def __init__(self, db_path: str, blobs_dir: str = "data/blobs") -> None:
         self._db_path = db_path
@@ -956,6 +957,7 @@ class SQLiteStore:
         with self._workspace_lock.acquire():
             self._con.executescript("""
                 DELETE FROM article_chat_log;
+                DELETE FROM agent_sessions;
                 DELETE FROM article_patches;
                 DELETE FROM article_comments;
                 DELETE FROM article_timeline;

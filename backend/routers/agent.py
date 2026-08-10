@@ -59,6 +59,7 @@ class GenerateAccepted(BaseModel):
     job_id: str = Field(alias="jobId")
     status: str
     article_id: str = Field(alias="articleId")
+    session_id: str = Field(alias="sessionId")
 
     model_config = {"populate_by_name": True}
 
@@ -152,6 +153,19 @@ def generate_article(
     # Create the article record (title filled in by background task)
     article = store.create_article(user_id, title="Draft")
     job = store.create_job(user_id, "generate", article["id"])
+    session = store.create_agent_session(
+        user_id,
+        provider=runner_provider_id,
+        article_id=article["id"],
+        title=body.brief[:240],
+        metadata={
+            "job_id": job["job_id"],
+            "skill": body.skill,
+            "word_count": body.word_count,
+            "destinations": body.destinations,
+        },
+    )
+    store.add_agent_message(user_id, session["id"], "user", body.brief)
 
     background_tasks.add_task(
         agent_service.run_generation,
@@ -164,6 +178,7 @@ def generate_article(
         word_count=body.word_count,
         context_text=body.context_text,
         destinations=body.destinations,
+        session_id=session["id"],
     )
 
     return JSONResponse(
@@ -172,5 +187,6 @@ def generate_article(
             "jobId": job["job_id"],
             "articleId": article["id"],
             "status": "running",
+            "sessionId": session["id"],
         },
     )
