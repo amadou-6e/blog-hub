@@ -7,6 +7,7 @@ BLOGHUB_DB_PATH env var overrides the default path; use ':memory:' for tests.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 import shutil
@@ -16,7 +17,14 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from backend.store.crypto import decrypt_token, encrypt_token, needs_reencryption
+from backend.store.crypto import (
+    CredentialDecryptionError,
+    decrypt_token,
+    encrypt_token,
+    needs_reencryption,
+)
+
+logger = logging.getLogger(__name__)
 
 # ─── Static metadata ──────────────────────────────────────────────────────────
 
@@ -802,7 +810,14 @@ class SQLiteStore:
                                 (conn_id, user_id)).fetchone()
         if not row or not row["token"]:
             return None
-        return decrypt_token(row["token"]) or None
+        try:
+            return decrypt_token(row["token"]) or None
+        except CredentialDecryptionError:
+            logger.warning(
+                "undecryptable credential for connection %r (user %r); treating as disconnected",
+                conn_id, user_id,
+            )
+            return None
 
     def reencrypt_connection_credentials(self) -> int:
         """Move plaintext, legacy, and retired-key credentials to the active key."""

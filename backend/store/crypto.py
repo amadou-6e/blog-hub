@@ -75,6 +75,9 @@ class FileKeyProvider:
         self.path = Path(path).expanduser().resolve()
         if not self.path.exists():
             self._write_new_keyring()
+        self._cached_mtime: float | None = None
+        self._cached_keys: Mapping[str, bytes] | None = None
+        self._cached_active: str | None = None
 
     def _read(self) -> dict:
         try:
@@ -86,6 +89,15 @@ class FileKeyProvider:
         if payload.get("version") != 1 or not isinstance(payload.get("keys"), dict):
             raise CredentialConfigurationError("credential key file has an unsupported format")
         return payload
+
+    def _read_cached(self) -> tuple[str, Mapping[str, bytes]]:
+        mtime = self.path.stat().st_mtime
+        if self._cached_mtime != mtime:
+            payload = self._read()
+            self._cached_keys = StaticKeyProvider(payload.get("active", ""), payload["keys"]).keys()
+            self._cached_active = payload.get("active", "")
+            self._cached_mtime = mtime
+        return self._cached_active, self._cached_keys
 
     def _write(self, payload: dict) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -136,13 +148,12 @@ class FileKeyProvider:
                 pass
 
     def keys(self) -> Mapping[str, bytes]:
-        payload = self._read()
-        return StaticKeyProvider(payload.get("active", ""), payload["keys"]).keys()
+        _, keys = self._read_cached()
+        return keys
 
     def active_key(self) -> tuple[str, bytes]:
-        payload = self._read()
-        provider = StaticKeyProvider(payload.get("active", ""), payload["keys"])
-        return provider.active_key()
+        active, keys = self._read_cached()
+        return active, keys[active]
 
     def rotate(self) -> str:
         payload = self._read()
@@ -150,6 +161,7 @@ class FileKeyProvider:
         payload["keys"][key_id] = Fernet.generate_key().decode()
         payload["active"] = key_id
         self._write(payload)
+        self._cached_mtime = None
         return key_id
 
     def retire_inactive(self) -> int:
@@ -159,6 +171,7 @@ class FileKeyProvider:
         removed = len(payload["keys"]) - 1
         payload["keys"] = {active: payload["keys"][active]}
         self._write(payload)
+        self._cached_mtime = None
         return removed
 
 

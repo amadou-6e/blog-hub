@@ -2,8 +2,8 @@
 
 BlogHub encrypts every provider credential before writing it to SQLite. New
 installations create `data/credential-keys.json` with restricted file
-permissions. The key file must be protected separately from database backups;
-losing it makes stored provider credentials unrecoverable.
+permissions. The key file must be protected separately from database backups.
+Losing it makes stored provider credentials unrecoverable.
 
 The ciphertext format is versioned (`enc:v1:<key-id>:...`). On startup, BlogHub
 transactionally upgrades plaintext legacy values, old `fernet:` values, and
@@ -66,4 +66,4 @@ Disconnecting a provider erases its stored credential and leaves only a
 credential-free disconnected marker. Reconnect to replace expired, revoked, or
 otherwise unusable credentials. If a key is lost or ciphertext is corrupt,
 restore the matching key from protected backup or remove the affected connection
-row and reconnect; BlogHub will not silently discard the decryption error.
+row and reconnect. BlogHub will not silently discard the decryption error.
