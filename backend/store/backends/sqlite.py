@@ -7,6 +7,7 @@ BLOGHUB_DB_PATH env var overrides the default path; use ':memory:' for tests.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 import shutil
@@ -21,7 +22,12 @@ from backend.store.backups import (
     create_backup as create_verified_backup,
     create_backup_if_due as create_verified_backup_if_due,
 )
-from backend.store.crypto import decrypt_token, encrypt_token
+from backend.store.crypto import (
+    CredentialDecryptionError,
+    decrypt_token,
+    encrypt_token,
+    needs_reencryption,
+)
 from backend.store.locking import WorkspaceLock
 from backend.store.schema import (
     SEED_USER_EMAIL as DEFAULT_SEED_USER_EMAIL,
@@ -29,6 +35,8 @@ from backend.store.schema import (
     SEED_USER_ID as DEFAULT_SEED_USER_ID,
     apply_schema,
 )
+
+logger = logging.getLogger(__name__)
 
 # ─── Static metadata ──────────────────────────────────────────────────────────
 
@@ -225,6 +233,7 @@ class SQLiteStore:
         self._con.execute("PRAGMA foreign_keys=ON")
         with self._workspace_lock.acquire():
             apply_schema(self._con)
+            self.reencrypt_connection_credentials()
             self._seed_if_empty()
         # Ephemeral — no need to persist across restarts
         self._oauth_pending: dict[str, dict] = {}
@@ -663,7 +672,6 @@ class SQLiteStore:
             "label": meta["label"],
             "type": meta["type"],
             "auth_method": meta["auth"],
-            "token": token,
             "status": status,
             "username": username,
             "connected_at": now_s,
@@ -687,7 +695,35 @@ class SQLiteStore:
                                 (conn_id, user_id)).fetchone()
         if not row or not row["token"]:
             return None
-        return decrypt_token(row["token"]) or None
+        try:
+            return decrypt_token(row["token"]) or None
+        except CredentialDecryptionError:
+            logger.warning(
+                "undecryptable credential for connection %r (user %r); treating as disconnected",
+                conn_id, user_id,
+            )
+            return None
+
+    def reencrypt_connection_credentials(self) -> int:
+        """Move plaintext, legacy, and retired-key credentials to the active key."""
+        rows = self._con.execute(
+            "SELECT platform, user_id, token FROM connections WHERE token <> ''"
+        ).fetchall()
+        replacements = []
+        for row in rows:
+            if needs_reencryption(row["token"]):
+                replacements.append((
+                    encrypt_token(decrypt_token(row["token"])),
+                    row["platform"],
+                    row["user_id"],
+                ))
+        if replacements:
+            with self._con:
+                self._con.executemany(
+                    "UPDATE connections SET token=? WHERE platform=? AND user_id IS ?",
+                    replacements,
+                )
+        return len(replacements)
 
     def count_connected(self, user_id: str) -> int:
         return sum(1 for c in self.list_connections(user_id) if c["status"] == "connected")
