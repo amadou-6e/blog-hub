@@ -173,6 +173,10 @@ def add_agent_message(user_id: str, *a, **kw):
     return _backend.add_agent_message(user_id, *a, **kw)
 
 
+def add_agent_event(user_id: str, *a, **kw):
+    return _backend.add_agent_event(user_id, *a, **kw)
+
+
 def record_agent_tool_call(user_id: str, *a, **kw):
     return _backend.record_agent_tool_call(user_id, *a, **kw)
 

@@ -27,6 +27,10 @@ class AddMessageRequest(CamelModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class ChatTurnRequest(CamelModel):
+    content: str = Field(min_length=1, max_length=20_000)
+
+
 class RecordToolCallRequest(CamelModel):
     idempotency_key: str = Field(min_length=1, max_length=240)
     name: str = Field(min_length=1, max_length=160)

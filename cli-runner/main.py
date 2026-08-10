@@ -22,13 +22,14 @@ import threading
 import time
 import urllib.parse
 import uuid
-from typing import Optional
+from typing import Iterator, Optional
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 _DEVICE_CODE_RE = re.compile(r"\b[A-Z0-9]{4}-[A-Z0-9]{4,6}\b")
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 app = FastAPI(title="BlogHub CLI Runner", version="0.1.0")
@@ -198,6 +199,18 @@ class TaskResponse(BaseModel):
     stdout:    str
     stderr:    str
     truncated: bool
+
+
+class ChatRequest(BaseModel):
+    provider: str
+    session_id: str
+    article_md: str
+    messages: list[dict[str, str]] = []
+    model: Optional[str] = None
+    api_key: Optional[str] = None
+
+
+_chat_processes: dict[str, subprocess.Popen] = {}
 
 
 # ── Health ─────────────────────────────────────────────────────────────────────
@@ -628,6 +641,174 @@ def openai_save_key(body: SaveKeyRequest):
 
 
 # ── Tasks: run ─────────────────────────────────────────────────────────────────
+
+def _chat_prompt(
+    provider: str, article_path: str, article_md: str,
+    messages: list[dict[str, str]],
+) -> str:
+    history = "\n".join(
+        f"{item.get('role', 'user').upper()}: {item.get('content', '')}"
+        for item in messages[-20:]
+    )
+    article_instruction = (
+        f"Before answering, inspect {article_path} with an available read tool."
+        if provider == "anthropic" else
+        "BlogHub already loaded the article through its audited read_article tool. "
+        "Do not invoke command execution or file tools; use the supplied article text."
+    )
+    supplied_article = "" if provider == "anthropic" else f"\n\n<article>\n{article_md}\n</article>"
+    return (
+        "You are BlogHub's article editing agent. Work only inside this isolated "
+        f"directory. {article_instruction} "
+        "Discuss the draft precisely and explain any proposed change. Do not modify "
+        "article.md unless a later turn explicitly says BlogHub recorded user approval.\n\n"
+        f"Article path: {article_path}{supplied_article}\n\nConversation:\n{history}"
+    )
+
+
+def _chat_command(req: ChatRequest, article_path: str) -> list[str]:
+    prompt = _chat_prompt(req.provider, article_path, req.article_md, req.messages)
+    if req.provider == "anthropic":
+        command = [
+            "claude", "-p", prompt, "--output-format", "stream-json", "--verbose",
+            "--include-partial-messages", "--permission-mode", "dontAsk",
+            "--allowedTools", "Read,Grep,Glob",
+        ]
+        if req.model:
+            command.extend(["--model", req.model])
+        return command
+    command = [
+        "codex", "exec", "--json", "--sandbox", "read-only",
+        "--skip-git-repo-check", "--ephemeral",
+    ]
+    if req.model:
+        command.extend(["--model", req.model])
+    command.append(prompt)
+    return command
+
+
+def _json_line(payload: dict) -> str:
+    return _json.dumps(payload, separators=(",", ":")) + "\n"
+
+
+def _normalize_chat_event(provider: str, raw: dict) -> list[dict]:
+    events: list[dict] = []
+    if provider == "anthropic":
+        if raw.get("type") == "stream_event":
+            event = raw.get("event", {})
+            block = event.get("content_block", {})
+            delta = event.get("delta", {})
+            if event.get("type") == "content_block_start" and block.get("type") == "tool_use":
+                events.append({"type": "tool_started", "toolId": block.get("id"),
+                               "name": block.get("name", "tool"), "arguments": block.get("input", {})})
+            elif event.get("type") == "content_block_delta" and delta.get("type") == "text_delta":
+                events.append({"type": "assistant_delta", "text": delta.get("text", "")})
+        elif raw.get("type") == "result":
+            if raw.get("result"):
+                events.append({"type": "assistant_message", "text": raw["result"]})
+            for denial in raw.get("permission_denials", []):
+                events.append({"type": "approval_required", "request": denial})
+            if raw.get("session_id"):
+                events.append({"type": "checkpoint", "nativeSessionId": raw["session_id"]})
+        elif raw.get("type") == "user":
+            for block in raw.get("message", {}).get("content", []):
+                if block.get("type") == "tool_result":
+                    events.append({
+                        "type": "tool_completed", "toolId": block.get("tool_use_id"),
+                        "status": "failed" if block.get("is_error") else "completed",
+                        "result": block.get("content"),
+                    })
+    else:
+        event_type = raw.get("type", "")
+        item = raw.get("item") or {}
+        item_type = item.get("type", "")
+        if event_type == "thread.started":
+            events.append({"type": "checkpoint", "nativeSessionId": raw.get("thread_id")})
+        elif event_type == "item.started" and item_type not in {"agent_message", "reasoning"}:
+            arguments = {
+                key: value for key, value in {
+                    "command": item.get("command"), "query": item.get("query")
+                }.items() if value is not None
+            }
+            events.append({"type": "tool_started", "toolId": item.get("id"),
+                           "name": item_type or "tool", "arguments": arguments})
+        elif event_type == "item.completed" and item_type == "agent_message":
+            events.append({"type": "assistant_message", "text": item.get("text", "")})
+        elif event_type == "item.completed" and item_type not in {"reasoning"}:
+            events.append({"type": "tool_completed", "toolId": item.get("id"),
+                           "name": item_type or "tool", "status": item.get("status", "completed"),
+                           "result": item.get("aggregated_output") or item.get("result")})
+        elif event_type in {"error", "turn.failed"}:
+            events.append({"type": "error", "message": raw.get("message") or str(raw.get("error", "Provider failed"))})
+    return events
+
+
+@app.post("/chat/stream")
+def chat_stream(req: ChatRequest):
+    if req.provider not in _PROVIDERS:
+        raise HTTPException(422, f"Unknown provider: {req.provider}")
+    env = _build_env(req.provider, req.api_key)
+    work_dir = tempfile.mkdtemp(prefix="bloghub_chat_")
+    article_path = os.path.join(work_dir, "article.md")
+    with open(article_path, "w", encoding="utf-8") as article_file:
+        article_file.write(req.article_md)
+
+    def generate() -> Iterator[str]:
+        stderr: list[str] = []
+        try:
+            proc = subprocess.Popen(
+                _chat_command(req, article_path), stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, env=env, cwd=work_dir, text=True, bufsize=1,
+            )
+            _chat_processes[req.session_id] = proc
+            yield _json_line({"type": "status", "status": "running"})
+            if req.provider == "openai":
+                yield _json_line({
+                    "type": "tool_started", "toolId": "bloghub-read-article",
+                    "name": "read_article", "arguments": {"path": "article.md"},
+                })
+                yield _json_line({
+                    "type": "tool_completed", "toolId": "bloghub-read-article",
+                    "name": "read_article", "status": "completed",
+                    "result": {"characters": len(req.article_md)},
+                })
+
+            def read_stderr() -> None:
+                assert proc.stderr is not None
+                for line in proc.stderr:
+                    stderr.append(line)
+
+            stderr_thread = threading.Thread(target=read_stderr, daemon=True)
+            stderr_thread.start()
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                try:
+                    raw = _json.loads(line)
+                except _json.JSONDecodeError:
+                    continue
+                for event in _normalize_chat_event(req.provider, raw):
+                    yield _json_line(event)
+            proc.wait(timeout=TASK_TIMEOUT)
+            stderr_thread.join(timeout=2)
+            if proc.returncode:
+                yield _json_line({"type": "error", "message": _safe_reason("".join(stderr))})
+            yield _json_line({"type": "done", "exitCode": proc.returncode})
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            yield _json_line({"type": "error", "message": _safe_reason(str(exc))})
+            yield _json_line({"type": "done", "exitCode": 1})
+        finally:
+            _chat_processes.pop(req.session_id, None)
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson")
+
+
+@app.post("/chat/{session_id}/cancel")
+def cancel_chat(session_id: str):
+    proc = _chat_processes.get(session_id)
+    if proc and proc.poll() is None:
+        proc.terminate()
+    return {"status": "canceled"}
 
 # Allow-listed task slugs and their CLI invocation templates.
 # {article_path} is substituted with the path to article.md in the task dir.

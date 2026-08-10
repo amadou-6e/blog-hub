@@ -11,7 +11,7 @@ Callers convert that to an appropriate HTTP response (503).
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Iterator, Optional
 
 import httpx
 
@@ -111,6 +111,34 @@ def api_key_from_connection_token(token: str | None) -> str | None:
     if not token or token == "cli_session" or token.startswith("web_session:"):
         return None
     return token
+
+
+def stream_chat(
+    *, provider: str, session_id: str, article_md: str,
+    messages: list[dict[str, str]], model: str | None = None,
+    api_key: str | None = None,
+) -> Iterator[dict]:
+    payload = {
+        "provider": provider, "session_id": session_id,
+        "article_md": article_md, "messages": messages,
+        "model": model, "api_key": api_key,
+    }
+    try:
+        with _client() as client:
+            with client.stream(
+                "POST", "/chat/stream", json=payload,
+                timeout=httpx.Timeout(connect=3, read=300, write=10, pool=5),
+            ) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if line:
+                        yield __import__("json").loads(line)
+    except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
+        raise RunnerUnavailable(f"Chat runner unavailable: {exc}") from exc
+
+
+def cancel_chat(session_id: str) -> None:
+    _post(f"/chat/{session_id}/cancel")
 
 
 def run_task(

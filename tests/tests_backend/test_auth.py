@@ -146,6 +146,16 @@ class TestMiddleware:
         r = client.get("/api/articles")
         assert r.status_code == 200
 
+    def test_disabled_auth_uses_seed_user(self, anon_client, monkeypatch):
+        monkeypatch.setenv("BLOGHUB_DISABLE_AUTH", "true")
+
+        articles = anon_client.get("/api/articles")
+        current_user = anon_client.get("/api/auth/me")
+
+        assert articles.status_code == 200
+        assert current_user.status_code == 200
+        assert current_user.json()["id"] == "user_seed"
+
     def test_health_is_public(self, client):
         r = client.get("/health")
         assert r.status_code == 200
