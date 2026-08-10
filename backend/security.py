@@ -9,6 +9,7 @@ _REDACTIONS = (
     re.compile(r'(?i)("(?:access_token|refresh_token|token|code|cookie|api_key|client_secret)"\s*:\s*")[^"]*(")'),
     re.compile(r"(?i)((?:authorization|proxy-authorization)\s*[:=]\s*(?:bearer\s+)?)[^\s,;]+"),
     re.compile(r"(?i)((?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|auth[-_ ]?code|client[-_ ]?secret|token)\s*[:=]\s*)[^\s,;]+"),
+    re.compile(r"(?i)([?&](?:code|state|token)=)[^&#\s]+"),
     re.compile(r"(?i)(cookie\s*[:=]\s*)[^\r\n]+"),
 )
 

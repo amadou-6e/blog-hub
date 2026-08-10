@@ -145,7 +145,7 @@
           <h2 class="text-bright font-semibold text-sm mb-1">Publishing Platforms</h2>
           <p class="text-xs mb-7" style="color:#5a6080; line-height:1.6;">
             Connect your blog accounts to enable one-click publishing.<br/>
-            Tokens are stored in memory — reconnect after a server restart.
+            Credentials are encrypted and stored outside article workspaces.
           </p>
           <div id="platform-list" class="flex flex-col gap-2">
             <div class="text-xs text-muted">Loading…</div>
@@ -156,7 +156,7 @@
         <div id="section-ai" style="display:none;">
           <h2 class="text-bright font-semibold text-sm mb-1">AI Providers</h2>
           <p class="text-xs mb-7" style="color:#5a6080; line-height:1.6;">
-            Add API keys to enable AI-assisted drafting, suggestions, and review.
+            Sign in with a provider or add an API key for AI-assisted drafting and review.
           </p>
           <div id="ai-list" class="flex flex-col gap-3">
             <div class="text-xs text-muted">Loading…</div>
@@ -198,6 +198,24 @@ const ICON_STYLE = {
 };
 
 let _connections = [];
+const _authTimers = new Map();
+
+const AUTH_STATES = {
+  disconnected:              { label: 'Not configured', color: '#5a6080' },
+  waiting_for_authorization: { label: 'Waiting for authorization', color: '#fbbf24' },
+  expired:                   { label: 'Authorization expired', color: '#fbbf24' },
+  rejected:                  { label: 'Authorization rejected', color: '#f87171' },
+  timed_out:                 { label: 'Login timed out', color: '#fbbf24' },
+  rate_limited:              { label: 'Rate limited', color: '#f87171' },
+  failed:                    { label: 'Login failed', color: '#f87171' },
+  canceled:                  { label: 'Login canceled', color: '#5a6080' },
+};
+
+function esc(value) {
+  const node = document.createElement('div');
+  node.textContent = value == null ? '' : String(value);
+  return node.innerHTML;
+}
 
 // ─── Section nav ───────────────────────────────────────────────────────────────
 function showSection(name, btn) {
@@ -222,6 +240,7 @@ async function loadConnections() {
   renderPlatforms(_connections.filter(c => c.type === 'blog'));
   renderAI(_connections.filter(c => c.type === 'ai'));
   updateCount(_connections);
+  await resumeActiveAuthFlows();
 }
 
 function buildStaticConns() {
@@ -356,6 +375,7 @@ function aiCard(conn) {
   const ic   = ICON_STYLE[conn.id] || { bg: '#13172a', color: '#5a6080', letter: '?' };
   const meta = CONN_META[conn.id] || {};
   const ok   = conn.status === 'connected';
+  const waiting = conn.status === 'waiting_for_authorization';
 
   // Icon col is always dark — visual direction adds a 3px green accent bar when authenticated
   const accentBar = ok
@@ -364,7 +384,7 @@ function aiCard(conn) {
   const iconColor = ok ? ic.color : '#5a6080';
 
   // Not-configured: whole card at opacity 0.75
-  const cardStyle = ok ? '' : 'opacity:0.75;';
+  const cardStyle = ok || waiting ? '' : 'opacity:0.82;';
 
   // Body content differs between authenticated and not-configured (Decision C)
   let bodyHtml = '';
@@ -395,20 +415,27 @@ function aiCard(conn) {
         </div>
       </div>`;
   } else {
-    // Not-configured: flex-column space-between — description top, button bottom (Decision C)
+    const state = AUTH_STATES[conn.status] || AUTH_STATES.disconnected;
+    const helper = conn.errorMessage
+      ? esc(conn.errorMessage)
+      : waiting
+      ? 'Finish signing in on the provider page.'
+      : `${meta.tokenLabel || 'API key'} or provider login required.`;
+    const actionLabel = waiting ? 'Continue login' :
+      conn.status === 'disconnected' ? 'Login with browser' : 'Reconnect';
     bodyHtml = `
       <div class="ai-body-empty">
         <div>
           <div style="font-size:13px;font-weight:600;color:#e8eaf2;margin-bottom:2px;">${conn.label}</div>
           <div style="display:flex;align-items:center;gap:4px;margin-bottom:8px;">
-            <span style="width:5px;height:5px;border-radius:50%;background:#5a6080;"></span>
-            <span style="font-size:11px;color:#5a6080;">Not configured</span>
+            <span style="width:5px;height:5px;border-radius:50%;background:${state.color};"></span>
+            <span style="font-size:11px;color:${state.color};">${state.label}</span>
           </div>
-          <div style="font-size:11px;color:#3a3f52;line-height:1.4;">${meta.tokenLabel || 'API key'} required.</div>
+          <div style="font-size:11px;color:#5a6080;line-height:1.4;">${helper}</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:10px;">
           ${meta.oauth ? `<button onclick="doOAuth('${conn.id}')"
-            style="font-size:11px;font-weight:500;padding:4px 12px;border-radius:4px;background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;">Login with browser</button>` : ''}
+            style="font-size:11px;font-weight:500;padding:4px 12px;border-radius:4px;background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;">${actionLabel}</button>` : ''}
           <button onclick="expandKey('${conn.id}')"
             style="font-size:11px;font-weight:500;padding:4px 12px;border-radius:4px;${meta.oauth ? 'background:transparent;color:#5a6080;border:1px solid #252a38;' : 'background:#6366f1;color:#fff;border:none;'}cursor:pointer;font-family:inherit;">Add API key</button>
         </div>
@@ -556,187 +583,184 @@ async function testConn(id) {
   }
 }
 
-// ─── Browser login dispatcher ──────────────────────────────────────────────────
-// Three flows depending on what the server returns:
-//
-//   flow === "cli_browser"  (Anthropic)
-//     Loopback OAuth. Browser opens auth URL, redirect fails, user copies the
-//     full address-bar URL and pastes it back. We forward it to the CLI server.
-//
-//   flow === "device_code"  (OpenAI Codex)
-//     RFC 8628 device auth. Browser opens the URL, user logs in and enters the
-//     one-time code shown in the UI. CLI polls internally — no submit needed.
-//
-//   flow === undefined / "oauth_popup"  (Medium)
-//     Standard Authorization Code popup. Backend handles the code exchange.
-
-async function doOAuth(id) {
-  const meta = CONN_META[id];
-  if (!meta?.oauth) return;
-  try {
-    const res  = await fetch(`/api/connections/${id}/oauth-start`);
-    const data = await res.json();
-    if (!data.available || !data.url) {
-      alert('Browser login not available — paste an API token instead.');
-      expandKey(id);
-      return;
-    }
-    if (data.flow === 'device_code') {
-      _doDeviceCodeLogin(id, data.url, data.device_code);
-    } else if (data.flow === 'cli_browser') {
-      _doCliBrowserLogin(id, data.url);
-    } else {
-      _doOAuthPopup(id, data.url);
-    }
-  } catch (e) {
-    alert('Login error: ' + e.message);
-  }
-}
-
-// Device code login — open URL, show code, poll until CLI completes internally
-function _doDeviceCodeLogin(id, url, deviceCode) {
-  window.open(url, '_blank');
-  collapseKey(id);
-  closeAllExpand();
-  _showDeviceCodeThrobber(id, deviceCode);
-
-  const MAX_POLLS = 150;
-  let polls = 0;
-  const timer = setInterval(async () => {
-    polls++;
-    try {
-      const res  = await fetch(`/api/connections/${id}/cli-login-status`);
-      const data = await res.json();
-      if (data.status === 'connected') {
-        clearInterval(timer);
-        _hideLoginThrobber(id);
-        await loadConnections();
-      } else if (polls >= MAX_POLLS) {
-        // Device code flow: codex polls OpenAI internally regardless of our session,
-        // so keep polling on 'error' until MAX_POLLS — only give up after time is up.
-        clearInterval(timer);
-        _hideLoginThrobber(id);
-        alert('Login timed out — please try again.');
-      }
-    } catch { /* network blip */ }
-  }, 2000);
-}
-
-// CLI browser login — open tab, show throbber, poll until connected
-function _doCliBrowserLogin(id, url) {
-  window.open(url, '_blank');
-  collapseKey(id);        // close API key expand row if open
-  closeAllExpand();
-  _showLoginThrobber(id);
-
-  const MAX_POLLS = 150; // 5 min at 2 s each
-  let polls = 0;
-  const timer = setInterval(async () => {
-    polls++;
-    try {
-      const res  = await fetch(`/api/connections/${id}/cli-login-status`);
-      const data = await res.json();
-      if (data.status === 'connected') {
-        clearInterval(timer);
-        _hideLoginThrobber(id);
-        await loadConnections();
-      } else if (data.status === 'error' || polls >= MAX_POLLS) {
-        clearInterval(timer);
-        _hideLoginThrobber(id);
-        if (data.errorMessage) alert('Login failed: ' + data.errorMessage);
-        else if (polls >= MAX_POLLS) alert('Login timed out — please try again.');
-      }
-    } catch { /* network blip — keep polling */ }
-  }, 2000);
-}
-
+// ─── Provider-neutral agent login ─────────────────────────────────────────────
 const _SPINNER_SVG = `<svg class="spin" width="13" height="13" viewBox="0 0 24 24" fill="none">
   <circle cx="12" cy="12" r="10" stroke="#5a6080" stroke-width="2.5" stroke-dasharray="16 48"/>
 </svg>`;
 
-function _showLoginThrobber(id) {
-  const wrap = document.getElementById('ai-wrap-' + id) || document.getElementById('plat-card-' + id);
-  if (!wrap || document.getElementById('throbber-row-' + id)) return;
-  const row = document.createElement('div');
-  row.id = 'throbber-row-' + id;
-  row.style.cssText = 'border-top:1px solid #252a38;padding:10px 16px;';
-  row.innerHTML = `
-    <div id="throbber-status-${id}" style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-      ${_SPINNER_SVG}
-      <span id="throbber-msg-${id}" style="font-size:11px;color:#5a6080;">Authorize in the tab that opened. The browser will show a connection error — that is expected. Copy the full URL from the address bar (<code style="font-size:10px;">http://localhost:…/callback?code=…</code>) and paste it below:</span>
-    </div>
-    <div id="code-area-${id}" style="display:flex;gap:6px;">
-      <input id="code-input-${id}" type="text" autocomplete="off" placeholder="http://localhost:…/callback?code=…&state=…"
-        style="flex:1;background:#0f1117;border:1px solid #6366f1;border-radius:5px;
-               padding:6px 10px;font-size:12px;color:#e8eaf2;font-family:'JetBrains Mono',monospace;"
-        onkeydown="if(event.key==='Enter') submitCode('${id}')" />
-      <button onclick="submitCode('${id}')"
-        style="font-size:12px;font-weight:500;padding:6px 14px;border-radius:5px;
-               background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;">Submit</button>
-    </div>`;
-  wrap.appendChild(row);
-  setTimeout(() => document.getElementById('code-input-' + id)?.focus(), 50);
-}
+async function doOAuth(id) {
+  const meta = CONN_META[id];
+  if (!meta?.oauth) return;
+  if (!['anthropic', 'openai'].includes(id)) {
+    const res = await fetch(`/api/connections/${id}/oauth-start`);
+    const data = await res.json();
+    if (!data.available || !data.url) { expandKey(id); return; }
+    _doOAuthPopup(id, data.url);
+    return;
+  }
 
-function _hideLoginThrobber(id) {
-  document.getElementById('throbber-row-' + id)?.remove();
-}
-
-function _showDeviceCodeThrobber(id, deviceCode) {
-  const wrap = document.getElementById('ai-wrap-' + id) || document.getElementById('plat-card-' + id);
-  if (!wrap || document.getElementById('throbber-row-' + id)) return;
-  const row = document.createElement('div');
-  row.id = 'throbber-row-' + id;
-  row.style.cssText = 'border-top:1px solid #252a38;padding:10px 16px;';
-  const codeHtml = deviceCode
-    ? `<div style="margin-top:8px;font-size:11px;color:#5a6080;">
-         Enter this code on the page that just opened:
-         <code style="font-size:13px;font-weight:700;color:#e8eaf2;letter-spacing:2px;margin-left:6px;">${deviceCode}</code>
-       </div>`
-    : '';
-  row.innerHTML = `
-    <div id="throbber-status-${id}" style="display:flex;flex-direction:column;gap:4px;">
-      <div style="display:flex;align-items:center;gap:8px;">
-        ${_SPINNER_SVG}
-        <span id="throbber-msg-${id}" style="font-size:11px;color:#5a6080;">Sign in on the tab that just opened, then enter the code below.</span>
-      </div>
-      ${codeHtml}
-    </div>`;
-  wrap.appendChild(row);
-}
-
-async function submitCode(id) {
-  const inp  = document.getElementById('code-input-' + id);
-  const code = inp?.value.trim();
-  if (!code) { inp?.focus(); return; }
-
-  inp.disabled = true;
-  const btn = inp.nextElementSibling;
-  if (btn) btn.disabled = true;
-
+  const providerTab = window.open('about:blank', '_blank');
+  if (providerTab) providerTab.opener = null;
   try {
-    const res = await fetch(`/api/connections/${id}/submit-code`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ code }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      alert('Submit failed: ' + (err.detail || res.statusText || res.status));
-      inp.disabled = false;
-      if (btn) btn.disabled = false;
+    const res = await fetch(`/api/connections/${id}/auth-flows`, { method: 'POST' });
+    if (res.status === 401) {
+      providerTab?.close();
+      redirectToLogin();
       return;
     }
-    // Code accepted: hide code area, update message, keep polling
-    const area = document.getElementById('code-area-' + id);
-    if (area) area.remove();
-    const msg = document.getElementById('throbber-msg-' + id);
-    if (msg) msg.textContent = 'Completing sign-in…';
-  } catch (e) {
-    alert('Submit error: ' + e.message);
-    inp.disabled = false;
-    if (btn) btn.disabled = false;
+    const flow = await res.json();
+    if (!res.ok) throw new Error(flow.detail || `HTTP ${res.status}`);
+    if (flow.authorizationUrl && providerTab) providerTab.location.href = flow.authorizationUrl;
+    else if (flow.authorizationUrl) window.open(flow.authorizationUrl, '_blank');
+    else providerTab?.close();
+    collapseKey(id);
+    closeAllExpand();
+    syncAgentConnection(flow);
+    renderAgentAuthFlow(flow);
+    if (flow.status === 'waiting_for_authorization') pollAgentAuthFlow(flow);
+  } catch (error) {
+    providerTab?.close();
+    renderAgentAuthFailure(id, error.message, 'Retry login after checking the CLI runner.');
   }
+}
+
+function syncAgentConnection(flow) {
+  const conn = _connections.find(item => item.id === flow.provider);
+  const wrap = document.getElementById('ai-wrap-' + flow.provider);
+  if (!conn || !wrap) return;
+  conn.status = flow.status;
+  conn.username = flow.username || null;
+  conn.errorMessage = flow.errorMessage || null;
+  wrap.outerHTML = aiCard(conn);
+}
+
+async function resumeActiveAuthFlows() {
+  try {
+    const res = await fetch('/api/connections/auth-flows/active');
+    if (!res.ok) return;
+    const data = await res.json();
+    for (const flow of data.flows || []) {
+      renderAgentAuthFlow(flow);
+      pollAgentAuthFlow(flow);
+    }
+  } catch { /* Connections still render when the runner is temporarily unavailable. */ }
+}
+
+function pollAgentAuthFlow(flow) {
+  if (_authTimers.has(flow.flowId)) return;
+  const timer = setInterval(async () => {
+    try {
+      const res = await fetch(`/api/connections/auth-flows/${flow.flowId}`);
+      const current = await res.json();
+      if (!res.ok) throw new Error(current.detail || `HTTP ${res.status}`);
+      const row = document.getElementById('auth-flow-row-' + flow.provider);
+      if (!row || row.dataset.status !== current.status) {
+        renderAgentAuthFlow(current);
+      }
+      if (current.status !== 'waiting_for_authorization') {
+        clearInterval(timer);
+        _authTimers.delete(flow.flowId);
+        await loadConnections();
+        if (current.status !== 'connected') renderAgentAuthFlow(current);
+      }
+    } catch (error) {
+      const msg = document.getElementById('auth-message-' + flow.provider);
+      if (msg) msg.textContent = 'Connection interrupted. Retrying…';
+    }
+  }, 2000);
+  _authTimers.set(flow.flowId, timer);
+}
+
+function renderAgentAuthFlow(flow) {
+  const id = flow.provider;
+  const wrap = document.getElementById('ai-wrap-' + id);
+  if (!wrap) return;
+  document.getElementById('auth-flow-row-' + id)?.remove();
+  const row = document.createElement('div');
+  row.id = 'auth-flow-row-' + id;
+  row.dataset.flowId = flow.flowId;
+  row.dataset.status = flow.status;
+  row.style.cssText = 'border-top:1px solid #252a38;padding:12px 16px;';
+
+  if (flow.status !== 'waiting_for_authorization') {
+    const state = AUTH_STATES[flow.status] || AUTH_STATES.failed;
+    row.innerHTML = `<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+      <div>
+        <div style="font-size:11px;color:${state.color};margin-bottom:4px;">${state.label}</div>
+        ${flow.errorMessage ? `<div style="font-size:11px;color:#c9cfe0;">${esc(flow.errorMessage)}</div>` : ''}
+        ${flow.recovery ? `<div style="font-size:11px;color:#5a6080;margin-top:3px;">${esc(flow.recovery)}</div>` : ''}
+      </div>
+      <button onclick="doOAuth('${id}')" style="font-size:11px;padding:4px 10px;border-radius:4px;background:#6366f1;color:#fff;border:none;cursor:pointer;">Retry</button>
+    </div>`;
+    wrap.appendChild(row);
+    return;
+  }
+
+  const callbackInput = flow.flowType === 'browser_callback'
+    ? `<div id="callback-area-${id}" style="display:flex;gap:6px;margin-top:10px;">
+         <input id="callback-input-${id}" type="text" autocomplete="off"
+           placeholder="Paste the localhost callback URL"
+           style="flex:1;background:#0f1117;border:1px solid #6366f1;border-radius:5px;padding:6px 10px;font-size:12px;color:#e8eaf2;font-family:'JetBrains Mono',monospace;"
+           onkeydown="if(event.key==='Enter')submitAgentCallback('${id}')" />
+         <button onclick="submitAgentCallback('${id}')" style="font-size:11px;padding:5px 11px;border-radius:4px;background:#6366f1;color:#fff;border:none;cursor:pointer;">Submit</button>
+       </div>` : '';
+  const deviceCode = flow.flowType === 'device_code' && flow.deviceCode
+    ? `<div style="font-size:11px;color:#5a6080;margin-top:7px;">Enter code
+         <code style="font-size:13px;font-weight:700;color:#e8eaf2;letter-spacing:2px;margin-left:6px;">${esc(flow.deviceCode)}</code>
+       </div>` : '';
+  const instruction = flow.flowType === 'device_code'
+    ? 'Authorize in the provider tab and enter the device code.'
+    : 'Authorize in the provider tab, then paste its localhost callback URL.';
+  row.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+      <div style="display:flex;align-items:center;gap:8px;">${_SPINNER_SVG}
+        <span id="auth-message-${id}" style="font-size:11px;color:#c9cfe0;">${instruction}</span>
+      </div>
+      <button onclick="cancelAgentAuth('${id}')" style="font-size:11px;color:#f87171;background:transparent;border:none;cursor:pointer;">Cancel</button>
+    </div>${deviceCode}${callbackInput}`;
+  wrap.appendChild(row);
+}
+
+function renderAgentAuthFailure(id, message, recovery) {
+  renderAgentAuthFlow({
+    flowId: 'local-error', provider: id, status: 'failed',
+    errorMessage: message, recovery,
+  });
+}
+
+async function submitAgentCallback(id) {
+  const row = document.getElementById('auth-flow-row-' + id);
+  const input = document.getElementById('callback-input-' + id);
+  const callbackUrl = input?.value.trim();
+  if (!row || !callbackUrl) { input?.focus(); return; }
+  input.disabled = true;
+  try {
+    const res = await fetch(`/api/connections/auth-flows/${row.dataset.flowId}/callback`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callbackUrl }),
+    });
+    const flow = await res.json();
+    if (!res.ok) throw new Error(flow.detail || `HTTP ${res.status}`);
+    document.getElementById('callback-area-' + id)?.remove();
+    const msg = document.getElementById('auth-message-' + id);
+    if (msg) msg.textContent = 'Completing sign-in…';
+  } catch (error) {
+    input.disabled = false;
+    const msg = document.getElementById('auth-message-' + id);
+    if (msg) msg.textContent = error.message;
+  }
+}
+
+async function cancelAgentAuth(id) {
+  const row = document.getElementById('auth-flow-row-' + id);
+  if (!row) return;
+  const flowId = row.dataset.flowId;
+  const timer = _authTimers.get(flowId);
+  if (timer) clearInterval(timer);
+  _authTimers.delete(flowId);
+  const res = await fetch(`/api/connections/auth-flows/${flowId}`, { method: 'DELETE' });
+  const flow = await res.json();
+  await loadConnections();
+  renderAgentAuthFlow(flow);
 }
 
 // Medium OAuth popup — wait for postMessage from callback page
@@ -761,7 +785,23 @@ document.addEventListener('click', (e) => {
 });
 
 // ─── Init ──────────────────────────────────────────────────────────────────────
-loadConnections();
+function redirectToLogin() {
+  const next = window.location.pathname + window.location.search + window.location.hash;
+  window.location.replace('/screens/login/v1.html?next=' + encodeURIComponent(next));
+}
+
+async function initSettings() {
+  try {
+    const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
+    if (res.status === 401) {
+      redirectToLogin();
+      return;
+    }
+  } catch { /* loadConnections renders its offline fallback. */ }
+  await loadConnections();
+}
+
+initSettings();
 </script>
 </body>
 </html>

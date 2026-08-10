@@ -21,6 +21,7 @@ def test_fresh_database_has_current_schema_and_seed_user(tmp_path):
             "article_destinations",
             "article_timeline",
             "connections",
+            "connection_auth_flows",
             "jobs",
             "article_assets",
             "article_comments",

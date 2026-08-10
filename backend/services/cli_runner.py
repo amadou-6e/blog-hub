@@ -89,12 +89,28 @@ def login_status(provider: str) -> dict:
     return _get(f"/auth/{provider}/status")
 
 
+def submit_login_callback(provider: str, callback: str) -> dict:
+    """Forward a loopback callback without logging or persisting its payload."""
+    return _post(f"/auth/{provider}/submit-code", code=callback)
+
+
+def cancel_login(provider: str) -> dict:
+    """Cancel an in-progress login without deleting an existing credential."""
+    return _post(f"/auth/{provider}/cancel")
+
+
 def logout(provider: str) -> dict:
     """Clear CLI credentials for a provider. Returns { status: "disconnected" }."""
     return _post(f"/auth/{provider}/logout")
 
 
 _TASK_TIMEOUT = httpx.Timeout(connect=3.0, read=200.0, write=10.0, pool=5.0)
+
+def api_key_from_connection_token(token: str | None) -> str | None:
+    """Return a real API key, leaving persisted CLI sessions to the runner."""
+    if not token or token == "cli_session" or token.startswith("web_session:"):
+        return None
+    return token
 
 
 def run_task(

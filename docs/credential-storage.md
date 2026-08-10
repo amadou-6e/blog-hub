@@ -67,3 +67,7 @@ credential-free disconnected marker. Reconnect to replace expired, revoked, or
 otherwise unusable credentials. If a key is lost or ciphertext is corrupt,
 restore the matching key from protected backup or remove the affected connection
 row and reconnect. BlogHub will not silently discard the decryption error.
+
+Browser-authenticated agents store only an encrypted `web_session:<provider>`
+marker in SQLite. Their CLI credential material is retained in the protected
+runner configuration volumes described in [Agent web login](agent-web-login.md).

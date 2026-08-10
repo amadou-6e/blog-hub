@@ -298,6 +298,13 @@ body {
 var mode = 'login'; // 'login' | 'register'
 var loading = false;
 
+function postLoginDestination() {
+  var next = new URLSearchParams(window.location.search).get('next');
+  return next && next.startsWith('/') && !next.startsWith('//')
+    ? next
+    : '/screens/overview/v3.html';
+}
+
 // ── Mode switch ───────────────────────────────────────────────────────────
 function switchMode(e) {
   e.preventDefault();
@@ -436,8 +443,7 @@ function handleSubmit(e) {
   .then(function(r) {
     stopLoading();
     if (r.status === 200 || r.status === 201) {
-      // Redirect to overview
-      window.location.href = '/screens/overview/v3.html';
+      window.location.href = postLoginDestination();
     } else if (r.status === 401) {
       showError('Incorrect email or password');
     } else if (r.status === 409) {
@@ -539,7 +545,7 @@ function clearErrors() {
 // ── Redirect if already logged in ─────────────────────────────────────────
 (function checkSession() {
   fetch('/api/auth/me', { credentials: 'same-origin' })
-    .then(function(r) { if (r.ok) window.location.href = '/screens/overview/v3.html'; })
+    .then(function(r) { if (r.ok) window.location.href = postLoginDestination(); })
     .catch(function() {});
 })();
 </script>

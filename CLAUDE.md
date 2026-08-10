@@ -12,88 +12,59 @@ blog-hub/
     ui/             pytest-playwright — browser tests (require live server)
 ```
 
-**Docker services:** only `cli-runner` runs in Docker. The FastAPI backend runs locally.
+Start the complete development stack:
+```
+cd blog-hub
+python start.py
+```
 
-Start backend:
-```
-cd blog-hub && .venv/Scripts/python.exe -m uvicorn backend.main:app --port 8082
-```
+Docker Compose starts both the backend and CLI runner, waits for runner health,
+and keeps application data, credential keys, Claude credentials, and Codex
+credentials in separate named volumes. The backend reaches the runner through
+the internal `http://cli-runner:8001` service URL.
 
-Rebuild cli-runner after changes to `cli-runner/main.py` or `cli-runner/Dockerfile`:
+There is no implicit host-CLI fallback. If Compose is unavailable, startup fails
+with instructions to install Docker Desktop and enable WSL integration. Use
+`--runner local` only as an explicit troubleshooting mode; its credentials are
+kept under ignored `data/agent-config/`. `--runner external` and `--runner off`
+are also explicit development modes.
+
+Rebuild the stack after changing either image with:
 ```
-docker compose build cli-runner && docker compose up -d cli-runner
+docker compose build
 ```
 
 ---
 
-## AI Provider Auth — Current State
+## AI Provider Auth
 
-### Anthropic (Claude)
+Anthropic and OpenAI use the durable provider-neutral flow documented in
+`docs/agent-web-login.md`:
 
-**Flow:** Loopback OAuth via `claude auth login` (Claude Code CLI).
+1. `POST /api/connections/{provider}/auth-flows` starts browser or device-code login.
+2. The UI opens `authorizationUrl` and renders either the loopback callback input or
+   `deviceCode` from `flowType`.
+3. Anthropic callbacks are sent to
+   `POST /api/connections/auth-flows/{flowId}/callback`. OpenAI's CLI polls the
+   device-code provider directly.
+4. The UI polls `GET /api/connections/auth-flows/{flowId}`. Active flows resume from
+   `GET /api/connections/auth-flows/active` after navigation or backend restart.
+5. Connected CLI credentials persist in the `claude-config` and `codex-config`
+   volumes; SQLite contains only an encrypted web-session marker.
 
-1. Runner spawns `claude auth login` with `stdin=DEVNULL`.
-2. CLI starts an HTTP server on a random port (e.g. 36403) and prints an auth URL to stderr:
-   `https://claude.ai/oauth/authorize?...&redirect_uri=http://localhost:36403/callback&...`
-3. Runner scans `/proc/net/tcp6` to find the port, then replaces `redirect_uri` in the URL with
-   `http://localhost:{port}/callback` (it's already correct, but we normalise it).
-4. URL returned to frontend with `flow="cli_browser"`.
-5. Browser opens the URL, user authorises on claude.ai.
-6. Browser tries to redirect to `http://localhost:36403/callback?code=X&state=Y` — fails
-   (port is inside Docker, unreachable from host browser). Page shows connection error.
-7. User copies the full address-bar URL and pastes it into the input field in BlogHub.
-8. Frontend POSTs to `POST /api/connections/anthropic/submit-code` with `{ code: "<full URL>" }`.
-9. Backend forwards to runner `POST /auth/anthropic/submit-code`.
-10. Runner parses `code` and `state` from the URL, forwards
-    `GET http://[::1]:{port}/callback?code=X&state=Y` to the CLI's internal server.
-11. CLI does token exchange with `redirect_uri=http://localhost:{port}/callback` — matches
-    what was used in the auth request, so Anthropic accepts.
-12. Credentials saved to `/root/.claude/.claude.json` (persisted in `claude-config` Docker volume).
-13. Frontend polls `GET /api/connections/anthropic/cli-login-status` every 2s until connected.
+The shared states are `waiting_for_authorization`, `connected`, `expired`,
+`rejected`, `timed_out`, `rate_limited`, `failed`, and `canceled`. Callback
+payloads are forwarded directly and never stored or logged.
 
 **Key files:**
-- `cli-runner/main.py` — `auth_login`, `auth_submit_code`, `_find_cli_callback_port`
-- `backend/routers/connections.py` — `_cli_oauth_start`, `cli_login_status`
-- `screens/settings/v2.html` — `_doCliBrowserLogin`, `_showLoginThrobber`, `submitCode`
+- `backend/services/connection_auth.py` - durable flow orchestration
+- `backend/store/connection_auth.py` - encrypted flow persistence
+- `backend/routers/connections.py` - authenticated HTTP contract
+- `cli-runner/main.py` - provider CLI processes and normalized status
+- `screens/settings/v2.html` - no-reload flow UI
 
-**Volume:** `claude-config:/root/.claude`
-
-**Known gotcha:** `CLAUDE_CONFIG_DIR=/root/.claude` must be set in docker-compose env so the CLI
-writes to the volume, not to `/root/.claude.json` (outside the volume).
-
----
-
-### OpenAI (Codex)
-
-**Flow:** Device code OAuth (RFC 8628) via `codex login --device-auth` (OpenAI Codex CLI).
-
-1. Runner spawns `codex login --device-auth`.
-2. CLI prints to stdout:
-   - URL: `https://auth.openai.com/codex/device`
-   - One-time code: e.g. `1NFL-253Z0`
-3. Runner extracts both with ANSI-stripped regex scan.
-4. Returns `{ flow: "device_code", url: "...", device_code: "1NFL-253Z0" }` to frontend.
-5. Browser opens the URL. UI shows the device code prominently so user can copy it.
-6. User logs into ChatGPT on that page and enters the device code.
-7. **No submit step needed** — the CLI polls OpenAI's token endpoint internally until the
-   code is accepted.
-8. Frontend polls `GET /api/connections/openai/cli-login-status` every 2s.
-9. Runner calls `codex login status` — returns exit 0 when authenticated.
-10. Credentials saved to `/root/.codex/` (persisted in `codex-config` Docker volume).
-
-**Key files:**
-- `cli-runner/main.py` — `auth_login` (shared), `auth_status` openai branch
-- `backend/routers/connections.py` — `_cli_oauth_start` detects `device_code` field
-- `backend/schemas/connections.py` — `OAuthStartResponse.device_code`
-- `screens/settings/v2.html` — `_doDeviceCodeLogin`, `_showDeviceCodeThrobber`
-
-**Volume:** `codex-config:/root/.codex`
-
-**Rate limit:** OpenAI limits device code requests per IP. If you see 429 errors from
-`codex login --device-auth`, wait ~15 minutes before retrying.
-
-**Status:** Flow implemented and wired up end-to-end. Not yet validated with a successful
-login due to rate limiting during development. Test when rate limit clears.
+`CLAUDE_CONFIG_DIR=/root/.claude` must remain set in Docker Compose so Claude
+writes credentials into the mounted volume.
 
 ---
 

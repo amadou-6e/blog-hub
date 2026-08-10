@@ -249,7 +249,8 @@ def generate_article(request: Request, body: GenerateArticleRequest):
 
     # Both providers go through the CLI runner — Anthropic via claude -p,
     # OpenAI via codex exec (uses the OAuth session or API key).
-    api_key = store.get_connection_token(user_id, body.provider) if body.provider == "openai" else None
+    token = store.get_connection_token(user_id, body.provider) if body.provider == "openai" else None
+    api_key = runner.api_key_from_connection_token(token)
     try:
         result = runner.run_task(
             provider=body.provider,
@@ -680,7 +681,8 @@ def regenerate_patches(request: Request, article_id: str):
         store.complete_job(user_id, job["job_id"], error="No AI provider connected")
         return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
 
-    api_key = store.get_connection_token(user_id, provider) if provider == "openai" else None
+    token = store.get_connection_token(user_id, provider) if provider == "openai" else None
+    api_key = runner.api_key_from_connection_token(token)
     try:
         result = runner.run_task(provider=provider,
                                  task="generate",

@@ -66,6 +66,23 @@ CREATE TABLE IF NOT EXISTS connections (
     PRIMARY KEY (platform, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS connection_auth_flows (
+    id                       TEXT PRIMARY KEY,
+    user_id                  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider                 TEXT NOT NULL,
+    flow_type                TEXT NOT NULL,
+    status                   TEXT NOT NULL,
+    authorization_url_secret TEXT,
+    device_code_secret       TEXT,
+    username                 TEXT,
+    error_code               TEXT,
+    error_message            TEXT,
+    created_at               TEXT NOT NULL,
+    updated_at               TEXT NOT NULL,
+    expires_at               TEXT NOT NULL,
+    completed_at             TEXT
+);
+
 CREATE TABLE IF NOT EXISTS jobs (
     job_id       TEXT PRIMARY KEY,
     kind         TEXT NOT NULL,
@@ -213,6 +230,12 @@ CREATE INDEX IF NOT EXISTS idx_sessions_expires
 
 CREATE INDEX IF NOT EXISTS idx_jobs_user_status
     ON jobs(user_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_connection_auth_user_provider
+    ON connection_auth_flows(user_id, provider, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_connection_auth_active
+    ON connection_auth_flows(status, expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_article_timeline_article
     ON article_timeline(article_id);

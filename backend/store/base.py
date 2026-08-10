@@ -117,6 +117,30 @@ class ArticleStore(Protocol):
     def count_connected(self, user_id: str) -> int:
         ...
 
+    def create_connection_auth_flow(
+        self, user_id: str, provider: str, flow_type: str, **kwargs: Any,
+    ) -> dict:
+        ...
+
+    def get_connection_auth_flow(self, user_id: str, flow_id: str) -> dict | None:
+        ...
+
+    def get_latest_connection_auth_flow(
+        self, user_id: str, provider: str, *, active_only: bool = False,
+    ) -> dict | None:
+        ...
+
+    def list_active_connection_auth_flows(self, user_id: str) -> list[dict]:
+        ...
+
+    def update_connection_auth_flow(
+        self, user_id: str, flow_id: str, status: str, **kwargs: Any,
+    ) -> dict:
+        ...
+
+    def delete_connection_auth_flows(self, user_id: str, provider: str) -> int:
+        ...
+
     def create_oauth_state(self, conn_id: str) -> str:
         ...
 

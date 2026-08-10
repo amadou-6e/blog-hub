@@ -96,6 +96,34 @@ def count_connected(user_id: str, *a, **kw):
     return _backend.count_connected(user_id, *a, **kw)
 
 
+def create_connection_auth_flow(user_id: str, *a, **kw):
+    return _backend.create_connection_auth_flow(user_id, *a, **kw)
+
+
+def get_connection_auth_flow(user_id: str, *a, **kw):
+    return _backend.get_connection_auth_flow(user_id, *a, **kw)
+
+
+def get_latest_connection_auth_flow(user_id: str, *a, **kw):
+    return _backend.get_latest_connection_auth_flow(user_id, *a, **kw)
+
+
+def list_active_connection_auth_flows(user_id: str, *a, **kw):
+    return _backend.list_active_connection_auth_flows(user_id, *a, **kw)
+
+
+def update_connection_auth_flow(user_id: str, *a, **kw):
+    return _backend.update_connection_auth_flow(user_id, *a, **kw)
+
+
+def delete_connection_auth_flows(user_id: str, *a, **kw):
+    return _backend.delete_connection_auth_flows(user_id, *a, **kw)
+
+
+def expire_connection_auth_flows(*a, **kw):
+    return _backend.expire_connection_auth_flows(*a, **kw)
+
+
 def create_oauth_state(*a, **kw):
     return _backend.create_oauth_state(*a, **kw)
 
