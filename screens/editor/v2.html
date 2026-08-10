@@ -885,12 +885,22 @@ async function loadPatches() {
   } catch (_e) { /* silently ignore */ }
 }
 
+let CHAT_LOG_HISTORY = [];
+let AGENT_SESSION_HISTORY = [];
+
+function mergeChatHistory() {
+  CHAT_HISTORY = [...CHAT_LOG_HISTORY, ...AGENT_SESSION_HISTORY]
+    .sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''))
+    .map(({ role, text }) => ({ role, text }));
+}
+
 async function loadChat() {
   try {
     const r = await fetch(`/api/articles/${ARTICLE_ID}/chat`);
     if (!r.ok) return;
     const data = await r.json();
-    CHAT_HISTORY = data.messages.map(m => ({ role: m.role, text: m.text }));
+    CHAT_LOG_HISTORY = data.messages.map(m => ({ role: m.role, text: m.text, created_at: m.created_at }));
+    mergeChatHistory();
     renderSection('chat');
   } catch (_e) { /* silently ignore */ }
 }
@@ -906,11 +916,10 @@ async function loadAgentSession() {
     const detailResponse = await fetch(`/api/agent-sessions/${list.sessions[0].id}`);
     if (!detailResponse.ok) return;
     AGENT_SESSION = await detailResponse.json();
-    if (AGENT_SESSION.messages.length) {
-      CHAT_HISTORY = AGENT_SESSION.messages
-        .filter(m => m.role === 'user' || m.role === 'assistant')
-        .map(m => ({ role: m.role === 'assistant' ? 'bot' : 'user', text: m.content }));
-    }
+    AGENT_SESSION_HISTORY = AGENT_SESSION.messages
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => ({ role: m.role === 'assistant' ? 'bot' : 'user', text: m.content, created_at: m.created_at }));
+    mergeChatHistory();
     renderSection('chat');
   } catch (_e) { /* silently ignore */ }
 }

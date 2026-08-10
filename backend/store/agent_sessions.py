@@ -297,7 +297,9 @@ class AgentSessionStoreMixin:
         self, user_id: str, session_id: str, request: dict,
         tool_call_id: str | None = None,
     ) -> dict:
-        self._require_session(user_id, session_id)
+        row = self._require_session(user_id, session_id)
+        if row["status"] in _TERMINAL:
+            raise ValueError(f"Session in status {row['status']} cannot request approval")
         if tool_call_id:
             tool = self._con.execute(
                 "SELECT 1 FROM agent_tool_calls WHERE id=? AND session_id=?",

@@ -161,6 +161,56 @@ class ArticleStore(Protocol):
     ) -> tuple[dict, bool]:
         ...
 
+    def claim_agent_tool_call(self, user_id: str, session_id: str, tool_call_id: str) -> bool:
+        ...
+
+    def complete_agent_tool_call(
+        self, user_id: str, session_id: str, tool_call_id: str,
+        *, result: Any = None, error: str | None = None,
+    ) -> dict:
+        ...
+
+    def add_agent_checkpoint(self, user_id: str, session_id: str, state: dict) -> dict:
+        ...
+
+    def request_agent_approval(
+        self, user_id: str, session_id: str, request: dict,
+        tool_call_id: str | None = None,
+    ) -> dict:
+        ...
+
+    def resolve_agent_approval(
+        self, user_id: str, session_id: str, approval_id: str, *, approved: bool,
+        response: dict | None = None,
+    ) -> dict:
+        ...
+
+    def add_agent_output(
+        self, user_id: str, session_id: str, *, kind: str, reference: str,
+        metadata: dict | None = None,
+    ) -> dict:
+        ...
+
+    def update_agent_session_status(
+        self, user_id: str, session_id: str, status: str, error: str | None = None,
+    ) -> dict:
+        ...
+
+    def resume_agent_session(self, user_id: str, session_id: str) -> dict:
+        ...
+
+    def cancel_agent_session(self, user_id: str, session_id: str) -> dict:
+        ...
+
+    def archive_agent_session(self, user_id: str, session_id: str) -> dict:
+        ...
+
+    def delete_agent_session(self, user_id: str, session_id: str) -> bool:
+        ...
+
+    def export_agent_session(self, user_id: str, session_id: str) -> dict:
+        ...
+
     def recover_agent_sessions(self) -> int:
         ...
 
