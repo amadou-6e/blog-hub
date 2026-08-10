@@ -12,16 +12,21 @@ blog-hub/
     ui/             pytest-playwright — browser tests (require live server)
 ```
 
-**Docker services:** only `cli-runner` runs in Docker. The FastAPI backend runs locally.
+Start the complete development stack:
+```
+cd blog-hub
+python start.py --reload
+```
 
-Start backend:
-```
-cd blog-hub && .venv/Scripts/python.exe -m uvicorn backend.main:app --port 8082
-```
+The launcher reuses a healthy runner, tries Docker Compose, and then falls back
+to a local runner when a provider CLI is installed. Local CLI credentials are
+kept under ignored `data/agent-config/`. Startup fails if no agent provider is
+available; use `--runner off` only when intentionally developing without agents.
 
-Rebuild cli-runner after changes to `cli-runner/main.py` or `cli-runner/Dockerfile`:
+Force a specific runner mode with `--runner docker`, `--runner local`, or
+`--runner external`. Rebuild the Docker runner after changing its image:
 ```
-docker compose build cli-runner && docker compose up -d cli-runner
+docker compose build cli-runner
 ```
 
 ---

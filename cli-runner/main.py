@@ -33,6 +33,8 @@ from pydantic import BaseModel
 
 app = FastAPI(title="BlogHub CLI Runner", version="0.1.0")
 
+_RUNNER_HOME = os.environ.get("RUNNER_HOME", "/root")
+
 # ── Provider config ────────────────────────────────────────────────────────────
 
 _PROVIDERS: dict[str, dict] = {
@@ -44,7 +46,9 @@ _PROVIDERS: dict[str, dict] = {
         # URL is printed to stderr: "If the browser didn't open, visit: https://…"
         "url_stream":    "stderr",
         "url_prefix":    "https://",
-        "config_dir":    os.environ.get("CLAUDE_CONFIG_DIR", "/root/.claude"),
+        "config_dir":    os.environ.get(
+            "CLAUDE_CONFIG_DIR", os.path.join(_RUNNER_HOME, ".claude")
+        ),
         "callback_port": int(os.environ.get("CLAUDE_CALLBACK_PORT", "54322")),
     },
     # OpenAI Codex CLI — device code OAuth (RFC 8628).
@@ -58,7 +62,9 @@ _PROVIDERS: dict[str, dict] = {
         "logout_args":  ["codex", "logout"],
         "url_stream":   "stdout",
         "url_prefix":   "https://",
-        "config_dir":   os.environ.get("CODEX_CONFIG_DIR", "/root/.codex"),
+        "config_dir":   os.environ.get(
+            "CODEX_CONFIG_DIR", os.path.join(_RUNNER_HOME, ".codex")
+        ),
     },
 }
 
@@ -79,7 +85,7 @@ def _build_env(provider: str, api_key: str | None = None) -> dict[str, str]:
     """Return a clean env for CLI subprocesses — never pass os.environ wholesale."""
     cfg = _PROVIDERS[provider]
     env: dict[str, str] = {
-        "HOME": "/root",
+        "HOME": _RUNNER_HOME,
         "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
         "CLAUDE_CONFIG_DIR": _PROVIDERS["anthropic"]["config_dir"],
         "CODEX_HOME": _PROVIDERS["openai"]["config_dir"],
@@ -766,6 +772,18 @@ def _cancel_login(provider: str) -> None:
         proc = session.get("proc")
         if proc and proc.poll() is None:
             proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=3)
+
+
+@app.on_event("shutdown")
+def shutdown_login_processes() -> None:
+    """Do not leave provider login subprocesses behind after runner shutdown."""
+    for provider in tuple(_login_sessions):
+        _cancel_login(provider)
 
 
 def _get_proc_socket_inodes(pid: int) -> set[str]:

@@ -45,3 +45,14 @@ restart retains both the durable connection state and the CLI credentials.
 Set `AGENT_AUTH_TIMEOUT_SECONDS` for the backend flow expiry and
 `RUNNER_LOGIN_TIMEOUT` for the runner process timeout. They should normally have
 the same value.
+
+## Development startup
+
+Run `python start.py --reload` to start both the runner and backend. The launcher
+first reuses a healthy runner, then tries Docker Compose, and finally starts the
+runner locally when an installed `claude` or `codex` binary is available. Local
+runner credentials persist under ignored `data/agent-config/` by default.
+
+Use `--runner docker`, `--runner local`, or `--runner external` to require one
+mode. `--runner off` deliberately disables agent features. Normal startup fails
+instead of silently serving a broken login UI when no provider CLI is available.
