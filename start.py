@@ -75,7 +75,11 @@ def wait_for_runner(
 
 
 def find_compose_command() -> list[str] | None:
-    for command in (["docker", "compose"], ["docker-compose"]):
+    for command in (
+        ["docker", "compose"],
+        ["docker-compose"],
+        ["docker.exe", "compose"],
+    ):
         try:
             result = subprocess.run(
                 [*command, "version"],
@@ -206,8 +210,8 @@ def main(argv: list[str] | None = None) -> int:
             compose_command = find_compose_command()
             if not compose_command:
                 raise LauncherError(
-                    "Docker Compose is required for common startup. Install Docker Desktop "
-                    "and enable integration for this WSL distribution"
+                    "Docker Compose is required for common startup. Install the Compose "
+                    "plugin or start Docker Desktop"
                 )
             port = args.port or 8082
             print(

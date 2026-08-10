@@ -62,6 +62,19 @@ def test_common_startup_requires_compose_without_local_fallback(monkeypatch):
     assert start.main([]) == 1
 
 
+def test_compose_discovery_uses_windows_docker_from_wsl(monkeypatch):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0 if command[0] == "docker.exe" else 1)
+
+    monkeypatch.setattr(start.subprocess, "run", run)
+
+    assert start.find_compose_command() == ["docker.exe", "compose"]
+    assert calls[-1] == ["docker.exe", "compose", "version"]
+
+
 def test_runner_orchestrator_rejects_implicit_local_fallback(monkeypatch):
     monkeypatch.setattr(start, "runner_health", lambda url: None)
     monkeypatch.setattr(
