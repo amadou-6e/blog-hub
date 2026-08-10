@@ -475,7 +475,8 @@ function keepLocalConflict() {
 }
 function mergeConflictManually() {
   if (!PENDING_CONFLICT) return;
-  const { current, local } = PENDING_CONFLICT;
+  const { current } = PENDING_CONFLICT;
+  const local = currentDraft();
   document.getElementById('article-title').textContent = local.title;
   document.getElementById('raw-editor').value = `<<<<<<< YOUR DRAFT\n${local.content}\n=======\n${current.content}\n>>>>>>> LATEST SAVED`;
   CURRENT_REVISION_ID = current.id;

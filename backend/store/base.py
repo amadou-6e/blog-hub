@@ -48,6 +48,31 @@ class ArticleStore(Protocol):
     def save_article_revision(self, user_id: str, article_id: str, **kwargs) -> dict:
         ...
 
+    def get_current_article_revision(self, user_id: str, article_id: str) -> dict | None:
+        ...
+
+    def list_article_revisions(self, user_id: str, article_id: str) -> list[dict]:
+        ...
+
+    def get_article_revision(
+        self, user_id: str, article_id: str, revision_id: str
+    ) -> dict | None:
+        ...
+
+    def compare_article_revision(
+        self, user_id: str, article_id: str, revision_id: str
+    ) -> dict | None:
+        ...
+
+    def restore_article_revision(
+        self,
+        user_id: str,
+        article_id: str,
+        revision_id: str,
+        expected_revision_id: str,
+    ) -> dict:
+        ...
+
     def store_asset(
         self,
         article_id: str,
