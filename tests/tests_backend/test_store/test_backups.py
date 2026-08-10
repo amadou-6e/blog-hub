@@ -10,7 +10,7 @@ import pytest
 
 from backend.store.backups import BackupError, restore_backup, verify_backup
 from backend.store.backends.sqlite import SQLiteStore
-from backend.store.migrations import LATEST_SCHEMA_VERSION
+from backend.store.schema import SCHEMA_VERSION
 
 
 def _store(tmp_path):
@@ -30,7 +30,7 @@ def test_online_backup_contains_database_and_referenced_blobs(tmp_path):
         bundle = store.create_backup(str(tmp_path / "backups"))
         manifest = verify_backup(bundle)
 
-        assert manifest["summary"]["schema_version"] == LATEST_SCHEMA_VERSION
+        assert manifest["summary"]["schema_version"] == SCHEMA_VERSION
         assert manifest["summary"]["counts"]["articles"] == 6
         assert manifest["summary"]["counts"]["article_assets"] == 1
         assert manifest["summary"]["referenced_blob_count"] == 7
