@@ -209,7 +209,7 @@ def test_device_code_flow_shows_code_and_updates_without_reload(page):
     state = {"connected": False}
 
     def connections(route):
-        status = "connected" if state["connected"] else "disconnected"
+        status = "connected" if state["connected"] else "timed_out"
         route.fulfill(json=_connection_payload(openai=status))
 
     def flow_status(route):
@@ -236,8 +236,10 @@ def test_device_code_flow_shows_code_and_updates_without_reload(page):
     page.goto(SETTINGS_URL)
     page.get_by_role("button", name="AI Providers").click()
     page.evaluate("window.open = () => null")
-    page.locator("#ai-wrap-openai").get_by_role("button", name="Login with browser").click()
-    page.locator("#auth-flow-row-openai").get_by_text("ABCD-EFGH").wait_for()
+    card = page.locator("#ai-wrap-openai")
+    card.get_by_role("button", name="Reconnect").click()
+    card.get_by_text("Waiting for authorization", exact=True).wait_for()
+    card.locator("#auth-flow-row-openai").get_by_text("ABCD-EFGH").wait_for()
     page.locator("#ai-wrap-openai").get_by_text("Connected").wait_for(timeout=7000)
 
 

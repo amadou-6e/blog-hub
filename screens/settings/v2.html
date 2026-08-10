@@ -610,12 +610,23 @@ async function doOAuth(id) {
     else providerTab?.close();
     collapseKey(id);
     closeAllExpand();
+    syncAgentConnection(flow);
     renderAgentAuthFlow(flow);
     if (flow.status === 'waiting_for_authorization') pollAgentAuthFlow(flow);
   } catch (error) {
     providerTab?.close();
     renderAgentAuthFailure(id, error.message, 'Retry login after checking the CLI runner.');
   }
+}
+
+function syncAgentConnection(flow) {
+  const conn = _connections.find(item => item.id === flow.provider);
+  const wrap = document.getElementById('ai-wrap-' + flow.provider);
+  if (!conn || !wrap) return;
+  conn.status = flow.status;
+  conn.username = flow.username || null;
+  conn.errorMessage = flow.errorMessage || null;
+  wrap.outerHTML = aiCard(conn);
 }
 
 async function resumeActiveAuthFlows() {
