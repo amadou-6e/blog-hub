@@ -15,7 +15,7 @@ are never automatically replayed. Tool calls have a session-scoped idempotency
 key and an atomic claim operation, preventing a recovered worker from executing
 an already claimed call twice.
 Claimed calls become `interrupted` after restart and require explicit
-reconciliation; pending, never-claimed calls remain claimable.
+reconciliation. Pending, never-claimed calls remain claimable.
 
 ## API
 
@@ -35,6 +35,6 @@ sessions older than `BLOGHUB_AGENT_SESSION_RETENTION_DAYS` (default: 90). Export
 a session before archival or deletion when an audit record is required.
 
 Session payloads are sanitized before serialization. Credential-shaped fields
-and common authorization values are replaced with `[REDACTED]`; provider
+and common authorization values are replaced with `[REDACTED]`. Provider
 credentials remain exclusively in credential storage and are never copied into
 messages, checkpoints, approvals, tool arguments, events, or outputs.

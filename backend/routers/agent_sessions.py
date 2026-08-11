@@ -132,6 +132,8 @@ def request_approval(request: Request, session_id: str, body: RequestApprovalReq
         )
     except KeyError as exc:
         raise _not_found(exc) from exc
+    except ValueError as exc:
+        raise _conflict(exc) from exc
 
 
 @router.post("/{session_id}/approvals/{approval_id}/resolve")

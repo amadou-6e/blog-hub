@@ -13,10 +13,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import backend.store as store  # noqa: E402
-from backend.store.backups import restore_backup, verify_backup  # noqa: E402
-from backend.store.migrations import LATEST_SCHEMA_VERSION  # noqa: E402
-
 
 DATABASE = Path(os.environ.get("BLOGHUB_DB_PATH", ROOT / "data" / "bloghub.db"))
 BLOBS = Path(os.environ.get("BLOGHUB_BLOBS_DIR", ROOT / "data" / "blobs"))
@@ -24,18 +20,25 @@ BACKUPS = Path(os.environ.get("BLOGHUB_BACKUP_DIR", ROOT / "data" / "backups"))
 
 
 def _status(_args: argparse.Namespace) -> int:
+    # Imported lazily: touching backend.store opens (and, on a fresh file,
+    # creates) the primary database, which `verify` below must not require.
+    import backend.store as store
+    from backend.store.schema import SCHEMA_VERSION
+
     connection = sqlite3.connect(DATABASE)
     try:
         integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
     finally:
         connection.close()
     print(f"database: {DATABASE.resolve()}")
-    print(f"schema:   {store.schema_version()} / {LATEST_SCHEMA_VERSION}")
+    print(f"schema:   {store.schema_version()} / {SCHEMA_VERSION}")
     print(f"integrity: {integrity}")
     return 0
 
 
 def _backup(args: argparse.Namespace) -> int:
+    import backend.store as store
+
     if args.if_due_hours is None:
         bundle = store.create_backup(str(args.backup_dir), retain=args.retain)
     else:
@@ -52,6 +55,8 @@ def _backup(args: argparse.Namespace) -> int:
 
 
 def _verify(args: argparse.Namespace) -> int:
+    from backend.store.backups import verify_backup
+
     manifest = verify_backup(args.bundle)
     print(f"verified: {Path(args.bundle).resolve()}")
     print(f"created:  {manifest['created_at']}")
@@ -62,6 +67,9 @@ def _verify(args: argparse.Namespace) -> int:
 def _restore(args: argparse.Namespace) -> int:
     if not args.yes:
         raise SystemExit("restore requires --yes after BlogHub has been stopped")
+    import backend.store as store
+    from backend.store.backups import restore_backup
+
     store.close()
     restore_backup(args.bundle, DATABASE, BLOBS)
     print(f"restored: {Path(args.bundle).resolve()}")

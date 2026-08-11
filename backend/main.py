@@ -7,6 +7,10 @@ from fastapi.staticfiles import StaticFiles
 from backend.routers import agent, agent_sessions, articles, comments, connections, dev, jobs, patches, platforms
 from backend.routers import auth as auth_router
 from backend.middleware.auth import AuthMiddleware
+from backend.security import install_secret_redaction
+
+install_secret_redaction()
+
 import backend.store as store
 
 app = FastAPI(
