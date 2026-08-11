@@ -53,7 +53,8 @@
       transition: border-color 120ms, background 120ms;
       display: flex;
       overflow: hidden;
-      min-height: 148px;
+      height: 241px;
+      min-height: 241px;
       width: 100%;
       max-width: 1080px;
     }
@@ -173,6 +174,72 @@
       border-radius: 8px;
       overflow: hidden;
       background: #10131c;
+    }
+
+    .article-card-left {
+      width: 332px;
+      flex-shrink: 0;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid #252a38;
+    }
+    .article-card-right {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .article-card-tabs {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      padding: 8px 12px 6px;
+      border-bottom: 1px solid #252a38;
+      flex-shrink: 0;
+    }
+    .article-card-preview {
+      flex: 1;
+      padding: 10px 14px;
+      gap: 12px;
+      align-items: center;
+      overflow: hidden;
+    }
+    .article-card-thumbnail {
+      flex-shrink: 0;
+      width: 190px;
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid #252a38;
+      background: #10131c;
+    }
+
+    @media (max-width: 760px) {
+      .article-card {
+        height: auto;
+        min-height: 0;
+        flex-direction: column;
+      }
+      .article-card-left {
+        width: 100%;
+        min-height: 241px;
+        border-right: 0;
+        border-bottom: 1px solid #252a38;
+      }
+      .article-card-right {
+        min-height: 190px;
+      }
+      .article-card-tabs {
+        overflow-x: auto;
+      }
+      .article-card-preview {
+        min-height: 150px;
+        padding: 14px 16px;
+      }
+      .article-card-thumbnail {
+        width: min(46%, 190px);
+      }
     }
   </style>
 </head>
@@ -672,7 +739,7 @@ function renderCard(a) {
 
   // ── Left pane (332 px) ──────────────────────────────────────────
   const left = document.createElement('div');
-  left.style.cssText = 'width:332px;flex-shrink:0;padding:12px 16px;display:flex;flex-direction:column;border-right:1px solid #252a38;';
+  left.className = 'article-card-left';
 
   // Title + context menu
   const titleRow = document.createElement('div');
@@ -763,7 +830,10 @@ function renderCard(a) {
   } else {
     footBtn.style.cssText = 'font-size:12px;font-weight:500;padding:5px 12px;border-radius:5px;background:transparent;color:#c9cfe0;border:1px solid #252a38;cursor:pointer;font-family:inherit;';
     footBtn.textContent = 'Edit';
-    footBtn.onclick = (e) => { e.stopPropagation(); };
+    footBtn.onclick = (e) => {
+      e.stopPropagation();
+      window.location.href = `../editor/v2.html?id=${encodeURIComponent(a.id)}`;
+    };
   }
   footer.appendChild(footBtn);
   left.appendChild(footer);
@@ -771,16 +841,17 @@ function renderCard(a) {
 
   // ── Right preview pane ───────────────────────────────────────────
   const right = document.createElement('div');
-  right.style.cssText = 'flex:1;display:flex;flex-direction:column;overflow:hidden;';
+  right.className = 'article-card-right';
 
   // Platform tabs
   const tabRow = document.createElement('div');
-  tabRow.style.cssText = 'display:flex;align-items:center;gap:2px;padding:8px 12px 6px;border-bottom:1px solid #252a38;flex-shrink:0;';
+  tabRow.className = 'article-card-tabs';
 
   const panels = [];
+  const activePlatform = activePreview.get(a.id) || defaultPreviewPlatform(a);
   ['medium', 'hashnode', 'devto'].forEach((p, idx) => {
     const d = a.destinations[p];
-    const isActive = idx === 0;
+    const isActive = p === activePlatform;
     const dotColor = DOT_COLOR[d.status] || '#252a38';
     const tab = document.createElement('button');
     tab.className = 'plat-tab' + (isActive ? ' active' : '');
@@ -793,6 +864,7 @@ function renderCard(a) {
     `;
     tab.onclick = (e) => {
       e.stopPropagation();
+      activePreview.set(a.id, p);
       tabRow.querySelectorAll('.plat-tab').forEach((t, j) => {
         t.style.color = j === idx ? '#e8eaf2' : '#5a6080';
         t.style.background = j === idx ? '#1e2438' : 'transparent';
@@ -805,13 +877,15 @@ function renderCard(a) {
 
     // Panel: thumbnail + text
     const panel = document.createElement('div');
-    panel.style.cssText = `flex:1;padding:10px 14px;display:${isActive ? 'flex' : 'none'};gap:12px;align-items:center;overflow:hidden;`;
+    panel.className = 'article-card-preview';
+    panel.style.display = isActive ? 'flex' : 'none';
 
     const thumbDiv = document.createElement('div');
-    thumbDiv.style.cssText = `flex-shrink:0;width:190px;aspect-ratio:${PLAT_ASPECT[p]};border-radius:6px;overflow:hidden;border:1px solid #252a38;background:#10131c;`;
+    thumbDiv.className = 'article-card-thumbnail';
+    thumbDiv.style.aspectRatio = PLAT_ASPECT[p];
     if (a.previewImageUrl) {
       const img = document.createElement('img');
-      img.src = a.previewImageUrl.startsWith('/') ? 'http://localhost:8002' + a.previewImageUrl : a.previewImageUrl;
+      img.src = a.previewImageUrl;
       img.alt = a.title;
       img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
       thumbDiv.appendChild(img);
@@ -1069,4 +1143,3 @@ loadOverview()
 </script>
 </body>
 </html>
-
