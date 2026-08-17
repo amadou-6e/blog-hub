@@ -23,6 +23,7 @@ from backend.schemas.overview import (
 import backend.store as store
 import backend.services.cli_runner as runner
 from backend.services.push import push_article_to_platforms
+from backend.store.article_revisions import RevisionConflict
 
 router = APIRouter(prefix="/api/articles", tags=["articles"])
 
@@ -122,6 +123,8 @@ class ArticleDetailResponse(BaseModel):
     content: str
     word_count: int
     updated_at: str
+    revision_id: str
+    revision_number: int
     gate: str
     source: str
     source_platform: Optional[str] = None
@@ -134,12 +137,17 @@ def get_article(request: Request, article_id: str):
     article = store.get_article(user_id, article_id)
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
+    revision = store.get_current_article_revision(user_id, article_id)
+    if revision is None:
+        raise HTTPException(status_code=500, detail="Article revision is missing")
     return ArticleDetailResponse(
         id=article["id"],
         title=article["title"],
         content=article["body"],
         word_count=article["word_count"],
         updated_at=str(article["updated_at"]),
+        revision_id=revision["id"],
+        revision_number=revision["revision_number"],
         gate=article["gate"],
         source=article["source"],
         source_platform=article.get("source_platform"),
@@ -158,11 +166,25 @@ def get_article(request: Request, article_id: str):
 class ArticlePatchRequest(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
+    base_revision_id: str
 
 
 class ArticlePatchResponse(BaseModel):
     updated_at: str
     word_count: int
+    revision_id: str
+    revision_number: int
+
+
+def _raise_revision_conflict(exc: RevisionConflict) -> None:
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "revision_conflict",
+            "message": str(exc),
+            "current": exc.current,
+        },
+    ) from exc
 
 
 @router.patch("/{article_id}", response_model=ArticlePatchResponse)
@@ -171,15 +193,133 @@ def patch_article(request: Request, article_id: str, body: ArticlePatchRequest):
     article = store.get_article(user_id, article_id)
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
-    if body.title is not None:
-        store.update_article_title(user_id, article_id, body.title)
-    if body.content is not None:
-        store.update_article_body(user_id, article_id, body.content, event="Auto-saved")
+    try:
+        revision = store.save_article_revision(
+            user_id,
+            article_id,
+            title=body.title,
+            content=body.content,
+            expected_revision_id=body.base_revision_id,
+            source="user",
+            description="Auto-saved",
+        )
+    except RevisionConflict as exc:
+        _raise_revision_conflict(exc)
     updated = store.get_article(user_id, article_id)
     return ArticlePatchResponse(
         updated_at=str(updated["updated_at"]),
         word_count=updated["word_count"],
+        revision_id=revision["id"],
+        revision_number=revision["revision_number"],
     )
+
+
+class RevisionSummary(BaseModel):
+    id: str
+    revision_number: int
+    title: str
+    source: str
+    description: Optional[str] = None
+    created_by: Optional[str] = None
+    created_at: str
+    base_revision_id: Optional[str] = None
+    restored_from_id: Optional[str] = None
+
+
+class RevisionDetail(RevisionSummary):
+    content: str
+
+
+class RevisionListResponse(BaseModel):
+    revisions: list[RevisionSummary]
+
+
+class RevisionDiffResponse(BaseModel):
+    revision: RevisionDetail
+    current: RevisionDetail
+    diff: str
+
+
+class CheckpointRequest(BaseModel):
+    base_revision_id: str
+    description: Optional[str] = None
+
+
+class RestoreRevisionRequest(BaseModel):
+    base_revision_id: str
+
+
+@router.get("/{article_id}/revisions", response_model=RevisionListResponse)
+def list_revisions(request: Request, article_id: str):
+    user_id: str = request.state.user_id
+    if store.get_article(user_id, article_id) is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    return RevisionListResponse(revisions=store.list_article_revisions(user_id, article_id))
+
+
+@router.get("/{article_id}/revisions/{revision_id}", response_model=RevisionDetail)
+def get_revision(request: Request, article_id: str, revision_id: str):
+    revision = store.get_article_revision(request.state.user_id, article_id, revision_id)
+    if revision is None:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    return revision
+
+
+@router.get(
+    "/{article_id}/revisions/{revision_id}/diff", response_model=RevisionDiffResponse
+)
+def compare_revision(request: Request, article_id: str, revision_id: str):
+    comparison = store.compare_article_revision(
+        request.state.user_id, article_id, revision_id
+    )
+    if comparison is None:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    return comparison
+
+
+@router.post(
+    "/{article_id}/checkpoints", response_model=RevisionDetail, status_code=201
+)
+def create_checkpoint(request: Request, article_id: str, body: CheckpointRequest):
+    user_id: str = request.state.user_id
+    article = store.get_article(user_id, article_id)
+    if article is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    try:
+        return store.save_article_revision(
+            user_id,
+            article_id,
+            title=article["title"],
+            content=article["body"],
+            expected_revision_id=body.base_revision_id,
+            source="user",
+            description=body.description or "Manual checkpoint",
+            force_revision=True,
+        )
+    except RevisionConflict as exc:
+        _raise_revision_conflict(exc)
+
+
+@router.post(
+    "/{article_id}/revisions/{revision_id}/restore", response_model=RevisionDetail
+)
+def restore_revision(
+    request: Request,
+    article_id: str,
+    revision_id: str,
+    body: RestoreRevisionRequest,
+):
+    try:
+        return store.restore_article_revision(
+            request.state.user_id,
+            article_id,
+            revision_id,
+            body.base_revision_id,
+        )
+    except RevisionConflict as exc:
+        _raise_revision_conflict(exc)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Revision not found") from exc
 
 
 # ── Generate ──────────────────────────────────────────────────────────────────

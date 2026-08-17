@@ -29,6 +29,11 @@ class AddMessageRequest(CamelModel):
 
 class ChatTurnRequest(CamelModel):
     content: str = Field(min_length=1, max_length=20_000)
+    article_revision_id: str = Field(min_length=1)
+
+
+class CloseAgentSessionRequest(CamelModel):
+    article_revision_id: str = Field(min_length=1)
 
 
 class RecordToolCallRequest(CamelModel):

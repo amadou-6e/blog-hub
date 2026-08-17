@@ -7,14 +7,29 @@ checkpoints survive page and backend restarts.
 
 ## Turn lifecycle
 
-1. The editor creates or resumes a session for the selected connected provider.
-2. `POST /api/agent-sessions/{id}/turns` persists the user message and starts a
-   background turn.
-3. The backend consumes normalized NDJSON from `POST /chat/stream` on the runner.
-4. The editor polls session detail while the turn is running and renders partial
+1. The editor saves its local content as an immutable article revision.
+2. The editor creates or resumes a session for the selected connected provider.
+3. `POST /api/agent-sessions/{id}/turns` verifies that revision, applies any edit
+   queued by the preceding agent turn, and starts the agent from that exact snapshot.
+4. The backend consumes normalized NDJSON from `POST /chat/stream` on the runner.
+5. The editor polls session detail while the turn is running and renders partial
    text, tool state, errors, and approvals.
-5. The final assistant message is persisted and the session moves to
+6. A revised article returned by the agent is stored as a pending, revision-bound
+   patch. It is applied only immediately before the next agent turn or when the
+   thread is explicitly closed. A stale patch produces a revision conflict rather
+   than overwriting newer editor work.
+7. The final assistant message is persisted and the session moves to
    `waiting_for_input`.
+
+An article can give the agent a direct command with an HTML comment marker:
+
+```markdown
+<!-- bloghub-agent: Rewrite the introduction using the example below. -->
+```
+
+The command may span multiple lines before `-->`. Unmarked prose, quotations,
+code, links, and imported content are always treated as article content, not as
+agent instructions. Completed command markers are removed from the revised body.
 
 Canceling a turn terminates the provider process and marks the durable session
 as canceled. Reloading the editor restores the latest thread for each provider.
@@ -32,6 +47,6 @@ Codex while instructing it not to invoke shell or file tools. The runner is not
 granted bypass-sandbox privileges.
 
 Approval decisions are recorded against the requesting user and session. The
-current tool policy is read-only, so chat never updates canonical Markdown.
-Write-capable tools must produce reviewable article patches before they can be
-enabled in this surface.
+current tool policy is read-only. Article changes use BlogHub's structured output
+protocol and revision-bound patch service; providers never write canonical
+Markdown directly.

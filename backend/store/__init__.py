@@ -45,6 +45,30 @@ def update_article_title(user_id: str, *a, **kw):
     return _backend.update_article_title(user_id, *a, **kw)
 
 
+def save_article_revision(user_id: str, *a, **kw):
+    return _backend.save_article_revision(user_id, *a, **kw)
+
+
+def get_current_article_revision(user_id: str, *a, **kw):
+    return _backend.get_current_article_revision(user_id, *a, **kw)
+
+
+def list_article_revisions(user_id: str, *a, **kw):
+    return _backend.list_article_revisions(user_id, *a, **kw)
+
+
+def get_article_revision(user_id: str, *a, **kw):
+    return _backend.get_article_revision(user_id, *a, **kw)
+
+
+def compare_article_revision(user_id: str, *a, **kw):
+    return _backend.compare_article_revision(user_id, *a, **kw)
+
+
+def restore_article_revision(user_id: str, *a, **kw):
+    return _backend.restore_article_revision(user_id, *a, **kw)
+
+
 def delete_articles(user_id: str, *a, **kw):
     return _backend.delete_articles(user_id, *a, **kw)
 
@@ -261,6 +285,14 @@ def delete_comment(user_id: str, *a, **kw):
 
 def list_patches(user_id: str, *a, **kw):
     return _backend.list_patches(user_id, *a, **kw)
+
+
+def get_patch(user_id: str, *a, **kw):
+    return _backend.get_patch(user_id, *a, **kw)
+
+
+def get_pending_agent_session_patch(user_id: str, *a, **kw):
+    return _backend.get_pending_agent_session_patch(user_id, *a, **kw)
 
 
 def add_patch(user_id: str, *a, **kw):

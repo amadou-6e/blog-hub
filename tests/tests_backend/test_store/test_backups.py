@@ -33,6 +33,7 @@ def test_online_backup_contains_database_and_referenced_blobs(tmp_path):
         assert manifest["summary"]["schema_version"] == SCHEMA_VERSION
         assert manifest["summary"]["counts"]["articles"] == 6
         assert manifest["summary"]["counts"]["article_assets"] == 1
+        assert manifest["summary"]["counts"]["article_revisions"] == 6
         assert manifest["summary"]["referenced_blob_count"] == 7
         assert (
             bundle / "blobs" / "articles" / "art_001" / "body.md"

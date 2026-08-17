@@ -6,12 +6,15 @@ from fastapi.responses import JSONResponse
 
 import backend.store as store
 import backend.services.agent_chat as agent_chat
+import backend.services.article_patches as article_patches
 import backend.services.cli_runner as runner
+from backend.store.article_revisions import RevisionConflict
 from backend.schemas.agent_sessions import (
     AddCheckpointRequest,
     AddMessageRequest,
     AddOutputRequest,
     ChatTurnRequest,
+    CloseAgentSessionRequest,
     CompleteToolCallRequest,
     CreateAgentSessionRequest,
     RecordToolCallRequest,
@@ -28,6 +31,35 @@ def _not_found(exc: KeyError) -> HTTPException:
 
 def _conflict(exc: ValueError) -> HTTPException:
     return HTTPException(status_code=409, detail=str(exc))
+
+
+def _revision_conflict(exc: RevisionConflict) -> HTTPException:
+    return HTTPException(status_code=409, detail={
+        "code": "revision_conflict",
+        "message": str(exc),
+        "current": exc.current,
+    })
+
+
+def _current_revision(user_id: str, session: dict, expected_id: str) -> dict:
+    article_id = session.get("article_id")
+    current = store.get_current_article_revision(user_id, article_id) if article_id else None
+    if current is None:
+        raise HTTPException(status_code=404, detail="Session article not found")
+    if current["id"] != expected_id:
+        raise _revision_conflict(RevisionConflict(current))
+    return current
+
+
+def _turn_in_progress(session: dict) -> bool:
+    latest_start = -1
+    latest_finish = -1
+    for event in session.get("events", []):
+        if event["kind"] == "turn_started":
+            latest_start = event["id"]
+        elif event["kind"] == "turn_completed":
+            latest_finish = event["id"]
+    return latest_start > latest_finish
 
 
 @router.post("", status_code=201)
@@ -93,21 +125,68 @@ def run_chat_turn(
     )
     if not connection or connection["status"] != "connected":
         raise HTTPException(status_code=409, detail="Selected provider is not connected")
+    if session["status"] == "running" and _turn_in_progress(session):
+        raise HTTPException(status_code=409, detail="A response is already running")
+    current_revision = _current_revision(user_id, session, body.article_revision_id)
+    try:
+        applied_patch, applied_revision = article_patches.apply_pending_session_patch(
+            user_id=user_id, session_id=session_id
+        )
+    except RevisionConflict as exc:
+        raise _revision_conflict(exc) from exc
+    except article_patches.PatchConflict as exc:
+        raise _conflict(exc) from exc
+    agent_revision = applied_revision or current_revision
     if session["status"] in {"waiting_for_input", "waiting_for_resume", "failed"}:
         store.resume_agent_session(user_id, session_id)
     elif session["status"] != "running":
         raise HTTPException(
             status_code=409, detail=f"Session is {session['status'].replace('_', ' ')}"
         )
-    if any(event["kind"] == "turn_started" for event in session.get("events", [])[-2:]):
-        raise HTTPException(status_code=409, detail="A response is already running")
-
     message = store.add_agent_message(user_id, session_id, "user", body.content)
-    store.add_agent_event(user_id, session_id, "turn_started", {"message_id": message["id"]})
+    store.add_agent_event(user_id, session_id, "turn_started", {
+        "message_id": message["id"], "article_revision_id": agent_revision["id"],
+    })
     background_tasks.add_task(
-        agent_chat.run_turn, user_id=user_id, session_id=session_id
+        agent_chat.run_turn, user_id=user_id, session_id=session_id,
+        article_revision_id=agent_revision["id"],
     )
-    return {"sessionId": session_id, "status": "running", "message": message}
+    return {
+        "sessionId": session_id,
+        "status": "running",
+        "message": message,
+        "articleRevisionId": agent_revision["id"],
+        "articleChanged": applied_patch is not None,
+    }
+
+
+@router.post("/{session_id}/close")
+def close_session(request: Request, session_id: str, body: CloseAgentSessionRequest):
+    user_id = request.state.user_id
+    session = store.get_agent_session(user_id, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Agent session not found")
+    if session["status"] == "running" and _turn_in_progress(session):
+        raise HTTPException(status_code=409, detail="Wait for the current response to finish")
+    current_revision = _current_revision(user_id, session, body.article_revision_id)
+    try:
+        applied_patch, applied_revision = article_patches.apply_pending_session_patch(
+            user_id=user_id, session_id=session_id
+        )
+    except RevisionConflict as exc:
+        raise _revision_conflict(exc) from exc
+    except article_patches.PatchConflict as exc:
+        raise _conflict(exc) from exc
+    if session["status"] not in {"completed", "canceled", "expired"}:
+        session = store.update_agent_session_status(user_id, session_id, "completed")
+    else:
+        session = store.get_agent_session(user_id, session_id)
+    revision = applied_revision or current_revision
+    return {
+        "session": session,
+        "articleRevisionId": revision["id"],
+        "articleChanged": applied_patch is not None,
+    }
 
 
 @router.post("/{session_id}/tool-calls")

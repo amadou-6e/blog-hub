@@ -24,6 +24,14 @@ def editor_url(article_id=ARTICLE_ID):
 
 
 def goto_editor(page, article_id=ARTICLE_ID):
+    page.request.post(
+        f"{BASE_URL}/api/auth/login",
+        data={
+            "email": "seed@example.com",
+            "password": "seed1234",
+            "remember_me": False,
+        },
+    )
     page.goto(editor_url(article_id))
     # wait-for-selector with a short timeout; if the page redirects away (API 404)
     # this raises clearly so tests fail fast instead of timing out on file-label.
@@ -103,6 +111,58 @@ def test_autosave_clears_unsaved_dot(page):
         "document.getElementById('save-indicator').innerText.includes('saved')",
         timeout=8000,
     )
+
+
+def test_offline_edit_is_saved_locally_and_syncs_on_reconnect(page):
+    goto_editor(page)
+    page.context.set_offline(True)
+    page.locator("#raw-editor").press("Control+End")
+    page.keyboard.type(" offline-recovery-marker")
+    page.wait_for_function(
+        "document.getElementById('save-indicator').innerText.includes('offline')",
+        timeout=8000,
+    )
+    assert page.evaluate(
+        "localStorage.getItem('bloghub-draft:art_001').includes('offline-recovery-marker')"
+    )
+
+    page.context.set_offline(False)
+    page.wait_for_function(
+        "document.getElementById('save-indicator').innerText.includes('saved')",
+        timeout=10000,
+    )
+    page.reload()
+    page.wait_for_function(
+        "document.getElementById('raw-editor').value.includes('offline-recovery-marker')",
+        timeout=10000,
+    )
+
+
+def test_concurrent_tabs_show_conflict_instead_of_overwriting(page):
+    goto_editor(page)
+    second = page.context.new_page()
+    goto_editor(second)
+    try:
+        page.locator("#raw-editor").press("Control+End")
+        page.keyboard.type(" first-writer-marker")
+        page.wait_for_function(
+            "document.getElementById('save-indicator').innerText.includes('saved')",
+            timeout=10000,
+        )
+
+        second.locator("#raw-editor").press("Control+End")
+        second.keyboard.type(" second-writer-marker")
+        second.wait_for_selector("#conflict-overlay", state="visible", timeout=10000)
+        assert "first-writer-marker" in second.locator("#conflict-server").inner_text()
+        assert "second-writer-marker" in second.locator("#conflict-local").inner_text()
+
+        second.get_by_role("button", name="Keep my draft").click()
+        second.wait_for_function(
+            "document.getElementById('save-indicator').innerText.includes('saved')",
+            timeout=10000,
+        )
+    finally:
+        second.close()
 
 
 # ── 3. Word count updates ─────────────────────────────────────────────────────
@@ -525,7 +585,45 @@ def test_rejecting_patch_marks_it_rejected(page, requests_session):
     )
 
 
-# ── 14. Destinations section ─────────────────────────────────────────────────
+# ── 14. Revision history ─────────────────────────────────────────────────────
+
+def test_history_lists_saved_revisions_and_restores_without_rewriting(page):
+    goto_editor(page)
+    original = page.locator("#raw-editor").input_value()
+    page.locator("#raw-editor").fill("temporary replacement")
+    page.wait_for_function(
+        "document.getElementById('save-indicator').innerText.includes('saved')",
+        timeout=10000,
+    )
+
+    page.locator(".acc-hdr").filter(has_text="History").click()
+    page.wait_for_function(
+        "document.getElementById('abody-history').innerText.includes('v2')",
+        timeout=8000,
+    )
+    assert "v1" in page.locator("#abody-history").inner_text()
+
+    page.get_by_title("Compare revision").first.click()
+    page.get_by_role("button", name="Restore as new revision").click()
+    page.wait_for_function(
+        "document.getElementById('abody-history').innerText.includes('v3')",
+        timeout=10000,
+    )
+    assert page.locator("#raw-editor").input_value() == original
+
+
+def test_manual_checkpoint_creates_named_revision(page):
+    goto_editor(page)
+    page.locator(".acc-hdr").filter(has_text="History").click()
+    page.once("dialog", lambda dialog: dialog.accept("Before rewrite"))
+    page.get_by_role("button", name="Create checkpoint").click()
+    page.wait_for_function(
+        "document.getElementById('abody-history').innerText.includes('Before rewrite')",
+        timeout=8000,
+    )
+
+
+# ── 15. Destinations section ─────────────────────────────────────────────────
 
 def test_destinations_shows_platform_names(page):
     goto_editor(page)

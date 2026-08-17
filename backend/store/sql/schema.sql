@@ -55,6 +55,21 @@ CREATE TABLE IF NOT EXISTS article_timeline (
     event       TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS article_revisions (
+    id                 TEXT PRIMARY KEY,
+    article_id         TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+    revision_number    INTEGER NOT NULL,
+    title              TEXT NOT NULL,
+    content            TEXT NOT NULL,
+    source             TEXT NOT NULL,
+    description        TEXT,
+    created_by         TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at         TEXT NOT NULL,
+    base_revision_id   TEXT REFERENCES article_revisions(id) ON DELETE SET NULL,
+    restored_from_id   TEXT REFERENCES article_revisions(id) ON DELETE SET NULL,
+    UNIQUE(article_id, revision_number)
+);
+
 CREATE TABLE IF NOT EXISTS connections (
     platform      TEXT NOT NULL,
     token         TEXT NOT NULL,
@@ -125,6 +140,11 @@ CREATE TABLE IF NOT EXISTS article_patches (
     added       TEXT NOT NULL,
     state       TEXT NOT NULL DEFAULT 'pending',
     created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS article_patch_revisions (
+    patch_id         TEXT PRIMARY KEY REFERENCES article_patches(id) ON DELETE CASCADE,
+    base_revision_id TEXT NOT NULL REFERENCES article_revisions(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS article_chat_log (
@@ -240,11 +260,17 @@ CREATE INDEX IF NOT EXISTS idx_connection_auth_active
 CREATE INDEX IF NOT EXISTS idx_article_timeline_article
     ON article_timeline(article_id);
 
+CREATE INDEX IF NOT EXISTS idx_article_revisions_article
+    ON article_revisions(article_id, revision_number DESC);
+
 CREATE INDEX IF NOT EXISTS idx_article_comments_article
     ON article_comments(article_id);
 
 CREATE INDEX IF NOT EXISTS idx_article_patches_article
     ON article_patches(article_id);
+
+CREATE INDEX IF NOT EXISTS idx_article_patch_revisions_base
+    ON article_patch_revisions(base_revision_id);
 
 CREATE INDEX IF NOT EXISTS idx_article_chat_article
     ON article_chat_log(article_id, id);
