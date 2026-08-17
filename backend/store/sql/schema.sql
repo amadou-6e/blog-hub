@@ -67,15 +67,55 @@ CREATE TABLE IF NOT EXISTS connections (
 );
 
 CREATE TABLE IF NOT EXISTS jobs (
-    job_id       TEXT PRIMARY KEY,
-    kind         TEXT NOT NULL,
-    article_id   TEXT,
-    status       TEXT NOT NULL DEFAULT 'pending',
-    result       TEXT,
+    job_id              TEXT PRIMARY KEY,
+    kind                TEXT NOT NULL,
+    article_id          TEXT,
+    status              TEXT NOT NULL DEFAULT 'pending',
+    result              TEXT,
+    error               TEXT,
+    created_at          TEXT NOT NULL,
+    completed_at        TEXT,
+    user_id             TEXT REFERENCES users(id) ON DELETE CASCADE,
+    payload_json        TEXT NOT NULL DEFAULT '{}',
+    queue               TEXT NOT NULL DEFAULT 'default',
+    priority            INTEGER NOT NULL DEFAULT 0,
+    idempotency_key     TEXT,
+    max_attempts        INTEGER NOT NULL DEFAULT 3,
+    attempt_count       INTEGER NOT NULL DEFAULT 0,
+    available_at        TEXT,
+    claimed_by          TEXT,
+    lease_expires_at    TEXT,
+    heartbeat_at        TEXT,
+    timeout_seconds     INTEGER NOT NULL DEFAULT 300,
+    cancel_requested_at TEXT,
+    checkpoint_json     TEXT,
+    updated_at          TEXT,
+    terminal_error      TEXT,
+    expires_at          TEXT
+);
+
+CREATE TABLE IF NOT EXISTS job_attempts (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id       TEXT NOT NULL REFERENCES jobs(job_id) ON DELETE CASCADE,
+    attempt      INTEGER NOT NULL,
+    worker_id    TEXT NOT NULL,
+    status       TEXT NOT NULL,
+    started_at   TEXT NOT NULL,
+    heartbeat_at TEXT,
+    finished_at  TEXT,
     error        TEXT,
-    created_at   TEXT NOT NULL,
+    UNIQUE(job_id, attempt)
+);
+
+CREATE TABLE IF NOT EXISTS job_effects (
+    job_id       TEXT NOT NULL REFERENCES jobs(job_id) ON DELETE CASCADE,
+    effect_key   TEXT NOT NULL,
+    status       TEXT NOT NULL,
+    attempt      INTEGER NOT NULL,
+    result_json  TEXT,
+    started_at   TEXT NOT NULL,
     completed_at TEXT,
-    user_id      TEXT REFERENCES users(id) ON DELETE CASCADE
+    PRIMARY KEY(job_id, effect_key)
 );
 
 CREATE TABLE IF NOT EXISTS article_assets (
@@ -213,6 +253,22 @@ CREATE INDEX IF NOT EXISTS idx_sessions_expires
 
 CREATE INDEX IF NOT EXISTS idx_jobs_user_status
     ON jobs(user_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_queue_claim
+    ON jobs(queue, status, available_at, priority DESC, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_lease
+    ON jobs(status, lease_expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_user_created
+    ON jobs(user_id, created_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_user_idempotency
+    ON jobs(user_id, kind, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_job_attempts_job
+    ON job_attempts(job_id, attempt);
 
 CREATE INDEX IF NOT EXISTS idx_article_timeline_article
     ON article_timeline(article_id);

@@ -48,7 +48,7 @@ def _prepare_article_body(title: str, token: str) -> str:
 
 
 @pytest.mark.integration
-def test_push_hashnode_via_backend_api_full_chain(client: TestClient):
+def test_push_hashnode_via_backend_api_full_chain(client: TestClient, run_jobs):
     personal_access_token = _read_secret("HASHNODE_PAT")
     if not personal_access_token:
         pytest.skip("HASHNODE_PAT is not set")
@@ -64,6 +64,7 @@ def test_push_hashnode_via_backend_api_full_chain(client: TestClient):
                                 json={"platforms": ["hashnode"]})
     assert push_response.status_code == 202
     job_id = push_response.json()["jobId"]
+    run_jobs()
 
     job = client.get(f"/api/jobs/{job_id}").json()
     article_payload = next(
@@ -76,7 +77,7 @@ def test_push_hashnode_via_backend_api_full_chain(client: TestClient):
                                                                        encoding="utf-8")
 
     assert job["type"] == "push"
-    assert job["status"] == "done"
+    assert job["status"] == "completed"
     assert job["result"]["hashnode"]["status"] == "draft"
     preview_url = job["result"]["hashnode"]["url"]
     assert isinstance(preview_url, str) and "/preview/" in preview_url

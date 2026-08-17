@@ -235,4 +235,4 @@ def test_generation_worker_completes_durable_session(store, monkeypatch):
     assert persisted["messages"][-1]["role"] == "assistant"
     assert "Generated content survives restart" in persisted["messages"][-1]["content"]
     assert persisted["outputs"][0]["reference"] == article["id"]
-    assert store.get_job(user_id, job["job_id"])["status"] == "done"
+    assert store.get_job(user_id, job["job_id"])["status"] == "completed"
