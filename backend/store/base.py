@@ -120,6 +120,26 @@ class ArticleStore(Protocol):
     def set_destinations_pending(self, article_id: str, platforms: list[str]) -> None:
         ...
 
+    def record_remote_snapshot(
+        self, user_id: str, article_id: str, snapshot: dict
+    ) -> dict:
+        ...
+
+    def get_latest_remote_snapshot(
+        self, user_id: str, article_id: str, platform: str
+    ) -> dict | None:
+        ...
+
+    def list_latest_remote_snapshots(
+        self, user_id: str, article_id: str
+    ) -> list[dict]:
+        ...
+
+    def apply_remote_destination_state(
+        self, user_id: str, article_id: str, platform: str, **kwargs
+    ) -> None:
+        ...
+
     # ── Connections ──────────────────────────────────────────────────────────
 
     def list_connections(self, user_id: str) -> list[dict]:

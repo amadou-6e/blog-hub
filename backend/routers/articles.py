@@ -23,6 +23,7 @@ from backend.schemas.overview import (
 import backend.store as store
 import backend.services.cli_runner as runner
 from backend.services.push import push_article_to_platforms
+from backend.services import reconciliation
 from backend.store.article_revisions import RevisionConflict
 
 router = APIRouter(prefix="/api/articles", tags=["articles"])
@@ -441,6 +442,25 @@ def push_article(request: Request, article_id: str, body: dict = {}):
         raise HTTPException(status_code=404, detail="Article not found")
 
     platforms = body.get("platforms", list(article["destinations"].keys()))
+    remote_conflicts = []
+    for platform in platforms:
+        snapshot = store.get_latest_remote_snapshot(user_id, article_id, platform)
+        if snapshot is None:
+            continue
+        state = reconciliation.current_view(
+            store, user_id, article_id, snapshot
+        )["sync_state"]
+        if state in {"conflict", "remote_ahead"}:
+            remote_conflicts.append(platform)
+    if remote_conflicts:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "remote_conflict",
+                "message": "Resolve remote changes before pushing local content.",
+                "platforms": remote_conflicts,
+            },
+        )
     store.set_destinations_pending(user_id, article_id, platforms)
     job = store.create_job(user_id, "push", article_id)
 

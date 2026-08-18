@@ -633,6 +633,122 @@ class SQLiteStore(ConnectionAuthStoreMixin, AgentSessionStoreMixin, ArticleRevis
         self._touch(article_id)
         self._con.commit()
 
+    # ── Remote reconciliation ────────────────────────────────────────────────
+
+    @staticmethod
+    def _remote_snapshot_row_to_dict(row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "article_id": row["article_id"],
+            "platform": row["platform"],
+            "remote_id": row["remote_id"],
+            "availability": row["availability"],
+            "sync_state": row["sync_state"],
+            "local_revision_id": row["local_revision_id"],
+            "local_fingerprint": row["local_fingerprint"],
+            "remote_fingerprint": row["remote_fingerprint"],
+            "title": row["title"],
+            "content": row["content"],
+            "canonical_url": row["canonical_url"],
+            "remote_url": row["remote_url"],
+            "remote_status": row["remote_status"],
+            "remote_updated_at": row["remote_updated_at"],
+            "metadata": json.loads(row["metadata_json"] or "{}"),
+            "error": row["error"],
+            "fetched_at": row["fetched_at"],
+        }
+
+    def record_remote_snapshot(
+        self, user_id: str, article_id: str, snapshot: dict
+    ) -> dict:
+        owner = self._con.execute(
+            "SELECT id FROM articles WHERE id=? AND user_id=?", (article_id, user_id)
+        ).fetchone()
+        if owner is None:
+            raise KeyError(article_id)
+        snapshot_id = f"remote_{uuid.uuid4().hex}"
+        fetched_at = _ts(_now())
+        self._con.execute(
+            """INSERT INTO remote_article_snapshots
+               (id, article_id, platform, remote_id, availability, sync_state,
+                local_revision_id, local_fingerprint, remote_fingerprint, title,
+                content, canonical_url, remote_url, remote_status, remote_updated_at,
+                metadata_json, error, fetched_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                snapshot_id,
+                article_id,
+                snapshot["platform"],
+                snapshot.get("remote_id"),
+                snapshot["availability"],
+                snapshot["sync_state"],
+                snapshot.get("local_revision_id"),
+                snapshot["local_fingerprint"],
+                snapshot.get("remote_fingerprint"),
+                snapshot.get("title"),
+                snapshot.get("content"),
+                snapshot.get("canonical_url"),
+                snapshot.get("remote_url"),
+                snapshot.get("remote_status"),
+                snapshot.get("remote_updated_at"),
+                json.dumps(snapshot.get("metadata") or {}, sort_keys=True),
+                snapshot.get("error"),
+                fetched_at,
+            ),
+        )
+        self._con.commit()
+        row = self._con.execute(
+            "SELECT * FROM remote_article_snapshots WHERE id=?", (snapshot_id,)
+        ).fetchone()
+        return self._remote_snapshot_row_to_dict(row)
+
+    def get_latest_remote_snapshot(
+        self, user_id: str, article_id: str, platform: str
+    ) -> dict | None:
+        row = self._con.execute(
+            """SELECT s.* FROM remote_article_snapshots s
+               JOIN articles a ON a.id=s.article_id
+               WHERE s.article_id=? AND s.platform=? AND a.user_id=?
+               ORDER BY s.fetched_at DESC, s.rowid DESC LIMIT 1""",
+            (article_id, platform, user_id),
+        ).fetchone()
+        return self._remote_snapshot_row_to_dict(row) if row else None
+
+    def list_latest_remote_snapshots(self, user_id: str, article_id: str) -> list[dict]:
+        rows = self._con.execute(
+            """SELECT s.* FROM remote_article_snapshots s
+               JOIN articles a ON a.id=s.article_id
+               WHERE s.article_id=? AND a.user_id=?
+                 AND s.rowid=(
+                   SELECT s2.rowid FROM remote_article_snapshots s2
+                   WHERE s2.article_id=s.article_id AND s2.platform=s.platform
+                   ORDER BY s2.fetched_at DESC, s2.rowid DESC LIMIT 1
+                 )
+               ORDER BY s.platform""",
+            (article_id, user_id),
+        ).fetchall()
+        return [self._remote_snapshot_row_to_dict(row) for row in rows]
+
+    def apply_remote_destination_state(
+        self,
+        user_id: str,
+        article_id: str,
+        platform: str,
+        *,
+        status: str,
+        url: str | None,
+        remote_id: str,
+    ) -> None:
+        label = "Published" if status == "published" else "Draft"
+        self._con.execute(
+            """UPDATE article_destinations
+               SET status=?, label=?, url=?, draft_id=?, error=NULL
+               WHERE article_id=? AND platform=?
+                 AND article_id IN (SELECT id FROM articles WHERE id=? AND user_id=?)""",
+            (status, label, url, remote_id, article_id, platform, article_id, user_id),
+        )
+        self._con.commit()
+
     # ── Connections ──────────────────────────────────────────────────────────
 
     def list_connections(self, user_id: str) -> list[dict]:
@@ -979,6 +1095,7 @@ class SQLiteStore(ConnectionAuthStoreMixin, AgentSessionStoreMixin, ArticleRevis
                 DELETE FROM article_patches;
                 DELETE FROM article_comments;
                 DELETE FROM article_timeline;
+                DELETE FROM remote_article_snapshots;
                 DELETE FROM article_revisions;
                 DELETE FROM article_destinations;
                 DELETE FROM article_assets;

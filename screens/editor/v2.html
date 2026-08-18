@@ -312,6 +312,7 @@ if (!ARTICLE_ID) { location.replace('../overview/v3.html'); }
 
 let DESTINATIONS = [
 ];
+let RECONCILIATIONS = {};
 
 let COMMENTS = [];
 
@@ -775,24 +776,89 @@ async function restoreRevision(revisionId) {
 }
 
 function buildDestinations() {
-  const rows = DESTINATIONS.map((d, i) => `
+  const stateMeta = {
+    in_sync:['In sync','#4ade80'], local_ahead:['Local changes','#fbbf24'],
+    remote_ahead:['Remote changed','#7dd3fc'], conflict:['Conflict','#f87171'],
+    remote_deleted:['Remote deleted','#f87171'], inaccessible:['Unavailable','#f87171'],
+    unlinked:['Not linked','#5a6080']
+  };
+  const rows = DESTINATIONS.map((d, i) => {
+    const comparison = RECONCILIATIONS[d.id];
+    const remoteState = comparison ? (stateMeta[comparison.sync_state] || [comparison.sync_state, '#8b93ac']) : null;
+    const canCompare = d.id === 'hashnode' || d.id === 'devto';
+    const needsChoice = comparison && ['conflict','remote_ahead'].includes(comparison.sync_state);
+    const localAhead = comparison?.sync_state === 'local_ahead';
+    const localTitle = document.getElementById('article-title').textContent.trim();
+    return `
     <div style="${i ? 'border-top:1px solid #252a38;' : ''}padding:9px 0;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${d.url || d.error ? 4 : 0}px;">
         <span style="font-size:13px;color:#e8eaf2;">${d.platform}</span>
-        <span class="pill ${d.status === 'draft' ? 's-draft' : d.status === 'error' ? 's-error' : 's-none'}">${d.label}</span>
+        <div style="display:flex;align-items:center;gap:6px;">
+          ${remoteState ? `<span style="font-size:9px;color:${remoteState[1]};font-family:'JetBrains Mono',monospace;">${remoteState[0]}</span>` : ''}
+          <span class="pill ${d.status === 'draft' ? 's-draft' : d.status === 'error' ? 's-error' : 's-none'}">${d.label}</span>
+        </div>
       </div>
       ${d.url ? `<a href="${esc(d.url.startsWith('http') ? d.url : 'https://' + d.url)}" target="_blank" rel="noopener" style="font-size:11px;color:#6366f1;text-decoration:none;">${esc(d.url)} ↗</a>` : ''}
+      ${comparison?.error ? `<div style="font-size:10px;color:#f87171;margin-top:5px;line-height:1.4;">${esc(comparison.error)}</div>` : ''}
+      <div style="display:flex;gap:5px;margin-top:7px;flex-wrap:wrap;">
+        ${canCompare ? `<button onclick="refreshReconciliation('${d.id}')" class="ai-btn" title="Fetch and compare the linked remote article">Refresh remote</button>` : '<span style="font-size:10px;color:#4d5368;">Remote comparison unavailable</span>'}
+        ${needsChoice ? `<button onclick="resolveRemote('${d.id}','use_remote')" class="ai-btn" style="color:#7dd3fc;">Use remote</button><button onclick="resolveRemote('${d.id}','keep_local')" class="ai-btn warn">Keep local</button>` : ''}
+        ${localAhead ? `<button onclick="pushLocal('${d.id}')" class="ai-btn warn">Push local</button>` : ''}
+      </div>
+      ${needsChoice ? `<details style="margin-top:7px;font-size:10px;color:#8b93ac;"><summary style="cursor:pointer;color:#aab2cc;">Compare versions</summary><div style="margin-top:6px;padding-left:7px;border-left:2px solid #fbbf24;"><div style="color:#fbbf24;margin-bottom:2px;">LOCAL</div><div style="color:#c9cfe0;overflow-wrap:anywhere;">${esc(localTitle)}</div></div><div style="margin-top:6px;padding-left:7px;border-left:2px solid #7dd3fc;"><div style="color:#7dd3fc;margin-bottom:2px;">REMOTE</div><div style="color:#c9cfe0;overflow-wrap:anywhere;">${esc(comparison.title || 'Untitled')}</div><div style="color:#5a6080;margin-top:2px;">${comparison.remote_updated_at ? new Date(comparison.remote_updated_at).toLocaleString() : 'Update time unavailable'}</div></div></details>` : ''}
       ${d.error ? `<div style="margin-top:5px;background:#2d1a1a;border:1px solid #4d2a2a;border-radius:4px;padding:5px 9px;display:flex;align-items:center;justify-content:space-between;gap:6px;">
         <span style="font-size:11px;color:#f87171;">${esc(d.error)}</span>
         <button style="font-size:10px;padding:2px 7px;border-radius:3px;background:#0f1117;border:1px solid #4d2a2a;color:#f87171;cursor:pointer;flex-shrink:0;">Retry</button>
       </div>` : ''}
-    </div>`).join('');
+    </div>`}).join('');
   return `<div>${rows}</div>
     <div style="padding-top:10px;">
       <button onclick="triggerInspect()" style="width:100%;font-size:12px;padding:7px 10px;border-radius:5px;border:1px solid #252a38;background:transparent;color:#c9cfe0;cursor:pointer;text-align:left;display:flex;align-items:center;gap:7px;">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>Run inspection
       </button>
     </div>`;
+}
+
+async function loadReconciliation() {
+  try {
+    const r = await fetch(`/api/articles/${ARTICLE_ID}/reconciliation`);
+    if (!r.ok) return;
+    const data = await r.json();
+    RECONCILIATIONS = Object.fromEntries(data.comparisons.map(item => [item.platform, item]));
+    if (accOpen.destinations) renderSection('destinations');
+  } catch (_e) {}
+}
+
+async function refreshReconciliation(platform) {
+  const r = await fetch(`/api/articles/${ARTICLE_ID}/reconciliation/${platform}/refresh`, {method:'POST'});
+  const data = await r.json();
+  if (!r.ok) { alert(data.detail || 'Remote refresh failed'); return; }
+  RECONCILIATIONS[platform] = data;
+  renderSection('destinations');
+}
+
+async function resolveRemote(platform, action) {
+  const r = await fetch(`/api/articles/${ARTICLE_ID}/reconciliation/${platform}/resolve`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({action, base_revision_id:CURRENT_REVISION_ID}),
+  });
+  const data = await r.json();
+  if (r.status === 409 && data.detail?.code === 'revision_conflict') { showConflict(data.detail.current); return; }
+  if (!r.ok) { alert(data.detail || 'Resolution failed'); return; }
+  RECONCILIATIONS[platform] = data;
+  if (action === 'use_remote') await reloadArticleHead();
+  renderSection('destinations');
+}
+
+async function pushLocal(platform) {
+  const r = await fetch(`/api/articles/${ARTICLE_ID}/push`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({platforms:[platform]}),
+  });
+  const data = await r.json();
+  if (!r.ok) { alert(data.detail?.message || data.detail || 'Push failed'); return; }
+  await refreshReconciliation(platform);
+  await loadArticle();
 }
 
 function buildChat() {
@@ -1197,6 +1263,7 @@ async function loadArticle() {
     await loadComments();
     await loadPatches();
     await loadRevisions();
+    await loadReconciliation();
     await loadChat();
     await loadConnectedProviders();
     await loadAgentSession();

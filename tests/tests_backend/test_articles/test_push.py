@@ -81,3 +81,37 @@ class TestPushArticle:
         item = next(i for i in client.get("/api/articles").json()["items"] if i["id"] == "art_001")
         assert item["destinations"]["hashnode"]["url"] == "https://hashnode.example/preview/123"
         assert item["destinations"]["devto"]["url"] == "https://dev.to/example/draft"
+
+
+def test_devto_retry_updates_linked_article_instead_of_creating(monkeypatch):
+    from backend.services import push
+
+    article = {
+        "id": "art_test",
+        "title": "Retryable",
+        "body": "# Retryable\n\nBody",
+        "destinations": {"devto": {"draft_id": "42", "url": "https://dev.to/test"}},
+    }
+    calls = []
+
+    class FakeClient:
+        def __init__(self, token):
+            pass
+
+        def update_article(self, article_id, payload):
+            calls.append((article_id, payload.title))
+            return type("Result", (), {
+                "article_id": article_id,
+                "url": "https://dev.to/test",
+            })()
+
+        def publish_article(self, payload):
+            raise AssertionError("retry created a duplicate article")
+
+    monkeypatch.setattr(push, "DevToClient", FakeClient)
+    result = push.push_article_to_platforms(
+        article, ["devto"], get_connection_token=lambda _: "secret"
+    )["devto"]
+
+    assert calls == [(42, "Retryable")]
+    assert result.draft_id == "42"

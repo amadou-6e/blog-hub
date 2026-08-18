@@ -70,6 +70,30 @@ CREATE TABLE IF NOT EXISTS article_revisions (
     UNIQUE(article_id, revision_number)
 );
 
+-- Immutable observations of a linked article on a remote publishing platform.
+-- A new row is appended on every refresh or explicit resolution so drift can
+-- be classified against the last known common state without mutable history.
+CREATE TABLE IF NOT EXISTS remote_article_snapshots (
+    id                   TEXT PRIMARY KEY,
+    article_id           TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+    platform             TEXT NOT NULL,
+    remote_id            TEXT,
+    availability         TEXT NOT NULL,
+    sync_state           TEXT NOT NULL,
+    local_revision_id    TEXT REFERENCES article_revisions(id) ON DELETE SET NULL,
+    local_fingerprint    TEXT NOT NULL,
+    remote_fingerprint   TEXT,
+    title                TEXT,
+    content              TEXT,
+    canonical_url        TEXT,
+    remote_url           TEXT,
+    remote_status        TEXT,
+    remote_updated_at    TEXT,
+    metadata_json        TEXT NOT NULL DEFAULT '{}',
+    error                TEXT,
+    fetched_at           TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS connections (
     platform      TEXT NOT NULL,
     token         TEXT NOT NULL,
@@ -262,6 +286,9 @@ CREATE INDEX IF NOT EXISTS idx_article_timeline_article
 
 CREATE INDEX IF NOT EXISTS idx_article_revisions_article
     ON article_revisions(article_id, revision_number DESC);
+
+CREATE INDEX IF NOT EXISTS idx_remote_snapshots_article_platform
+    ON remote_article_snapshots(article_id, platform, fetched_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_article_comments_article
     ON article_comments(article_id);

@@ -97,6 +97,22 @@ def set_destinations_pending(user_id: str, *a, **kw):
     return _backend.set_destinations_pending(user_id, *a, **kw)
 
 
+def record_remote_snapshot(user_id: str, *a, **kw):
+    return _backend.record_remote_snapshot(user_id, *a, **kw)
+
+
+def get_latest_remote_snapshot(user_id: str, *a, **kw):
+    return _backend.get_latest_remote_snapshot(user_id, *a, **kw)
+
+
+def list_latest_remote_snapshots(user_id: str, *a, **kw):
+    return _backend.list_latest_remote_snapshots(user_id, *a, **kw)
+
+
+def apply_remote_destination_state(user_id: str, *a, **kw):
+    return _backend.apply_remote_destination_state(user_id, *a, **kw)
+
+
 # ── Connections ───────────────────────────────────────────────────────────────
 
 
