@@ -5,5 +5,7 @@
   "new_draft": ["button:has-text('New')"],
   "title": ["textarea[placeholder*='title' i]", "input[placeholder*='title' i]"],
   "markdown_mode": ["button:has-text('Markdown')"],
-  "content": ["textarea[placeholder*='writing markdown' i]"]
+  "content": ["textarea[placeholder*='writing markdown' i]"],
+  "publish_open": ["button:has-text('Publish')"],
+  "publish_confirm": ["[role='dialog'] button:has-text('Publish')"]
 }

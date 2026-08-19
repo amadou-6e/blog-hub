@@ -12,8 +12,11 @@ def _now() -> str:
 
 class BrowserPublishStoreMixin:
     def create_browser_publish_run(
-        self, user_id: str, article_id: str, *, platform: str
+        self, user_id: str, article_id: str, *, platform: str,
+        mode: str = "draft",
     ) -> dict:
+        if mode not in {"draft", "publish"}:
+            raise ValueError(f"Unsupported browser publish mode: {mode}")
         if self.get_article(user_id, article_id) is None:
             raise KeyError("Article not found")
         revision = self.get_current_article_revision(user_id, article_id)
@@ -22,10 +25,10 @@ class BrowserPublishStoreMixin:
         run_id = f"bpr_{uuid.uuid4().hex}"
         self._con.execute(
             """INSERT INTO browser_publish_runs
-               (id, user_id, article_id, article_revision_id, platform,
+               (id, user_id, article_id, article_revision_id, platform, mode,
                 status, created_at)
-               VALUES (?, ?, ?, ?, ?, 'awaiting_approval', ?)""",
-            (run_id, user_id, article_id, revision["id"], platform, _now()),
+               VALUES (?, ?, ?, ?, ?, ?, 'awaiting_approval', ?)""",
+            (run_id, user_id, article_id, revision["id"], platform, mode, _now()),
         )
         self._con.commit()
         return self.get_browser_publish_run(user_id, run_id)

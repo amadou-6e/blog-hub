@@ -36,6 +36,7 @@ class FakeLocator:
             self.page.url = "https://hashnode.com/draft/current"
             self.page.visible.update({
                 "button:has-text('New')",
+                "button:has-text('Publish')",
                 "textarea[placeholder*='title' i]",
                 "button:has-text('Markdown')",
             })
@@ -44,6 +45,10 @@ class FakeLocator:
             self.page.filled.clear()
         elif self.selector == "button:has-text('Markdown')":
             self.page.visible.add("textarea[placeholder*='writing markdown' i]")
+        elif self.selector == "button:has-text('Publish')":
+            self.page.visible.add("[role='dialog'] button:has-text('Publish')")
+        elif self.selector == "[role='dialog'] button:has-text('Publish')":
+            self.page.url = "https://hashnode.com/edit/post_test"
 
     def input_value(self):
         return self.page.filled.get(self.selector, "")
@@ -59,6 +64,7 @@ class FakePage:
         self.filled = {}
         self.clicked = []
         self.cookies = []
+        self.request = FakeRequest(self)
 
     def goto(self, *_args, **_kwargs):
         return None
@@ -74,6 +80,37 @@ class FakePage:
 
     def reload(self, **_kwargs):
         return None
+
+
+class FakeResponse:
+    ok = True
+
+    def __init__(self, payload):
+        self.payload = payload
+
+    def json(self):
+        return self.payload
+
+
+class FakeRequest:
+    def __init__(self, page):
+        self.page = page
+
+    def get(self, _url):
+        return FakeResponse({
+            "success": True,
+            "post": {
+                "isActive": True,
+                "title": self.page.filled[
+                    "textarea[placeholder*='title' i]"
+                ],
+                "contentMarkdown": self.page.filled[
+                    "textarea[placeholder*='writing markdown' i]"
+                ],
+                "slug": "test-article",
+                "publication": {"username": "tensorworks"},
+            },
+        })
 
 
 class FakeContext:
@@ -146,6 +183,25 @@ def test_hashnode_markdown_normalization_accepts_editor_formatting():
         hashnode_browser._normalized_markdown(persisted)
         == hashnode_browser._normalized_markdown(original)
     )
+
+
+def test_public_publish_requires_final_confirmation(monkeypatch):
+    page = FakePage()
+    sync_api = SimpleNamespace(sync_playwright=lambda: PlaywrightManager(page))
+    monkeypatch.setitem(sys.modules, "patchright.sync_api", sync_api)
+
+    result = hashnode_browser.upload_hashnode_draft(
+        profile_dir="/tmp/profile",
+        title="A title",
+        article_md="# A title",
+        publish=True,
+    )
+
+    assert result["success"] is True
+    assert result["status"] == "published"
+    assert result["url"] == "https://tensorworks.hashnode.dev/test-article"
+    assert result["post_id"] == "post_test"
+    assert "[role='dialog'] button:has-text('Publish')" in page.clicked
 
 
 def _write_cookie_snapshot(profile_dir, cookies):

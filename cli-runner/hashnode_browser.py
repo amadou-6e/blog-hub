@@ -42,6 +42,11 @@ def _draft_id(url: str) -> str | None:
     return url.rstrip("/").split(marker, 1)[1] if marker in url else None
 
 
+def _edit_id(url: str) -> str | None:
+    marker = "/edit/"
+    return url.rstrip("/").split(marker, 1)[1] if marker in url else None
+
+
 def _normalized_markdown(markdown: str) -> str:
     normalized = re.sub(
         r'(!\[[^\]]*\]\([^\s)]+)\s+align="center"(\))',
@@ -56,7 +61,7 @@ def _normalized_markdown(markdown: str) -> str:
 
 
 def upload_hashnode_draft(
-    *, profile_dir: str, title: str, article_md: str,
+    *, profile_dir: str, title: str, article_md: str, publish: bool = False,
 ) -> dict:
     from patchright.sync_api import sync_playwright
 
@@ -140,12 +145,76 @@ def upload_hashnode_draft(
                     "url": draft_url,
                     "draft_id": draft_id,
                 }
+            if publish:
+                publish_open, _ = _wait_first_visible(
+                    page, selectors["publish_open"]
+                )
+                if publish_open is None:
+                    raise SelectorFailure("publish_open")
+                publish_open.click()
+                publish_confirm, _ = _wait_first_visible(
+                    page, selectors["publish_confirm"]
+                )
+                if publish_confirm is None:
+                    raise SelectorFailure("publish_confirm")
+                publish_confirm.click()
+                deadline = time.monotonic() + 45
+                while "/draft/" in page.url and time.monotonic() < deadline:
+                    page.wait_for_timeout(250)
+                if "/draft/" in page.url:
+                    return {
+                        "success": False,
+                        "error": "Hashnode public publish could not be verified",
+                        "url": draft_url,
+                        "draft_id": draft_id,
+                    }
+                post_id = _edit_id(page.url)
+                if post_id is None:
+                    return {
+                        "success": False,
+                        "error": "Hashnode published post identifier was not returned",
+                        "url": page.url,
+                        "draft_id": draft_id,
+                    }
+                response = page.request.get(
+                    f"https://hashnode.com/api/posts/{post_id}"
+                )
+                metadata = response.json() if response.ok else {}
+                post = metadata.get("post") if metadata.get("success") else None
+                if (
+                    not post
+                    or not post.get("isActive")
+                    or post.get("title") != title
+                    or _normalized_markdown(post.get("contentMarkdown") or "")
+                    != _normalized_markdown(article_md)
+                ):
+                    return {
+                        "success": False,
+                        "error": "Hashnode published post could not be verified",
+                        "url": page.url,
+                        "draft_id": draft_id,
+                    }
+                publication = post.get("publication") or {}
+                publication_name = publication.get("username")
+                slug = post.get("slug")
+                if not publication_name or not slug:
+                    return {
+                        "success": False,
+                        "error": "Hashnode public article URL was not returned",
+                        "url": page.url,
+                        "draft_id": draft_id,
+                    }
+                public_url = f"https://{publication_name}.hashnode.dev/{slug}"
+
             result = {
                 "success": True,
                 "method": "deterministic",
-                "url": draft_url,
+                "status": "published" if publish else "draft",
+                "url": public_url if publish else draft_url,
                 "draft_id": draft_id,
             }
+            if publish:
+                result["post_id"] = post_id
         finally:
             context.close()
 

@@ -609,9 +609,10 @@ class SQLiteStore(
         error: str | None = None,
         label: str | None = None,
         draft_id: str | None = None,
+        status: str | None = None,
     ) -> None:
         if success:
-            new_status = "draft"
+            new_status = status or "draft"
             new_label = label or "Draft"
             self._con.execute(
                 """UPDATE article_destinations
@@ -619,7 +620,8 @@ class SQLiteStore(
                    WHERE article_id=? AND platform=?""",
                 (new_status, new_label, url, draft_id, article_id, platform),
             )
-            self._add_timeline(article_id, f"Draft pushed to {platform.title()}")
+            event = "Published to" if new_status == "published" else "Draft pushed to"
+            self._add_timeline(article_id, f"{event} {platform.title()}")
         else:
             self._con.execute(
                 """UPDATE article_destinations

@@ -26,6 +26,7 @@ def execute_hashnode_run(*, user_id: str, run_id: str) -> None:
             organization_id=browser_connection["skyvern_organization_id"],
             profile_id=browser_connection["skyvern_profile_id"],
             title=revision["title"], article_md=revision["content"],
+            publish=run["mode"] == "publish",
         )
         if not result.get("success"):
             error = result.get("error") or "Hashnode upload failed"
@@ -40,7 +41,8 @@ def execute_hashnode_run(*, user_id: str, run_id: str) -> None:
         store.apply_push_result(
             user_id, run["article_id"], "hashnode", success=True,
             url=result.get("url"), draft_id=result.get("draft_id"),
-            label="Draft",
+            label="Published" if run["mode"] == "publish" else "Draft",
+            status="published" if run["mode"] == "publish" else "draft",
         )
         store.complete_browser_publish_run(user_id, run_id, result=result)
     except Exception as exc:

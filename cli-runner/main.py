@@ -226,6 +226,7 @@ class HashnodeBrowserUploadRequest(BaseModel):
     profile_id: str
     title: str
     article_md: str
+    publish: bool = False
 
 
 class HashnodeBrowserLoginCompleteRequest(BaseModel):
@@ -256,6 +257,7 @@ def hashnode_browser_upload(req: HashnodeBrowserUploadRequest):
     try:
         return upload_hashnode_draft(
             profile_dir=str(profile_dir), title=req.title, article_md=req.article_md,
+            publish=req.publish,
         )
     except Exception as exc:
         return {"success": False, "error": _safe_reason(str(exc))}

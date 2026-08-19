@@ -3,7 +3,7 @@ import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, Request, UploadFile
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -474,9 +474,15 @@ def push_article(request: Request, article_id: str, body: dict = {}):
     return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
 
 
+class HashnodeBrowserPublishRequest(BaseModel):
+    mode: Literal["draft", "publish"] = "draft"
+
+
 @router.post("/{article_id}/browser-publish/hashnode", status_code=201)
 def request_hashnode_browser_publish(
-    request: Request, article_id: str,
+    request: Request,
+    article_id: str,
+    body: HashnodeBrowserPublishRequest = HashnodeBrowserPublishRequest(),
 ):
     if store.get_article(request.state.user_id, article_id) is None:
         raise HTTPException(status_code=404, detail="Article not found")
@@ -490,7 +496,7 @@ def request_hashnode_browser_publish(
         )
     return store.create_browser_publish_run(
         request.state.user_id, article_id,
-        platform="hashnode",
+        platform="hashnode", mode=body.mode,
     )
 
 

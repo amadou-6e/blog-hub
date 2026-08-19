@@ -114,6 +114,7 @@ class ArticleStore(Protocol):
         error: str | None,
         label: str | None,
         draft_id: str | None,
+        status: str | None = None,
     ) -> None:
         ...
 
@@ -191,7 +192,8 @@ class ArticleStore(Protocol):
     # ── Browser publishing ──────────────────────────────────────────────────
 
     def create_browser_publish_run(
-        self, user_id: str, article_id: str, *, platform: str
+        self, user_id: str, article_id: str, *, platform: str,
+        mode: str = "draft",
     ) -> dict:
         ...
 

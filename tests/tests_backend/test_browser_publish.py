@@ -40,8 +40,41 @@ def test_browser_publish_requires_approval_and_completes(client, monkeypatch):
     ).json()
     assert persisted["status"] == "completed"
     assert persisted["result"]["method"] == "deterministic"
+    assert persisted["mode"] == "draft"
+    assert seen["publish"] is False
     assert seen["profile_id"] == "bp_test"
     assert seen["organization_id"] == "o_test"
+
+
+def test_public_publish_mode_is_durable_and_updates_destination(client, monkeypatch):
+    _connect()
+    seen = {}
+    monkeypatch.setattr(
+        browser_publish.runner,
+        "hashnode_browser_upload",
+        lambda **kwargs: seen.update(kwargs) or {
+            "success": True,
+            "method": "deterministic",
+            "status": "published",
+            "url": "https://example.hashnode.dev/test",
+            "draft_id": "public_test",
+        },
+    )
+
+    run = client.post(
+        "/api/articles/art_001/browser-publish/hashnode",
+        json={"mode": "publish"},
+    ).json()
+    assert run["mode"] == "publish"
+
+    client.post(f"/api/articles/art_001/browser-publish/{run['id']}/approve")
+
+    assert seen["publish"] is True
+    article = client.get("/api/articles/art_001").json()
+    assert article["destinations"]["hashnode"]["status"] == "published"
+    assert article["destinations"]["hashnode"]["url"] == (
+        "https://example.hashnode.dev/test"
+    )
 
 
 def test_browser_publish_cannot_be_approved_twice(client, monkeypatch):

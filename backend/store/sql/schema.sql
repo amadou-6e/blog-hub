@@ -245,6 +245,7 @@ CREATE TABLE IF NOT EXISTS browser_publish_runs (
     article_id         TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
     article_revision_id TEXT NOT NULL REFERENCES article_revisions(id) ON DELETE RESTRICT,
     platform           TEXT NOT NULL,
+    mode               TEXT NOT NULL DEFAULT 'draft',
     status             TEXT NOT NULL,
     result_json        TEXT,
     error              TEXT,

@@ -143,11 +143,12 @@ def cancel_chat(session_id: str) -> None:
 
 def hashnode_browser_upload(
     *, organization_id: str, profile_id: str, title: str, article_md: str,
+    publish: bool = False,
 ) -> dict:
-    """Create a Hashnode draft through the approval-gated browser runner."""
+    """Create or publish a Hashnode article through the browser runner."""
     payload = {
         "organization_id": organization_id, "profile_id": profile_id,
-        "title": title, "article_md": article_md,
+        "title": title, "article_md": article_md, "publish": publish,
     }
     try:
         with _client() as client:
