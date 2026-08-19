@@ -243,6 +243,7 @@ class SQLiteStore(
         with self._workspace_lock.acquire():
             apply_schema(self._con)
             self.reencrypt_connection_credentials()
+            self.reencrypt_browser_connection_credentials()
             self._seed_if_empty()
             self._ensure_initial_article_revisions()
             self._ensure_patch_revision_links()

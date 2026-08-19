@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from backend.store.crypto import decrypt_token, encrypt_token, needs_reencryption
+
 
 BROWSER_CONNECTION_STATUSES = {
     "disconnected",
@@ -18,13 +20,20 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _browser_connection_row(row) -> dict:
+    result = dict(row)
+    if result.get("app_url"):
+        result["app_url"] = decrypt_token(result["app_url"])
+    return result
+
+
 class BrowserConnectionStoreMixin:
     def get_browser_connection(self, user_id: str, platform: str) -> dict | None:
         row = self._con.execute(
             "SELECT * FROM browser_connections WHERE user_id=? AND platform=?",
             (user_id, platform),
         ).fetchone()
-        return dict(row) if row else None
+        return _browser_connection_row(row) if row else None
 
     def start_browser_connection(
         self,
@@ -60,12 +69,35 @@ class BrowserConnectionStoreMixin:
                         session_id,
                         organization_id,
                         profile_id,
-                        app_url,
+                        encrypt_token(app_url),
                         now,
                         now,
                     ),
                 )
         return self.get_browser_connection(user_id, platform)  # type: ignore[return-value]
+
+    def reencrypt_browser_connection_credentials(self) -> int:
+        """Move plaintext and retired-key browser stream URLs to the active key."""
+        rows = self._con.execute(
+            """SELECT user_id, platform, app_url FROM browser_connections
+               WHERE app_url IS NOT NULL AND app_url <> ''"""
+        ).fetchall()
+        replacements = []
+        for row in rows:
+            if needs_reencryption(row["app_url"]):
+                replacements.append((
+                    encrypt_token(decrypt_token(row["app_url"])),
+                    row["user_id"],
+                    row["platform"],
+                ))
+        if replacements:
+            with self._con:
+                self._con.executemany(
+                    """UPDATE browser_connections SET app_url=?
+                       WHERE user_id=? AND platform=?""",
+                    replacements,
+                )
+        return len(replacements)
 
     def update_browser_connection(
         self,

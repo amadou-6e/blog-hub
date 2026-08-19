@@ -582,13 +582,13 @@ def disconnect_hashnode_browser_connection(request: Request):
     if connection and connection.get("skyvern_session_id") and connection["status"] == "waiting_for_login":
         try:
             runner.cancel_hashnode_browser_login(connection["skyvern_session_id"])
-        except runner.RunnerUnavailable:
-            pass
+        except runner.RunnerUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
     if connection and connection.get("skyvern_profile_id"):
         try:
             runner.delete_hashnode_browser_profile(connection["skyvern_profile_id"])
-        except runner.RunnerUnavailable:
-            pass
+        except runner.RunnerUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
     store.delete_browser_connection(request.state.user_id, "hashnode")
     return {"platform": "hashnode", "status": "disconnected"}
 

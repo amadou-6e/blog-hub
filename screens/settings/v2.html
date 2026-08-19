@@ -519,6 +519,11 @@ async function startHashnodeBrowserLogin() {
   const loginTab = createHashnodeLoginTab();
   try {
     const res = await fetch('/api/connections/hashnode/browser-connection', { method: 'POST' });
+    if (res.status === 401) {
+      loginTab?.close();
+      redirectToLogin();
+      return;
+    }
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
     _hashnodeBrowserConnection = data;
@@ -555,6 +560,10 @@ async function completeHashnodeBrowserLogin() {
   renderPlatforms(_connections.filter(c => c.type === 'blog'));
   try {
     const res = await fetch('/api/connections/hashnode/browser-connection/complete', { method: 'POST' });
+    if (res.status === 401) {
+      redirectToLogin();
+      return;
+    }
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
     _hashnodeBrowserConnection = data;
@@ -569,10 +578,20 @@ async function disconnectHashnodeBrowser() {
   _hashnodeLoginTabTimer = null;
   _hashnodeLoginTab?.close();
   _hashnodeLoginTab = null;
-  await fetch('/api/connections/hashnode/browser-connection', { method: 'DELETE' });
-  _hashnodeBrowserConnection = { platform: 'hashnode', status: 'disconnected' };
-  renderPlatforms(_connections.filter(c => c.type === 'blog'));
-  updateCount(_connections);
+  try {
+    const res = await fetch('/api/connections/hashnode/browser-connection', { method: 'DELETE' });
+    if (res.status === 401) {
+      redirectToLogin();
+      return;
+    }
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    _hashnodeBrowserConnection = { platform: 'hashnode', status: 'disconnected' };
+    renderPlatforms(_connections.filter(c => c.type === 'blog'));
+    updateCount(_connections);
+  } catch (error) {
+    alert(error.message);
+  }
 }
 
 async function disconnectHashnodeConnection(method) {

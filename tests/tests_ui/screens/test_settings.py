@@ -168,6 +168,33 @@ def test_hashnode_connected_card_only_offers_disconnect(page):
     assert card.get_by_text("Refresh login", exact=True).count() == 0
 
 
+@pytest.mark.parametrize(
+    ("function_name", "endpoint"),
+    [
+        ("startHashnodeBrowserLogin", "/api/connections/hashnode/browser-connection"),
+        (
+            "completeHashnodeBrowserLogin",
+            "/api/connections/hashnode/browser-connection/complete",
+        ),
+        ("disconnectHashnodeBrowser", "/api/connections/hashnode/browser-connection"),
+    ],
+)
+def test_hashnode_browser_actions_redirect_expired_sessions(
+    settings_page, function_name, endpoint,
+):
+    settings_page.route(
+        f"{BASE_URL}{endpoint}",
+        lambda route: route.fulfill(status=401, json={"detail": "Authentication required"}),
+    )
+
+    settings_page.evaluate(f"void {function_name}()")
+
+    settings_page.wait_for_url("**/screens/login/v1.html?next=**")
+    assert settings_page.url.endswith(
+        "/screens/login/v1.html?next=%2Fscreens%2Fsettings%2Fv2.html"
+    )
+
+
 def test_claude_card_shows_not_configured_on_fresh_store(ai_providers_page):
     card = ai_providers_page.locator("#ai-wrap-anthropic")
     assert card.get_by_text("Not configured").is_visible()

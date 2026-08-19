@@ -1,8 +1,16 @@
 # Skyvern local capability experiment
 
 This is a free, self-hosted Skyvern fixture for evaluating BlogHub's managed
-browser login and persistent-profile path. It is deliberately isolated from
-the main BlogHub compose stack and binds every host port to loopback.
+browser login and persistent-profile path. Its services are opt-in and every
+host port is bound to loopback.
+
+BlogHub's main compose file also exposes this fixture behind the opt-in
+`hashnode-browser` profile. Core backend and agent-runner startup does not wait
+for Skyvern. Start the integrated login capability with:
+
+```bash
+docker compose --profile hashnode-browser up -d --wait
+```
 
 ## Pinned source
 
