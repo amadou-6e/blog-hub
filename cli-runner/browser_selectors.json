@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "editor_url": "https://hashnode.com/draft/new",
+  "title": ["textarea[placeholder*='title' i]", "input[placeholder*='title' i]"],
+  "content": ["[contenteditable='true'][role='textbox']", ".ProseMirror[contenteditable='true']"],
+  "save_draft": ["button:has-text('Save draft')", "button:has-text('Save as draft')"]
+}

@@ -4,6 +4,7 @@ import importlib.util
 from pathlib import Path
 import sqlite3
 import sys
+from types import SimpleNamespace
 
 
 RUNNER = Path(__file__).resolve().parents[2] / "cli-runner"
@@ -12,6 +13,109 @@ spec = importlib.util.spec_from_file_location("hashnode_browser_under_test", RUN
 hashnode_browser = importlib.util.module_from_spec(spec)
 assert spec.loader
 spec.loader.exec_module(hashnode_browser)
+
+
+class FakeLocator:
+    def __init__(self, page, selector):
+        self.page = page
+        self.selector = selector
+
+    @property
+    def first(self):
+        return self
+
+    def is_visible(self, timeout=None):
+        return self.selector in self.page.visible
+
+    def fill(self, value):
+        self.page.filled[self.selector] = value
+
+    def click(self):
+        self.page.clicked.append(self.selector)
+
+    def evaluate_all(self, _script):
+        return [{"tag": "textarea", "placeholder": "Article title"}]
+
+
+class FakePage:
+    def __init__(self):
+        self.url = "https://hashnode.com/draft/new"
+        self.visible = {
+            "textarea[placeholder*='title' i]",
+            "[contenteditable='true'][role='textbox']",
+            "button:has-text('Save draft')",
+            "text=/draft saved|saved to drafts|saved successfully/i",
+        }
+        self.filled = {}
+        self.clicked = []
+        self.cookies = []
+
+    def goto(self, *_args, **_kwargs):
+        return None
+
+    def locator(self, selector):
+        return FakeLocator(self, selector)
+
+    def wait_for_timeout(self, _timeout):
+        return None
+
+
+class FakeContext:
+    def __init__(self, page):
+        self.pages = [page]
+
+    def close(self):
+        return None
+
+    def cookies(self, _urls=None):
+        return self.pages[0].cookies
+
+
+class FakePlaywright:
+    def __init__(self, page):
+        self.chromium = SimpleNamespace(
+            launch_persistent_context=lambda *_args, **_kwargs: FakeContext(page)
+        )
+
+
+class PlaywrightManager:
+    def __init__(self, page):
+        self.page = page
+
+    def __enter__(self):
+        return FakePlaywright(self.page)
+
+    def __exit__(self, *_args):
+        return None
+
+
+def test_deterministic_selectors_fill_and_save_draft(monkeypatch):
+    page = FakePage()
+    sync_api = SimpleNamespace(sync_playwright=lambda: PlaywrightManager(page))
+    monkeypatch.setitem(sys.modules, "patchright.sync_api", sync_api)
+    result = hashnode_browser.upload_hashnode_draft(
+        profile_dir="/tmp/profile", title="A title", article_md="# A title",
+    )
+
+    assert result["success"] is True
+    assert result["method"] == "deterministic"
+    assert page.filled["textarea[placeholder*='title' i]"] == "A title"
+    assert page.filled["[contenteditable='true'][role='textbox']"] == "# A title"
+
+
+def test_missing_deterministic_selector_fails(monkeypatch):
+    page = FakePage()
+    page.visible.remove("textarea[placeholder*='title' i]")
+    sync_api = SimpleNamespace(sync_playwright=lambda: PlaywrightManager(page))
+    monkeypatch.setitem(sys.modules, "patchright.sync_api", sync_api)
+    try:
+        hashnode_browser.upload_hashnode_draft(
+            profile_dir="/tmp/profile", title="A title", article_md="# A title",
+        )
+    except hashnode_browser.SelectorFailure as exc:
+        assert exc.action == "title"
+    else:
+        raise AssertionError("missing selector was accepted")
 
 
 def _write_cookie_snapshot(profile_dir, cookies):

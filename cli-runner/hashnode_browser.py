@@ -1,10 +1,82 @@
-"""Verify persisted Hashnode browser profiles without exposing credentials."""
+"""Deterministic Hashnode draft upload through a persisted browser profile."""
 from __future__ import annotations
 
 import json
 from pathlib import Path
 import sqlite3
 import time
+
+SELECTORS_PATH = Path(__file__).with_name("browser_selectors.json")
+_ALLOWED_ACTIONS = ("title", "content", "save_draft")
+
+
+class SelectorFailure(RuntimeError):
+    def __init__(self, action: str):
+        super().__init__(f"Hashnode control not found: {action}")
+        self.action = action
+
+
+def _first_visible(page, selectors: list[str]):
+    for selector in selectors:
+        locator = page.locator(selector).first
+        try:
+            if locator.is_visible(timeout=1200):
+                return locator, selector
+        except Exception:
+            continue
+    return None, None
+
+
+def upload_hashnode_draft(
+    *, profile_dir: str, title: str, article_md: str,
+) -> dict:
+    from patchright.sync_api import sync_playwright
+
+    selectors = json.loads(SELECTORS_PATH.read_text(encoding="utf-8"))
+    with sync_playwright() as playwright:
+        context = playwright.chromium.launch_persistent_context(
+            profile_dir, headless=True, viewport={"width": 1440, "height": 1000},
+        )
+        page = context.pages[0] if context.pages else context.new_page()
+        try:
+            page.goto(selectors["editor_url"], wait_until="domcontentloaded", timeout=45000)
+            if any(part in page.url.lower() for part in ("signin", "login", "onboard")):
+                return {
+                    "success": False,
+                    "error": "Hashnode browser session is not authenticated",
+                    "manual_handoff": {
+                        "reason": "hashnode_login_required",
+                        "url": "https://hashnode.com/login",
+                    },
+                }
+
+            controls = {}
+            for action in _ALLOWED_ACTIONS:
+                locator, _ = _first_visible(page, selectors[action])
+                if locator is None:
+                    raise SelectorFailure(action)
+                controls[action] = locator
+
+            controls["title"].fill(title)
+            controls["content"].fill(article_md)
+            before_url = page.url
+            controls["save_draft"].click()
+            page.wait_for_timeout(1800)
+            if page.locator("text=/error|failed/i").first.is_visible(timeout=500):
+                return {"success": False, "error": "Hashnode reported that the draft was not saved"}
+            saved_signal = page.locator("text=/draft saved|saved to drafts|saved successfully/i").first
+            if page.url == before_url and not saved_signal.is_visible(timeout=1200):
+                return {"success": False, "error": "Hashnode draft save could not be verified"}
+            result = {
+                "success": True,
+                "method": "deterministic",
+                "url": page.url if "/draft" in page.url else None,
+                "draft_id": page.url.rstrip("/").split("/")[-1] if "/draft/" in page.url else None,
+            }
+        finally:
+            context.close()
+
+    return result
 
 
 def check_hashnode_profile(*, profile_dir: str) -> dict:

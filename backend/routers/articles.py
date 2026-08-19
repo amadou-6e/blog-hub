@@ -2,7 +2,7 @@ import io
 import zipfile
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, Request, UploadFile
 from typing import Optional
 
 from pydantic import BaseModel
@@ -22,6 +22,7 @@ from backend.schemas.overview import (
 )
 import backend.store as store
 import backend.services.cli_runner as runner
+import backend.services.browser_publish as browser_publish
 from backend.services.push import push_article_to_platforms
 from backend.store.article_revisions import RevisionConflict
 
@@ -471,6 +472,53 @@ def push_article(request: Request, article_id: str, body: dict = {}):
     store.complete_job(user_id, job["job_id"], result=job_result)
 
     return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
+
+
+@router.post("/{article_id}/browser-publish/hashnode", status_code=201)
+def request_hashnode_browser_publish(
+    request: Request, article_id: str,
+):
+    if store.get_article(request.state.user_id, article_id) is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    browser_connection = store.get_browser_connection(
+        request.state.user_id, "hashnode"
+    )
+    if not browser_connection or browser_connection["status"] != "connected":
+        raise HTTPException(
+            status_code=409,
+            detail="Connect Hashnode with browser login before browser publishing",
+        )
+    return store.create_browser_publish_run(
+        request.state.user_id, article_id,
+        platform="hashnode",
+    )
+
+
+@router.get("/{article_id}/browser-publish/{run_id}")
+def get_browser_publish(request: Request, article_id: str, run_id: str):
+    run = store.get_browser_publish_run(request.state.user_id, run_id)
+    if run is None or run["article_id"] != article_id:
+        raise HTTPException(status_code=404, detail="Browser publish run not found")
+    return run
+
+
+@router.post("/{article_id}/browser-publish/{run_id}/approve", status_code=202)
+def approve_hashnode_browser_publish(
+    request: Request, article_id: str, run_id: str,
+    background_tasks: BackgroundTasks,
+):
+    run = store.get_browser_publish_run(request.state.user_id, run_id)
+    if run is None or run["article_id"] != article_id:
+        raise HTTPException(status_code=404, detail="Browser publish run not found")
+    try:
+        approved = store.approve_browser_publish_run(request.state.user_id, run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    background_tasks.add_task(
+        browser_publish.execute_hashnode_run,
+        user_id=request.state.user_id, run_id=run_id,
+    )
+    return approved
 
 
 # ── Import ────────────────────────────────────────────────────────────────────

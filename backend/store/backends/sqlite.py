@@ -32,6 +32,7 @@ from backend.store.locking import WorkspaceLock
 from backend.store.agent_sessions import AgentSessionStoreMixin
 from backend.store.article_revisions import ArticleRevisionStoreMixin
 from backend.store.connection_auth import ConnectionAuthStoreMixin
+from backend.store.browser_publish import BrowserPublishStoreMixin
 from backend.store.browser_connections import BrowserConnectionStoreMixin
 from backend.store.schema import (
     SEED_USER_EMAIL as DEFAULT_SEED_USER_EMAIL,
@@ -221,6 +222,7 @@ def _seed_articles() -> list[dict]:
 
 class SQLiteStore(
     BrowserConnectionStoreMixin,
+    BrowserPublishStoreMixin,
     ConnectionAuthStoreMixin,
     AgentSessionStoreMixin,
     ArticleRevisionStoreMixin,
@@ -982,6 +984,7 @@ class SQLiteStore(
             self._con.executescript("""
                 DELETE FROM article_chat_log;
                 DELETE FROM agent_sessions;
+                DELETE FROM browser_publish_runs;
                 DELETE FROM browser_connections;
                 DELETE FROM article_patch_revisions;
                 DELETE FROM article_patches;

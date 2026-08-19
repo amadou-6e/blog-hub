@@ -239,6 +239,20 @@ CREATE TABLE IF NOT EXISTS agent_session_outputs (
     created_at    TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS browser_publish_runs (
+    id                 TEXT PRIMARY KEY,
+    user_id            TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    article_id         TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+    article_revision_id TEXT NOT NULL REFERENCES article_revisions(id) ON DELETE RESTRICT,
+    platform           TEXT NOT NULL,
+    status             TEXT NOT NULL,
+    result_json        TEXT,
+    error              TEXT,
+    created_at         TEXT NOT NULL,
+    approved_at        TEXT,
+    completed_at       TEXT
+);
+
 CREATE TABLE IF NOT EXISTS browser_connections (
     user_id                 TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     platform                TEXT NOT NULL,
@@ -316,6 +330,9 @@ CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_session
 
 CREATE INDEX IF NOT EXISTS idx_agent_outputs_session
     ON agent_session_outputs(session_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_browser_publish_user_article
+    ON browser_publish_runs(user_id, article_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_browser_connections_status
     ON browser_connections(status, updated_at DESC);

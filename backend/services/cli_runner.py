@@ -141,6 +141,26 @@ def cancel_chat(session_id: str) -> None:
     _post(f"/chat/{session_id}/cancel")
 
 
+def hashnode_browser_upload(
+    *, organization_id: str, profile_id: str, title: str, article_md: str,
+) -> dict:
+    """Create a Hashnode draft through the approval-gated browser runner."""
+    payload = {
+        "organization_id": organization_id, "profile_id": profile_id,
+        "title": title, "article_md": article_md,
+    }
+    try:
+        with _client() as client:
+            response = client.post(
+                "/browser/hashnode/upload", json=payload,
+                timeout=httpx.Timeout(connect=3, read=300, write=30, pool=5),
+            )
+            response.raise_for_status()
+            return response.json()
+    except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
+        raise RunnerUnavailable(f"Browser runner unavailable: {exc}") from exc
+
+
 def start_hashnode_browser_login(profile_id: str | None = None) -> dict:
     if profile_id:
         return _post("/browser/hashnode/login", profile_id=profile_id)

@@ -32,13 +32,14 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from hashnode_browser import check_hashnode_profile
+from hashnode_browser import check_hashnode_profile, upload_hashnode_draft
 from skyvern_browser import (
     SkyvernUnavailable,
     close_hashnode_login,
     delete_hashnode_profile,
     finish_hashnode_login,
     get_hashnode_login,
+    profile_directory,
     start_hashnode_login,
 )
 
@@ -220,6 +221,13 @@ class ChatRequest(BaseModel):
     api_key: Optional[str] = None
 
 
+class HashnodeBrowserUploadRequest(BaseModel):
+    organization_id: str
+    profile_id: str
+    title: str
+    article_md: str
+
+
 class HashnodeBrowserLoginCompleteRequest(BaseModel):
     profile_name: str
     profile_id: Optional[str] = None
@@ -235,6 +243,22 @@ class HashnodeBrowserProfileRequest(BaseModel):
 
 
 _chat_processes: dict[str, subprocess.Popen] = {}
+
+
+@app.post("/browser/hashnode/upload")
+def hashnode_browser_upload(req: HashnodeBrowserUploadRequest):
+    try:
+        profile_dir = profile_directory(req.organization_id, req.profile_id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if not profile_dir.is_dir():
+        raise HTTPException(409, "Hashnode browser profile is unavailable")
+    try:
+        return upload_hashnode_draft(
+            profile_dir=str(profile_dir), title=req.title, article_md=req.article_md,
+        )
+    except Exception as exc:
+        return {"success": False, "error": _safe_reason(str(exc))}
 
 
 @app.post("/browser/hashnode/login", status_code=201)
