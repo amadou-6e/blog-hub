@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 import sqlite3
 import time
 
 SELECTORS_PATH = Path(__file__).with_name("browser_selectors.json")
-_ALLOWED_ACTIONS = ("title", "content", "save_draft")
 
 
 class SelectorFailure(RuntimeError):
@@ -25,6 +25,34 @@ def _first_visible(page, selectors: list[str]):
         except Exception:
             continue
     return None, None
+
+
+def _wait_first_visible(page, selectors: list[str], *, timeout_ms: int = 20_000):
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        locator, selector = _first_visible(page, selectors)
+        if locator is not None:
+            return locator, selector
+        page.wait_for_timeout(250)
+    return None, None
+
+
+def _draft_id(url: str) -> str | None:
+    marker = "/draft/"
+    return url.rstrip("/").split(marker, 1)[1] if marker in url else None
+
+
+def _normalized_markdown(markdown: str) -> str:
+    normalized = re.sub(
+        r'(!\[[^\]]*\]\([^\s)]+)\s+align="center"(\))',
+        r"\1\2",
+        markdown,
+    )
+    normalized = re.sub(r"^\*\s{3}", "- ", normalized, flags=re.MULTILINE)
+    normalized = re.sub(r"^\s+$", "", normalized, flags=re.MULTILINE)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    normalized = re.sub(r"(^- .+)\n\n(?=- )", r"\1\n", normalized, flags=re.MULTILINE)
+    return normalized.strip()
 
 
 def upload_hashnode_draft(
@@ -50,28 +78,73 @@ def upload_hashnode_draft(
                     },
                 }
 
-            controls = {}
-            for action in _ALLOWED_ACTIONS:
-                locator, _ = _first_visible(page, selectors[action])
-                if locator is None:
-                    raise SelectorFailure(action)
-                controls[action] = locator
+            editor_entry, _ = _wait_first_visible(page, selectors["editor_entry"])
+            if editor_entry is None:
+                raise SelectorFailure("editor_entry")
+            editor_entry.click()
+            page.wait_for_url("**/draft/**", timeout=30_000)
+            previous_draft_url = page.url
+            new_draft, _ = _wait_first_visible(
+                page, selectors["new_draft"], timeout_ms=60_000
+            )
+            if new_draft is None:
+                raise SelectorFailure("new_draft")
+            new_draft.click()
+            deadline = time.monotonic() + 30
+            while page.url == previous_draft_url and time.monotonic() < deadline:
+                page.wait_for_timeout(250)
+            if page.url == previous_draft_url:
+                raise SelectorFailure("new_draft")
 
-            controls["title"].fill(title)
-            controls["content"].fill(article_md)
-            before_url = page.url
-            controls["save_draft"].click()
-            page.wait_for_timeout(1800)
-            if page.locator("text=/error|failed/i").first.is_visible(timeout=500):
-                return {"success": False, "error": "Hashnode reported that the draft was not saved"}
-            saved_signal = page.locator("text=/draft saved|saved to drafts|saved successfully/i").first
-            if page.url == before_url and not saved_signal.is_visible(timeout=1200):
-                return {"success": False, "error": "Hashnode draft save could not be verified"}
+            title_control, _ = _wait_first_visible(page, selectors["title"])
+            markdown_mode, _ = _wait_first_visible(page, selectors["markdown_mode"])
+            if title_control is None:
+                raise SelectorFailure("title")
+            if markdown_mode is None:
+                raise SelectorFailure("markdown_mode")
+            markdown_mode.click()
+            content_control, _ = _wait_first_visible(page, selectors["content"])
+            if content_control is None:
+                raise SelectorFailure("content")
+
+            title_control.fill(title)
+            content_control.fill(article_md)
+            draft_url = page.url
+            draft_id = _draft_id(draft_url)
+
+            # Hashnode autosaves drafts. A reload is the strongest deterministic
+            # confirmation available without clicking the public Publish action.
+            page.wait_for_timeout(6_000)
+            page.reload(wait_until="domcontentloaded", timeout=45_000)
+            title_control, _ = _wait_first_visible(page, selectors["title"])
+            content_control, _ = _wait_first_visible(
+                page, selectors["content"], timeout_ms=2_000
+            )
+            if content_control is None:
+                markdown_mode, _ = _wait_first_visible(page, selectors["markdown_mode"])
+                if markdown_mode is not None:
+                    markdown_mode.click()
+                    content_control, _ = _wait_first_visible(
+                        page, selectors["content"]
+                    )
+            if (
+                title_control is None
+                or content_control is None
+                or title_control.input_value() != title
+                or _normalized_markdown(content_control.input_value())
+                != _normalized_markdown(article_md)
+            ):
+                return {
+                    "success": False,
+                    "error": "Hashnode draft autosave could not be verified",
+                    "url": draft_url,
+                    "draft_id": draft_id,
+                }
             result = {
                 "success": True,
                 "method": "deterministic",
-                "url": page.url if "/draft" in page.url else None,
-                "draft_id": page.url.rstrip("/").split("/")[-1] if "/draft/" in page.url else None,
+                "url": draft_url,
+                "draft_id": draft_id,
             }
         finally:
             context.close()

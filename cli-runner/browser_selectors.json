@@ -1,7 +1,9 @@
 {
   "version": 1,
-  "editor_url": "https://hashnode.com/draft/new",
+  "editor_url": "https://hashnode.com",
+  "editor_entry": ["button:has-text('Write')"],
+  "new_draft": ["button:has-text('New')"],
   "title": ["textarea[placeholder*='title' i]", "input[placeholder*='title' i]"],
-  "content": ["[contenteditable='true'][role='textbox']", ".ProseMirror[contenteditable='true']"],
-  "save_draft": ["button:has-text('Save draft')", "button:has-text('Save as draft')"]
+  "markdown_mode": ["button:has-text('Markdown')"],
+  "content": ["textarea[placeholder*='writing markdown' i]"]
 }

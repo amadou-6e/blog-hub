@@ -32,6 +32,21 @@ class FakeLocator:
 
     def click(self):
         self.page.clicked.append(self.selector)
+        if self.selector == "button:has-text('Write')":
+            self.page.url = "https://hashnode.com/draft/current"
+            self.page.visible.update({
+                "button:has-text('New')",
+                "textarea[placeholder*='title' i]",
+                "button:has-text('Markdown')",
+            })
+        elif self.selector == "button:has-text('New')":
+            self.page.url = "https://hashnode.com/draft/draft_test"
+            self.page.filled.clear()
+        elif self.selector == "button:has-text('Markdown')":
+            self.page.visible.add("textarea[placeholder*='writing markdown' i]")
+
+    def input_value(self):
+        return self.page.filled.get(self.selector, "")
 
     def evaluate_all(self, _script):
         return [{"tag": "textarea", "placeholder": "Article title"}]
@@ -39,13 +54,8 @@ class FakeLocator:
 
 class FakePage:
     def __init__(self):
-        self.url = "https://hashnode.com/draft/new"
-        self.visible = {
-            "textarea[placeholder*='title' i]",
-            "[contenteditable='true'][role='textbox']",
-            "button:has-text('Save draft')",
-            "text=/draft saved|saved to drafts|saved successfully/i",
-        }
+        self.url = "https://hashnode.com"
+        self.visible = {"button:has-text('Write')"}
         self.filled = {}
         self.clicked = []
         self.cookies = []
@@ -57,6 +67,12 @@ class FakePage:
         return FakeLocator(self, selector)
 
     def wait_for_timeout(self, _timeout):
+        return None
+
+    def wait_for_url(self, _url, timeout=None):
+        return None
+
+    def reload(self, **_kwargs):
         return None
 
 
@@ -89,7 +105,7 @@ class PlaywrightManager:
         return None
 
 
-def test_deterministic_selectors_fill_and_save_draft(monkeypatch):
+def test_deterministic_selectors_fill_and_verify_autosaved_draft(monkeypatch):
     page = FakePage()
     sync_api = SimpleNamespace(sync_playwright=lambda: PlaywrightManager(page))
     monkeypatch.setitem(sys.modules, "patchright.sync_api", sync_api)
@@ -99,13 +115,14 @@ def test_deterministic_selectors_fill_and_save_draft(monkeypatch):
 
     assert result["success"] is True
     assert result["method"] == "deterministic"
+    assert result["draft_id"] == "draft_test"
     assert page.filled["textarea[placeholder*='title' i]"] == "A title"
-    assert page.filled["[contenteditable='true'][role='textbox']"] == "# A title"
+    assert page.filled["textarea[placeholder*='writing markdown' i]"] == "# A title"
 
 
 def test_missing_deterministic_selector_fails(monkeypatch):
     page = FakePage()
-    page.visible.remove("textarea[placeholder*='title' i]")
+    page.visible.clear()
     sync_api = SimpleNamespace(sync_playwright=lambda: PlaywrightManager(page))
     monkeypatch.setitem(sys.modules, "patchright.sync_api", sync_api)
     try:
@@ -113,9 +130,22 @@ def test_missing_deterministic_selector_fails(monkeypatch):
             profile_dir="/tmp/profile", title="A title", article_md="# A title",
         )
     except hashnode_browser.SelectorFailure as exc:
-        assert exc.action == "title"
+        assert exc.action == "editor_entry"
     else:
         raise AssertionError("missing selector was accepted")
+
+
+def test_hashnode_markdown_normalization_accepts_editor_formatting():
+    original = "![Diagram](https://example.com/a.png)\n\n- first\n- second"
+    persisted = (
+        '![Diagram](https://example.com/a.png align="center")\n\n'
+        "*   first\n    \n*   second"
+    )
+
+    assert (
+        hashnode_browser._normalized_markdown(persisted)
+        == hashnode_browser._normalized_markdown(original)
+    )
 
 
 def _write_cookie_snapshot(profile_dir, cookies):
