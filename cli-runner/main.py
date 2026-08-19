@@ -32,6 +32,16 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from hashnode_browser import check_hashnode_profile
+from skyvern_browser import (
+    SkyvernUnavailable,
+    close_hashnode_login,
+    delete_hashnode_profile,
+    finish_hashnode_login,
+    get_hashnode_login,
+    start_hashnode_login,
+)
+
 app = FastAPI(title="BlogHub CLI Runner", version="0.1.0")
 
 _RUNNER_HOME = os.environ.get("RUNNER_HOME", "/root")
@@ -210,7 +220,84 @@ class ChatRequest(BaseModel):
     api_key: Optional[str] = None
 
 
+class HashnodeBrowserLoginCompleteRequest(BaseModel):
+    profile_name: str
+    profile_id: Optional[str] = None
+    organization_id: Optional[str] = None
+
+
+class HashnodeBrowserLoginRequest(BaseModel):
+    profile_id: Optional[str] = None
+
+
+class HashnodeBrowserProfileRequest(BaseModel):
+    profile_id: str
+
+
 _chat_processes: dict[str, subprocess.Popen] = {}
+
+
+@app.post("/browser/hashnode/login", status_code=201)
+def hashnode_browser_login(req: Optional[HashnodeBrowserLoginRequest] = None):
+    try:
+        return start_hashnode_login(req.profile_id if req else None)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except SkyvernUnavailable as exc:
+        raise HTTPException(503, _safe_reason(str(exc))) from exc
+
+
+@app.get("/browser/hashnode/login/{session_id}")
+def hashnode_browser_login_status(session_id: str):
+    try:
+        return get_hashnode_login(session_id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except SkyvernUnavailable as exc:
+        raise HTTPException(503, _safe_reason(str(exc))) from exc
+
+
+@app.delete("/browser/hashnode/login/{session_id}")
+def hashnode_browser_login_cancel(session_id: str):
+    try:
+        close_hashnode_login(session_id)
+        return {"status": "canceled"}
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except SkyvernUnavailable as exc:
+        raise HTTPException(503, _safe_reason(str(exc))) from exc
+
+
+@app.post("/browser/hashnode/login/{session_id}/complete")
+def hashnode_browser_login_complete(
+    session_id: str, req: HashnodeBrowserLoginCompleteRequest,
+):
+    try:
+        profile = finish_hashnode_login(
+            session_id,
+            req.profile_name,
+            profile_id=req.profile_id,
+            organization_id=req.organization_id,
+        )
+        verification = check_hashnode_profile(profile_dir=profile["profile_dir"])
+        return {**verification, **profile}
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except SkyvernUnavailable as exc:
+        raise HTTPException(503, _safe_reason(str(exc))) from exc
+    except Exception as exc:
+        raise HTTPException(502, _safe_reason(str(exc))) from exc
+
+
+@app.delete("/browser/hashnode/profiles/{profile_id}")
+def hashnode_browser_profile_delete(profile_id: str):
+    try:
+        delete_hashnode_profile(profile_id)
+        return {"status": "disconnected"}
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except SkyvernUnavailable as exc:
+        raise HTTPException(503, _safe_reason(str(exc))) from exc
 
 
 # ── Health ─────────────────────────────────────────────────────────────────────

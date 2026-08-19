@@ -34,10 +34,12 @@ services:
   cli-runner:
     build: ./cli-runner
     ports:
-      - "8001:8001"
+      - "127.0.0.1:${BLOGHUB_RUNNER_PORT:-8001}:8001"
     volumes:
       - claude-config:/root/.claude
       - codex-config:/root/.codex
+      - skyvern-config:/run/skyvern:ro
+      - skyvern-browser-sessions:/data/skyvern-browser-sessions
     environment:
       RUNNER_HOME: /root
       RUNNER_TASK_TIMEOUT: "180"
@@ -46,6 +48,13 @@ services:
       CLAUDE_CALLBACK_PORT: "54322"
       CLAUDE_CONFIG_DIR: /root/.claude
       CODEX_CONFIG_DIR: /root/.codex
+      SKYVERN_URL: http://skyvern:8000
+      SKYVERN_PUBLIC_APP_URL: http://localhost:8083
+      SKYVERN_CREDENTIALS_FILE: /run/skyvern/credentials.toml
+      SKYVERN_BROWSER_SESSION_ROOT: /data/skyvern-browser-sessions
+    depends_on:
+      skyvern:
+        condition: service_healthy
     init: true
     restart: unless-stopped
     healthcheck:
@@ -54,9 +63,97 @@ services:
       timeout: 3s
       retries: 10
 
+  skyvern-postgres:
+    image: postgres@sha256:727876d274666da0b92a445390ba093c84b8e9f8343e1c53cd4e9a7ab2d85310
+    restart: unless-stopped
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_USER: skyvern
+      POSTGRES_PASSWORD: skyvern
+      POSTGRES_DB: skyvern
+    volumes:
+      - skyvern-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skyvern"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  skyvern:
+    image: bloghub-skyvern-patchright:1.62.1
+    build:
+      context: ./experiments/skyvern
+      dockerfile: Dockerfile.patchright
+    restart: on-failure
+    entrypoint: ["sh", "/experiment/entrypoint.sh"]
+    ports:
+      - "127.0.0.1:8003:8000"
+      - "127.0.0.1:6083:6080"
+    environment:
+      DATABASE_STRING: postgresql+psycopg://skyvern:skyvern@skyvern-postgres:5432/skyvern
+      SKYVERN_SCHEMA_WORKAROUND_DATABASE_URL: postgresql://skyvern:skyvern@skyvern-postgres:5432/skyvern
+      BROWSER_STREAMING_MODE: cdp
+      BROWSER_TYPE: chromium-headful
+      CHROME_EXECUTABLE_PATH: /root/.cache/ms-playwright/chromium-1134/chrome-linux/chrome
+      DOWNLOAD_PATH: /data/downloads
+      BROWSER_SESSION_BASE_PATH: /data/browser_sessions
+      CREDENTIAL_VAULT_TYPE: skyvern
+      ENABLE_LOCAL_CREDENTIAL_VAULT: "true"
+      LOCAL_CREDENTIAL_VAULT_PATH: /data/credential_vault
+      ENABLE_OPENAI: "false"
+      ENABLE_ANTHROPIC: "false"
+      ENABLE_GEMINI: "false"
+      SKYVERN_TELEMETRY: "false"
+      ENABLE_LOG_ARTIFACTS: "false"
+      ALLOWED_ORIGINS: '["http://localhost:8083","http://127.0.0.1:8083"]'
+    volumes:
+      - skyvern-artifacts:/data/artifacts
+      - skyvern-downloads:/data/downloads
+      - skyvern-browser-sessions:/data/browser_sessions
+      - skyvern-credential-vault:/data/credential_vault
+      - skyvern-config:/app/.skyvern
+      - ./experiments/skyvern/entrypoint.sh:/experiment/entrypoint.sh:ro
+      - ./experiments/skyvern/skyvern_1_0_50_schema_workaround.py:/experiment/skyvern_1_0_50_schema_workaround.py:ro
+    depends_on:
+      skyvern-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/heartbeat', timeout=5)"]
+      interval: 5s
+      timeout: 5s
+      retries: 36
+      start_period: 180s
+
+  skyvern-ui:
+    image: bloghub-skyvern-ui:1.0.50
+    build:
+      context: ./experiments/skyvern
+      dockerfile: Dockerfile.ui
+    restart: on-failure
+    environment:
+      VITE_BROWSER_STREAMING_MODE: cdp
+      VITE_WSS_BASE_URL: ws://localhost:8003/api/v1
+      VITE_ARTIFACT_API_BASE_URL: http://localhost:9093
+      VITE_API_BASE_URL: http://localhost:8003/api/v1
+    ports:
+      - "127.0.0.1:8083:8080"
+      - "127.0.0.1:9093:9090"
+    volumes:
+      - skyvern-artifacts:/data/artifacts
+      - skyvern-config:/app/.skyvern
+    depends_on:
+      skyvern:
+        condition: service_healthy
+
 volumes:
   bloghub-data:
   bloghub-previews:
   bloghub-credential-keys:
   claude-config:
   codex-config:
+  skyvern-artifacts:
+  skyvern-browser-sessions:
+  skyvern-config:
+  skyvern-credential-vault:
+  skyvern-downloads:
+  skyvern-postgres-data:

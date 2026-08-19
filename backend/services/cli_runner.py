@@ -141,6 +141,58 @@ def cancel_chat(session_id: str) -> None:
     _post(f"/chat/{session_id}/cancel")
 
 
+def start_hashnode_browser_login(profile_id: str | None = None) -> dict:
+    if profile_id:
+        return _post("/browser/hashnode/login", profile_id=profile_id)
+    return _post("/browser/hashnode/login")
+
+
+def get_hashnode_browser_login(session_id: str) -> dict:
+    return _get(f"/browser/hashnode/login/{session_id}")
+
+
+def cancel_hashnode_browser_login(session_id: str) -> None:
+    try:
+        with _client() as client:
+            response = client.delete(f"/browser/hashnode/login/{session_id}")
+            response.raise_for_status()
+    except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
+        raise RunnerUnavailable(f"Browser login runner unavailable: {exc}") from exc
+
+
+def complete_hashnode_browser_login(
+    session_id: str,
+    profile_name: str,
+    *,
+    profile_id: str | None = None,
+    organization_id: str | None = None,
+) -> dict:
+    try:
+        with _client() as client:
+            response = client.post(
+                f"/browser/hashnode/login/{session_id}/complete",
+                json={
+                    "profile_name": profile_name,
+                    "profile_id": profile_id,
+                    "organization_id": organization_id,
+                },
+                timeout=httpx.Timeout(connect=3, read=180, write=10, pool=5),
+            )
+            response.raise_for_status()
+            return response.json()
+    except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
+        raise RunnerUnavailable(f"Browser login runner unavailable: {exc}") from exc
+
+
+def delete_hashnode_browser_profile(profile_id: str) -> None:
+    try:
+        with _client() as client:
+            response = client.delete(f"/browser/hashnode/profiles/{profile_id}")
+            response.raise_for_status()
+    except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
+        raise RunnerUnavailable(f"Browser login runner unavailable: {exc}") from exc
+
+
 def run_task(
     provider: str,
     task: str,

@@ -178,6 +178,25 @@ def complete_job(user_id: str, *a, **kw):
     return _backend.complete_job(user_id, *a, **kw)
 
 
+# ── Browser connections ────────────────────────────────────────────────────
+
+
+def get_browser_connection(user_id: str, *a, **kw):
+    return _backend.get_browser_connection(user_id, *a, **kw)
+
+
+def start_browser_connection(user_id: str, *a, **kw):
+    return _backend.start_browser_connection(user_id, *a, **kw)
+
+
+def update_browser_connection(user_id: str, *a, **kw):
+    return _backend.update_browser_connection(user_id, *a, **kw)
+
+
+def delete_browser_connection(user_id: str, *a, **kw):
+    return _backend.delete_browser_connection(user_id, *a, **kw)
+
+
 # ── Agent sessions ───────────────────────────────────────────────────────────
 
 

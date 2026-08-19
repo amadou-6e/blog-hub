@@ -36,6 +36,7 @@ def test_fresh_database_has_current_schema_and_seed_user(tmp_path):
             "agent_approvals",
             "agent_checkpoints",
             "agent_session_outputs",
+            "browser_connections",
         } <= tables
         assert store._con.execute(
             "SELECT COUNT(*) FROM users WHERE id=?", (SEED_USER_ID,)

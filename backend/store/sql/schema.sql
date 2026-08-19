@@ -239,6 +239,21 @@ CREATE TABLE IF NOT EXISTS agent_session_outputs (
     created_at    TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS browser_connections (
+    user_id                 TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    platform                TEXT NOT NULL,
+    status                  TEXT NOT NULL,
+    skyvern_session_id      TEXT,
+    skyvern_organization_id TEXT NOT NULL,
+    skyvern_profile_id      TEXT,
+    app_url                 TEXT,
+    error                   TEXT,
+    verified_at             TEXT,
+    created_at              TEXT NOT NULL,
+    updated_at              TEXT NOT NULL,
+    PRIMARY KEY (user_id, platform)
+);
+
 CREATE INDEX IF NOT EXISTS idx_articles_user_updated
     ON articles(user_id, updated_at DESC);
 
@@ -301,3 +316,6 @@ CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_session
 
 CREATE INDEX IF NOT EXISTS idx_agent_outputs_session
     ON agent_session_outputs(session_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_browser_connections_status
+    ON browser_connections(status, updated_at DESC);

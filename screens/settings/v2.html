@@ -54,6 +54,19 @@
       display: flex; align-items: center; justify-content: space-between;
       gap: 16px; padding: 16px 20px;
     }
+    .hashnode-methods {
+      position: absolute; right: 0; top: calc(100% + 6px); z-index: 30;
+      width: 272px; padding: 6px; display: grid; gap: 4px;
+      background: #151925; border: 1px solid #30364a; border-radius: 6px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.5);
+    }
+    .hashnode-method {
+      width: 100%; display: flex; align-items: center; gap: 10px;
+      padding: 10px 12px; border: 0; border-radius: 5px;
+      background: transparent; color: #c9cfe0; cursor: pointer;
+      font: inherit; text-align: left;
+    }
+    .hashnode-method:hover { background: #1e2332; }
 
     /* ── CliProviderCard C ──────────────────────────────────── */
     .ai-card {
@@ -198,6 +211,10 @@ const ICON_STYLE = {
 };
 
 let _connections = [];
+let _hashnodeBrowserConnection = { platform: 'hashnode', status: 'disconnected' };
+let _hashnodeMethodMenuOpen = false;
+let _hashnodeLoginTab = null;
+let _hashnodeLoginTabTimer = null;
 const _authTimers = new Map();
 
 const AUTH_STATES = {
@@ -237,6 +254,10 @@ async function loadConnections() {
     console.warn('API unavailable, using static fallback:', e.message);
     _connections = buildStaticConns();
   }
+  try {
+    const browserRes = await fetch('/api/connections/hashnode/browser-connection');
+    if (browserRes.ok) _hashnodeBrowserConnection = await browserRes.json();
+  } catch { /* The PAT path remains usable while browser automation is offline. */ }
   renderPlatforms(_connections.filter(c => c.type === 'blog'));
   renderAI(_connections.filter(c => c.type === 'ai'));
   updateCount(_connections);
@@ -254,7 +275,9 @@ function buildStaticConns() {
 }
 
 function updateCount(conns) {
-  const n = conns.filter(c => c.status === 'connected').length;
+  const n = conns.filter(c => c.id !== 'hashnode' && c.status === 'connected').length +
+    (conns.some(c => c.id === 'hashnode' && c.status === 'connected') ||
+      _hashnodeBrowserConnection.status === 'connected' ? 1 : 0);
   document.getElementById('count-dot').style.background = n > 0 ? '#4ade80' : '#5a6080';
   document.getElementById('count-label').textContent    = `${n} connection${n !== 1 ? 's' : ''} active`;
 }
@@ -265,6 +288,8 @@ function renderPlatforms(conns) {
 }
 
 function platCard(conn) {
+  if (conn.id === 'hashnode') return hashnodeCard(conn);
+
   const ic   = ICON_STYLE[conn.id] || { bg: '#25293840', color: '#5a6080', letter: '?' };
   const meta = CONN_META[conn.id] || {};
   const ok   = conn.status === 'connected';
@@ -364,6 +389,195 @@ function platCard(conn) {
           onmouseover="this.style.color='#c9cfe0'" onmouseout="this.style.color='#5a6080'">Get your ${(meta.tokenLabel || 'token').toLowerCase()} →</a>
       </div>
     </div>`;
+}
+
+function hashnodeCard(conn) {
+  const apiConnected = conn.status === 'connected';
+  const browserStatus = _hashnodeBrowserConnection.status || 'disconnected';
+  const browserConnected = browserStatus === 'connected';
+  const connected = apiConnected || browserConnected;
+  const waiting = ['waiting_for_login', 'verifying'].includes(browserStatus) && !apiConnected;
+  const failed = browserStatus === 'failed' && !apiConnected;
+  const statusColor = connected ? '#4ade80' : waiting ? '#fbbf24' : failed ? '#f87171' : '#5a6080';
+  const statusLabel = connected ? 'Connected' : waiting
+    ? (browserStatus === 'verifying' ? 'Verifying login' : 'Finish signing in')
+    : failed ? 'Login failed' : 'Not connected';
+  const method = apiConnected && browserConnected ? 'API token + browser login' : apiConnected
+    ? 'API token · Hashnode Plus' : browserConnected
+    ? 'Browser login · Persistent profile' : '';
+  const helper = connected ? (browserConnected ? 'Browser session verified' : 'Token stored securely')
+    : waiting ? 'Close the login tab after Hashnode confirms sign-in.'
+    : failed ? esc(_hashnodeBrowserConnection.error || 'Hashnode sign-in was not completed.')
+    : 'Choose API token or browser login.';
+
+  let actions = '';
+  if (connected) {
+    const connectedMethod = apiConnected && browserConnected ? 'both' : apiConnected ? 'api' : 'browser';
+    actions = `<button onclick="disconnectHashnodeConnection('${connectedMethod}')"
+      style="font-size:11px;color:#f87171;background:transparent;border:none;cursor:pointer;font-family:inherit;">Disconnect</button>`;
+  } else if (waiting) {
+    actions = `<button onclick="openHashnodeBrowserLogin()"
+      style="font-size:11px;padding:4px 10px;border-radius:4px;border:1px solid #252a38;background:transparent;color:#c9cfe0;cursor:pointer;font-family:inherit;">Open login</button>
+      <button onclick="disconnectHashnodeBrowser()"
+      style="font-size:11px;color:#f87171;background:transparent;border:none;cursor:pointer;font-family:inherit;">Cancel</button>`;
+  } else {
+    actions = `<button id="hashnode-connect" onclick="toggleHashnodeMethods()" aria-label="Connect" aria-haspopup="menu" aria-expanded="${_hashnodeMethodMenuOpen}"
+      style="font-size:12px;font-weight:500;padding:5px 12px 5px 14px;border-radius:5px;background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;">Connect <span aria-hidden="true" style="margin-left:3px;">▾</span></button>`;
+  }
+
+  const methodMenu = !connected && !waiting && _hashnodeMethodMenuOpen ? `
+    <div class="hashnode-methods" id="hashnode-method-menu">
+      <button class="hashnode-method" onclick="chooseHashnodeApiToken()">
+        <span style="width:30px;height:30px;border-radius:5px;background:#1d2945;color:#7fa4ff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;">API</span>
+        <span style="flex:1;"><span style="display:block;font-size:12px;font-weight:600;color:#e8eaf2;">API token</span><span style="display:block;font-size:10px;color:#69708a;margin-top:2px;">Deterministic publishing for Hashnode Plus</span></span>
+        <span style="font-size:9px;font-weight:600;color:#a5b4fc;border:1px solid #3b4670;border-radius:3px;padding:2px 5px;">PLUS</span>
+      </button>
+      <button class="hashnode-method" onclick="chooseHashnodeBrowserLogin()">
+        <span style="width:30px;height:30px;border-radius:5px;background:#173127;color:#71d892;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;">WEB</span>
+        <span style="flex:1;"><span style="display:block;font-size:12px;font-weight:600;color:#e8eaf2;">Browser login</span><span style="display:block;font-size:10px;color:#69708a;margin-top:2px;">Isolated persistent browser for free accounts</span></span>
+        <span style="font-size:9px;font-weight:600;color:#71d892;border:1px solid #285b43;border-radius:3px;padding:2px 5px;">FREE</span>
+      </button>
+    </div>` : '';
+
+  return `<div id="plat-card-hashnode" style="position:relative;">
+    <div class="plat-card" style="position:relative;">
+      ${connected ? '<div style="position:absolute;left:0;top:0;bottom:0;width:3px;background:#4ade80;"></div>' : ''}
+      <div class="plat-row">
+        <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
+          <div style="width:28px;height:28px;border-radius:6px;background:#1e2438;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:${connected ? '#4f6cae' : '#5a6080'};flex-shrink:0;">H</div>
+          <div style="min-width:0;">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span style="font-size:14px;font-weight:600;color:#e8eaf2;">Hashnode</span>
+              <span style="width:6px;height:6px;border-radius:50%;background:${statusColor};"></span>
+              <span style="font-size:11px;color:${statusColor};">${statusLabel}</span>
+            </div>
+            ${method ? `<div style="font-size:11px;color:#c9cfe0;margin-top:3px;">${method}</div>` : ''}
+            <div style="font-size:10px;color:#5a6080;margin-top:3px;">${helper}</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">${actions}</div>
+      </div>
+      <div class="expand-row" id="expand-hashnode">
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input id="key-input-hashnode" type="password" autocomplete="off" placeholder="Paste personal access token…"
+            style="flex:1;background:#0f1117;border:1px solid #252a38;border-radius:5px;padding:7px 10px;font-size:12px;color:#c9cfe0;font-family:inherit;"
+            onkeydown="if(event.key==='Enter')saveKey('hashnode')" />
+          <button onclick="saveKey('hashnode')" style="font-size:12px;font-weight:500;padding:7px 14px;border-radius:5px;background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;">Save</button>
+          <button onclick="collapseKey('hashnode')" style="font-size:12px;padding:7px 10px;border-radius:5px;border:1px solid #252a38;background:transparent;color:#5a6080;cursor:pointer;font-family:inherit;">Cancel</button>
+        </div>
+        <a href="${CONN_META.hashnode.helpUrl}" target="_blank" rel="noopener noreferrer" style="font-size:11px;color:#5a6080;text-decoration:none;display:block;margin-top:6px;">Get your personal access token →</a>
+      </div>
+    </div>
+    ${methodMenu}
+  </div>`;
+}
+
+function toggleHashnodeMethods() {
+  _hashnodeMethodMenuOpen = !_hashnodeMethodMenuOpen;
+  renderPlatforms(_connections.filter(c => c.type === 'blog'));
+}
+
+function chooseHashnodeApiToken() {
+  _hashnodeMethodMenuOpen = false;
+  renderPlatforms(_connections.filter(c => c.type === 'blog'));
+  expandKey('hashnode');
+}
+
+function chooseHashnodeBrowserLogin() {
+  _hashnodeMethodMenuOpen = false;
+  startHashnodeBrowserLogin();
+}
+
+function createHashnodeLoginTab(url='about:blank') {
+  // Omitting window features lets the browser open a normal tab. Open the
+  // blank tab synchronously so the later API response is not popup-blocked.
+  return window.open(url, '_blank');
+}
+
+function hashnodeLoginUrl(url) {
+  const target = new URL(url, window.location.href);
+  target.searchParams.set('purpose', 'hashnode-login');
+  return target.href;
+}
+
+function watchHashnodeLoginTab(tab) {
+  if (_hashnodeLoginTabTimer) clearInterval(_hashnodeLoginTabTimer);
+  _hashnodeLoginTab = tab;
+  if (!tab) return;
+  _hashnodeLoginTabTimer = setInterval(() => {
+    if (!tab.closed) return;
+    clearInterval(_hashnodeLoginTabTimer);
+    _hashnodeLoginTabTimer = null;
+    _hashnodeLoginTab = null;
+    if (_hashnodeBrowserConnection.status === 'waiting_for_login') {
+      completeHashnodeBrowserLogin();
+    }
+  }, 500);
+}
+
+async function startHashnodeBrowserLogin() {
+  const loginTab = createHashnodeLoginTab();
+  try {
+    const res = await fetch('/api/connections/hashnode/browser-connection', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    _hashnodeBrowserConnection = data;
+    renderPlatforms(_connections.filter(c => c.type === 'blog'));
+    if (data.authorizationUrl && loginTab) {
+      loginTab.location.href = hashnodeLoginUrl(data.authorizationUrl);
+      loginTab.focus();
+      watchHashnodeLoginTab(loginTab);
+    } else if (data.authorizationUrl) {
+      const fallback = window.open(hashnodeLoginUrl(data.authorizationUrl), '_blank', 'noopener');
+      watchHashnodeLoginTab(fallback);
+    }
+    else loginTab?.close();
+  } catch (error) {
+    loginTab?.close();
+    alert(error.message);
+  }
+}
+
+function openHashnodeBrowserLogin() {
+  if (_hashnodeBrowserConnection.authorizationUrl) {
+    const tab = createHashnodeLoginTab(hashnodeLoginUrl(_hashnodeBrowserConnection.authorizationUrl));
+    tab?.focus();
+    watchHashnodeLoginTab(tab);
+  }
+}
+
+async function completeHashnodeBrowserLogin() {
+  _hashnodeBrowserConnection = { ..._hashnodeBrowserConnection, status: 'verifying' };
+  if (_hashnodeLoginTabTimer) clearInterval(_hashnodeLoginTabTimer);
+  _hashnodeLoginTabTimer = null;
+  _hashnodeLoginTab?.close();
+  _hashnodeLoginTab = null;
+  renderPlatforms(_connections.filter(c => c.type === 'blog'));
+  try {
+    const res = await fetch('/api/connections/hashnode/browser-connection/complete', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    _hashnodeBrowserConnection = data;
+  } catch (error) {
+    _hashnodeBrowserConnection = { platform: 'hashnode', status: 'failed', error: error.message };
+  }
+  renderPlatforms(_connections.filter(c => c.type === 'blog'));
+}
+
+async function disconnectHashnodeBrowser() {
+  if (_hashnodeLoginTabTimer) clearInterval(_hashnodeLoginTabTimer);
+  _hashnodeLoginTabTimer = null;
+  _hashnodeLoginTab?.close();
+  _hashnodeLoginTab = null;
+  await fetch('/api/connections/hashnode/browser-connection', { method: 'DELETE' });
+  _hashnodeBrowserConnection = { platform: 'hashnode', status: 'disconnected' };
+  renderPlatforms(_connections.filter(c => c.type === 'blog'));
+  updateCount(_connections);
+}
+
+async function disconnectHashnodeConnection(method) {
+  if (method === 'browser' || method === 'both') await disconnectHashnodeBrowser();
+  if (method === 'api' || method === 'both') await doDisconnect('hashnode');
 }
 
 // ─── CliProviderCard C ─────────────────────────────────────────────────────────
@@ -782,6 +996,10 @@ function _doOAuthPopup(id, url) {
 // ─── Close popovers on outside click ──────────────────────────────────────────
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.confirm-anchor')) closeAllConfirm();
+  if (_hashnodeMethodMenuOpen && !e.target.closest('#plat-card-hashnode')) {
+    _hashnodeMethodMenuOpen = false;
+    renderPlatforms(_connections.filter(c => c.type === 'blog'));
+  }
 });
 
 // ─── Init ──────────────────────────────────────────────────────────────────────

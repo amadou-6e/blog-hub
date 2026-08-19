@@ -23,6 +23,25 @@ from tests.tests_ui.conftest import BASE_URL, RUNNER_URL, SETTINGS_URL
 
 pytestmark = pytest.mark.browser
 
+
+def _hashnode_browser_payload(status="disconnected", authorization_url=None):
+    return {
+        "platform": "hashnode",
+        "status": status,
+        "authorizationUrl": authorization_url,
+        "verifiedAt": None,
+        "error": None,
+    }
+
+
+def _show_disconnected_hashnode(page):
+    page.route(
+        f"{BASE_URL}/api/connections/hashnode/browser-connection",
+        lambda route: route.fulfill(json=_hashnode_browser_payload()),
+    )
+    page.reload()
+    page.locator("#plat-card-hashnode").get_by_role("button", name="Connect").wait_for()
+
 # ── 1. Initial load ────────────────────────────────────────────────────────────
 
 
@@ -41,6 +60,112 @@ def test_renders_platforms_section_by_default(settings_page):
 def test_ai_providers_tab_renders_both_cards(ai_providers_page):
     assert ai_providers_page.locator("#ai-wrap-anthropic").is_visible()
     assert ai_providers_page.locator("#ai-wrap-openai").is_visible()
+
+
+def test_hashnode_connect_opens_method_chooser(settings_page):
+    _show_disconnected_hashnode(settings_page)
+    card = settings_page.locator("#plat-card-hashnode")
+
+    card.get_by_role("button", name="Connect").click()
+
+    menu = card.locator("#hashnode-method-menu")
+    assert menu.get_by_role("button", name=re.compile(r"API token")).is_visible()
+    assert menu.get_by_role("button", name=re.compile(r"Browser login")).is_visible()
+
+
+def test_hashnode_api_token_choice_opens_credential_input(settings_page):
+    _show_disconnected_hashnode(settings_page)
+    card = settings_page.locator("#plat-card-hashnode")
+    card.get_by_role("button", name="Connect").click()
+    card.get_by_role("button", name=re.compile(r"API token")).click()
+
+    assert card.locator("#key-input-hashnode").is_visible()
+
+
+def test_hashnode_browser_login_opens_normal_tab(settings_page, context):
+    page = settings_page
+
+    def browser_connection(route):
+        if route.request.method == "POST":
+            route.fulfill(
+                status=201,
+                json=_hashnode_browser_payload(
+                    "waiting_for_login", f"{BASE_URL}/health"
+                ),
+            )
+        else:
+            route.fulfill(json=_hashnode_browser_payload())
+
+    page.route(
+        f"{BASE_URL}/api/connections/hashnode/browser-connection",
+        browser_connection,
+    )
+    page.reload()
+    page.evaluate("""
+      window.__hashnodeOpenCalls = [];
+      const nativeOpen = window.open;
+      window.open = (...args) => {
+        window.__hashnodeOpenCalls.push(args);
+        return nativeOpen.apply(window, args);
+      };
+    """)
+
+    with context.expect_page() as login_tab_info:
+        card = page.locator("#plat-card-hashnode")
+        card.get_by_role("button", name="Connect").click()
+        card.get_by_role("button", name=re.compile(r"Browser login")).click()
+
+    login_tab = login_tab_info.value
+    login_tab.wait_for_url(f"{BASE_URL}/health?purpose=hashnode-login")
+    open_call = page.evaluate("window.__hashnodeOpenCalls[0]")
+    assert open_call == ["about:blank", "_blank"]
+    assert page.get_by_role("button", name="I've signed in").count() == 0
+
+    page.route(
+        f"{BASE_URL}/api/connections/hashnode/browser-connection/complete",
+        lambda route: route.fulfill(
+            status=200,
+            json={
+                "platform": "hashnode",
+                "status": "connected",
+                "authorizationUrl": None,
+                "verifiedAt": "2026-08-19T00:00:00Z",
+                "error": None,
+            },
+        ),
+    )
+    login_tab.close()
+    card = page.locator("#plat-card-hashnode")
+    card.get_by_text("Connected", exact=True).wait_for(timeout=5000)
+    card.get_by_text("Browser login · Persistent profile", exact=True).wait_for()
+    assert login_tab.is_closed()
+
+
+def test_hashnode_connected_card_only_offers_disconnect(page):
+    page.request.post(
+        f"{BASE_URL}/api/auth/login",
+        data={"email": "seed@example.com", "password": "seed1234", "remember_me": False},
+    )
+    page.route(
+        f"{BASE_URL}/api/connections/hashnode/browser-connection",
+        lambda route: route.fulfill(json={
+            "platform": "hashnode",
+            "status": "connected",
+            "authorizationUrl": None,
+            "verifiedAt": "2026-08-19T00:00:00Z",
+            "error": None,
+        }),
+    )
+
+    page.goto(SETTINGS_URL)
+    card = page.locator("#plat-card-hashnode")
+    card.get_by_text("Browser login · Persistent profile", exact=True).wait_for()
+
+    actions = card.get_by_role("button")
+    assert actions.count() == 1
+    assert actions.first.inner_text() == "Disconnect"
+    assert card.get_by_text("Test", exact=True).count() == 0
+    assert card.get_by_text("Refresh login", exact=True).count() == 0
 
 
 def test_claude_card_shows_not_configured_on_fresh_store(ai_providers_page):

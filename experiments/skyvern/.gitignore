@@ -1,0 +1,10 @@
+.env
+.skyvern/
+artifacts/
+browser_sessions/
+credential_vault/
+downloads/
+har/
+log/
+postgres-data/
+videos/

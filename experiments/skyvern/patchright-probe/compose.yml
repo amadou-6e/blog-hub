@@ -1,0 +1,17 @@
+services:
+  hashnode-checkpoint:
+    build:
+      context: ..
+      dockerfile: patchright-probe/Dockerfile
+    init: true
+    environment:
+      PROBE_URL: https://hashnode.com/login
+      PROBE_ARTIFACT_DIR: /artifacts
+      PROBE_EXECUTABLE_PATH: /root/.cache/ms-playwright/chromium-1134/chrome-linux/chrome
+      PROBE_PROFILE_DIR: /profile
+    volumes:
+      - ./artifacts:/artifacts
+      - patchright-profile:/profile
+
+volumes:
+  patchright-profile:

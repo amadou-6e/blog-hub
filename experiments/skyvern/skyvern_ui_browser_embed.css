@@ -1,0 +1,29 @@
+
+/* BlogHub opens this dedicated UI as a login popup, so the browser is the UI. */
+#root > .h-screen.w-full.gap-4.p-6 {
+  padding: 0 !important;
+}
+
+#root > .h-screen.w-full.gap-4.p-6 > .mx-auto.flex.h-full.min-w-0 {
+  width: 100% !important;
+}
+
+#root > .h-screen.w-full.gap-4.p-6 > .mx-auto.flex.h-full.min-w-0 > :first-child,
+#root > .h-screen.w-full.gap-4.p-6 > .mx-auto.flex.h-full.min-w-0 > :nth-child(2) {
+  display: none !important;
+}
+
+#root > .h-screen.w-full.gap-4.p-6 > .mx-auto.flex.h-full.min-w-0 > :nth-child(3) {
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+
+/* The outer popup already supplies navigation; keep only the remote page. */
+#root .bg-slate-800.px-2.py-1\.5 {
+  display: none !important;
+}
+
+/* BlogHub's dedicated viewer always owns input, so this toggle is redundant. */
+#root button.absolute.bottom-2.left-1\/2 {
+  display: none !important;
+}

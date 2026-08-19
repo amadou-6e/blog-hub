@@ -21,6 +21,7 @@ The backend never spawns CLI subprocesses directly.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 
 import httpx
@@ -484,6 +485,112 @@ def _cli_oauth_start(conn_id: str) -> OAuthStartResponse:
 
 class SubmitCodeRequest(BaseModel):
     code: str
+
+
+def _browser_connection_response(connection: dict | None) -> dict:
+    if connection is None:
+        return {"platform": "hashnode", "status": "disconnected"}
+    return {
+        "platform": connection["platform"],
+        "status": connection["status"],
+        "authorizationUrl": (
+            connection.get("app_url")
+            if connection["status"] == "waiting_for_login"
+            else None
+        ),
+        "verifiedAt": connection.get("verified_at"),
+        "error": connection.get("error"),
+    }
+
+
+@router.get("/hashnode/browser-connection")
+def get_hashnode_browser_connection(request: Request):
+    return _browser_connection_response(
+        store.get_browser_connection(request.state.user_id, "hashnode")
+    )
+
+
+@router.post("/hashnode/browser-connection", status_code=201)
+def start_hashnode_browser_connection(request: Request):
+    previous = store.get_browser_connection(request.state.user_id, "hashnode")
+    if previous and previous.get("skyvern_session_id") and previous["status"] == "waiting_for_login":
+        try:
+            runner.cancel_hashnode_browser_login(previous["skyvern_session_id"])
+        except runner.RunnerUnavailable:
+            pass
+    reusable_profile_id = previous.get("skyvern_profile_id") if previous else None
+    try:
+        session = runner.start_hashnode_browser_login(reusable_profile_id)
+    except runner.RunnerUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    connection = store.start_browser_connection(
+        request.state.user_id,
+        "hashnode",
+        session_id=session["session_id"],
+        organization_id=session["organization_id"],
+        app_url=session["app_url"],
+        profile_id=reusable_profile_id,
+    )
+    return _browser_connection_response(connection)
+
+
+@router.post("/hashnode/browser-connection/complete")
+def complete_hashnode_browser_connection(request: Request):
+    user_id = request.state.user_id
+    connection = store.get_browser_connection(user_id, "hashnode")
+    if not connection or connection["status"] != "waiting_for_login":
+        raise HTTPException(status_code=409, detail="No Hashnode browser login is active")
+    store.update_browser_connection(user_id, "hashnode", "verifying")
+    profile_name = "bloghub-" + hashlib.sha256(user_id.encode()).hexdigest()[:16]
+    try:
+        result = runner.complete_hashnode_browser_login(
+            connection["skyvern_session_id"],
+            profile_name,
+            profile_id=connection.get("skyvern_profile_id"),
+            organization_id=connection.get("skyvern_organization_id"),
+        )
+    except runner.RunnerUnavailable as exc:
+        store.update_browser_connection(user_id, "hashnode", "failed", error=str(exc))
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not result.get("authenticated"):
+        failed = store.update_browser_connection(
+            user_id, "hashnode", "failed",
+            profile_id=result.get("profile_id"),
+            error="Hashnode sign-in was not completed in the browser",
+        )
+        return _browser_connection_response(failed)
+    if result.get("organization_id") != connection["skyvern_organization_id"]:
+        if result.get("profile_id"):
+            try:
+                runner.delete_hashnode_browser_profile(result["profile_id"])
+            except runner.RunnerUnavailable:
+                pass
+        failed = store.update_browser_connection(
+            user_id, "hashnode", "failed",
+            error="Browser profile ownership could not be verified",
+        )
+        return _browser_connection_response(failed)
+    connected = store.update_browser_connection(
+        user_id, "hashnode", "connected", profile_id=result["profile_id"]
+    )
+    return _browser_connection_response(connected)
+
+
+@router.delete("/hashnode/browser-connection")
+def disconnect_hashnode_browser_connection(request: Request):
+    connection = store.get_browser_connection(request.state.user_id, "hashnode")
+    if connection and connection.get("skyvern_session_id") and connection["status"] == "waiting_for_login":
+        try:
+            runner.cancel_hashnode_browser_login(connection["skyvern_session_id"])
+        except runner.RunnerUnavailable:
+            pass
+    if connection and connection.get("skyvern_profile_id"):
+        try:
+            runner.delete_hashnode_browser_profile(connection["skyvern_profile_id"])
+        except runner.RunnerUnavailable:
+            pass
+    store.delete_browser_connection(request.state.user_id, "hashnode")
+    return {"platform": "hashnode", "status": "disconnected"}
 
 
 @router.post("/{conn_id}/submit-code")

@@ -1,0 +1,6 @@
+patchright==1.62.1 \
+    --hash=sha256:ae908d0a69885f344bc36404a02bbfd772fc64c281f9bb77957dbc51be395592
+pyee==13.0.1 \
+    --hash=sha256:af2f8fede4171ef667dfded53f96e2ed0d6e6bd7ee3bb46437f77e3b57689228
+greenlet==3.5.5 \
+    --hash=sha256:74cc6df89ec5302337adc9cf096221cbed2510fd444b0e0f1586cf0470740864

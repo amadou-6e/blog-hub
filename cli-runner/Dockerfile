@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-# System deps: Node (for claude CLI) + curl
+# System deps: Node (for provider CLIs) + curl
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         ca-certificates \
@@ -18,10 +18,10 @@ RUN npm install -g @openai/codex
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY main.py .
+COPY main.py hashnode_browser.py skyvern_browser.py ./
 
 # Credential directories (will be overridden by named volumes in docker-compose)
-RUN mkdir -p /root/.claude /root/.config/openai
+RUN mkdir -p /root/.claude /root/.config/openai /root/.config/gh /data/skyvern-browser-sessions
 
 EXPOSE 8001
 

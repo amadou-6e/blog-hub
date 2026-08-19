@@ -218,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"\n  BlogHub stack: http://127.0.0.1:{port}/screens/login/v1.html"
                 "?next=%2Fscreens%2Fsettings%2Fv2.html"
             )
-            print("  Runtime:       Docker Compose (backend + cli-runner)\n")
+            print("  Runtime:       Docker Compose (backend + cli-runner + Skyvern)\n")
             return run_compose_stack(compose_command, port)
 
         handle, health = ensure_runner(runner_url, args.runner)
