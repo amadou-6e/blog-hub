@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 import sqlite3
+import time
 
 
 RUNNER = Path(__file__).resolve().parents[2] / "cli-runner"
@@ -62,3 +63,27 @@ def test_profile_check_accepts_encrypted_chromium_medium_session(tmp_path):
     result = medium_browser.check_medium_profile(profile_dir=str(tmp_path))
 
     assert result == {"authenticated": True, "status": "connected"}
+
+
+def test_profile_check_rejects_expired_chromium_medium_session(tmp_path):
+    cookie_db = tmp_path / "Default" / "Cookies"
+    cookie_db.parent.mkdir()
+    connection = sqlite3.connect(cookie_db)
+    connection.execute(
+        "CREATE TABLE cookies (host_key TEXT, name TEXT, expires_utc INTEGER, "
+        "value TEXT, encrypted_value BLOB)"
+    )
+    expired_utc = int((time.time() + 11_644_473_600 - 60) * 1_000_000)
+    connection.executemany(
+        "INSERT INTO cookies VALUES (?, ?, ?, ?, ?)",
+        [
+            (".medium.com", "uid", expired_utc, "", b"encrypted"),
+            (".medium.com", "sid", expired_utc, "", b"encrypted"),
+        ],
+    )
+    connection.commit()
+    connection.close()
+
+    result = medium_browser.check_medium_profile(profile_dir=str(tmp_path))
+
+    assert result == {"authenticated": False, "status": "login_required"}

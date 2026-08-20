@@ -5,6 +5,9 @@ import json
 from pathlib import Path
 import sqlite3
 import time
+
+
+_CHROMIUM_EPOCH_OFFSET_SECONDS = 11_644_473_600
 def check_medium_profile(*, profile_dir: str) -> dict:
     profile = Path(profile_dir)
     authenticated = _chromium_cookie_db_has_medium_session(profile)
@@ -32,6 +35,17 @@ def _cookie_is_not_expired(expires: object) -> bool:
     return value < 0 or value > time.time()
 
 
+def _chromium_cookie_is_not_expired(expires_utc: object) -> bool:
+    try:
+        value = int(expires_utc)
+    except (TypeError, ValueError):
+        return False
+    if value == 0:
+        return True
+    expires_unix = value / 1_000_000 - _CHROMIUM_EPOCH_OFFSET_SECONDS
+    return expires_unix > time.time()
+
+
 def _chromium_cookie_db_has_medium_session(profile: Path) -> bool:
     candidates = [
         profile / "Default" / "Cookies",
@@ -57,7 +71,7 @@ def _chromium_cookie_db_has_medium_session(profile: Path) -> bool:
         for domain, name, expires_utc, value, encrypted_value in rows:
             if not _is_medium_session_cookie(domain, name):
                 continue
-            if expires_utc and int(expires_utc) < 10_000_000_000_000_000:
+            if not _chromium_cookie_is_not_expired(expires_utc):
                 continue
             if not (value or encrypted_value):
                 continue
