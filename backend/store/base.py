@@ -121,6 +121,24 @@ class ArticleStore(Protocol):
     def set_destinations_pending(self, article_id: str, platforms: list[str]) -> None:
         ...
 
+    # ── Remote article identity ──────────────────────────────────────────────
+
+    def get_remote_article_identity(
+        self, user_id: str, platform: str, remote_id: str,
+    ) -> dict | None:
+        ...
+
+    def list_article_remote_identities(
+        self, user_id: str, article_id: str,
+    ) -> list[dict]:
+        ...
+
+    def upsert_remote_article_identity(
+        self, user_id: str, article_id: str, platform: str, remote_id: str,
+        **kwargs: Any,
+    ) -> dict:
+        ...
+
     # ── Connections ──────────────────────────────────────────────────────────
 
     def list_connections(self, user_id: str) -> list[dict]:

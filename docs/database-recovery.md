@@ -23,11 +23,14 @@ Python so it can be read and reviewed on its own. BlogHub applies it automatical
 when it opens the database; every statement is idempotent, so re-applying it
 against an already-current database is a no-op.
 
-BlogHub does not migrate schemas in place. When `schema.sql` changes, delete the
-runtime database (`data/bloghub.db`) and let it be recreated fresh, instead of
-writing an upgrade path for the old shape. Bump `SCHEMA_VERSION` in
-`backend/store/schema.py` alongside a breaking schema change so `status` reports
-it.
+BlogHub applies additive migrations in place by re-running the idempotent schema
+and advancing `SCHEMA_VERSION` in `backend/store/schema.py`. Version 8 adds the
+`remote_article_identities` table and supporting indexes; opening a version 7
+database creates those structures without rewriting existing article rows.
+
+Breaking changes still require an explicit migration before release. Do not
+drop or rename columns in `schema.sql` and rely on `CREATE TABLE IF NOT EXISTS`.
+Take a verified database-and-blob backup before deploying a schema upgrade.
 
 Check the current schema version and database integrity with:
 
@@ -96,6 +99,16 @@ python scripts/bloghub_db.py status
 
 Restore stages the database and blobs before replacing the active paths. If the
 replacement fails, it puts the previous database and blob directory back.
+
+## Version 8 rollback
+
+The version 8 migration is additive. Rolling the application binary back leaves
+the remote identity table unused, but downgrade compatibility is not guaranteed
+by older BlogHub versions. The supported rollback is to stop all writers and
+restore the verified version 7 backup taken before deployment. A later retry can
+open that backup and apply version 8 again. Restoring only the SQLite file is not
+supported because cover references and article assets belong to the same backup
+generation.
 
 ## Recovery policy
 

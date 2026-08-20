@@ -34,6 +34,7 @@ from backend.store.article_revisions import ArticleRevisionStoreMixin
 from backend.store.connection_auth import ConnectionAuthStoreMixin
 from backend.store.browser_publish import BrowserPublishStoreMixin
 from backend.store.browser_connections import BrowserConnectionStoreMixin
+from backend.store.remote_articles import RemoteArticleStoreMixin
 from backend.store.schema import (
     SEED_USER_EMAIL as DEFAULT_SEED_USER_EMAIL,
     SEED_USER_HASH as DEFAULT_SEED_USER_HASH,
@@ -221,6 +222,7 @@ def _seed_articles() -> list[dict]:
 
 
 class SQLiteStore(
+    RemoteArticleStoreMixin,
     BrowserConnectionStoreMixin,
     BrowserPublishStoreMixin,
     ConnectionAuthStoreMixin,
@@ -994,6 +996,7 @@ class SQLiteStore(
                 DELETE FROM article_timeline;
                 DELETE FROM article_revisions;
                 DELETE FROM article_destinations;
+                DELETE FROM remote_article_identities;
                 DELETE FROM article_assets;
                 DELETE FROM articles;
                 DELETE FROM jobs;

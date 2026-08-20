@@ -97,6 +97,21 @@ def set_destinations_pending(user_id: str, *a, **kw):
     return _backend.set_destinations_pending(user_id, *a, **kw)
 
 
+# ── Remote article identity ─────────────────────────────────────────────────
+
+
+def get_remote_article_identity(user_id: str, *a, **kw):
+    return _backend.get_remote_article_identity(user_id, *a, **kw)
+
+
+def list_article_remote_identities(user_id: str, *a, **kw):
+    return _backend.list_article_remote_identities(user_id, *a, **kw)
+
+
+def upsert_remote_article_identity(user_id: str, *a, **kw):
+    return _backend.upsert_remote_article_identity(user_id, *a, **kw)
+
+
 # ── Connections ───────────────────────────────────────────────────────────────
 
 

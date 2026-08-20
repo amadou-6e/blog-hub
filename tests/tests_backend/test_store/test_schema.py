@@ -38,6 +38,7 @@ def test_fresh_database_has_current_schema_and_seed_user(tmp_path):
             "agent_session_outputs",
             "browser_publish_runs",
             "browser_connections",
+            "remote_article_identities",
         } <= tables
         assert store._con.execute(
             "SELECT COUNT(*) FROM users WHERE id=?", (SEED_USER_ID,)
@@ -49,6 +50,27 @@ def test_fresh_database_has_current_schema_and_seed_user(tmp_path):
             )
         }
         assert "mode" in publish_columns
+        remote_identity_columns = {
+            row[1]
+            for row in store._con.execute(
+                "PRAGMA table_info(remote_article_identities)"
+            )
+        }
+        assert {
+            "user_id",
+            "platform",
+            "remote_id",
+            "article_id",
+            "remote_content_fingerprint",
+            "subtitle",
+            "cover_asset_id",
+            "last_sync_status",
+            "last_sync_result_json",
+            "remote_created_at",
+            "remote_updated_at",
+            "last_sync_started_at",
+            "last_synced_at",
+        } <= remote_identity_columns
     finally:
         store.close()
 
