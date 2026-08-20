@@ -574,6 +574,90 @@ class SQLiteStore(
             self._con.commit()
             return self.get_article(user_id, article_id)  # type: ignore[return-value]
 
+    def get_or_create_remote_article(
+        self,
+        user_id: str,
+        platform: str,
+        remote_id: str,
+        *,
+        title: str,
+        body: str,
+        canonical_url: str | None = None,
+        remote_updated_at: str | None = None,
+    ) -> tuple[dict, bool]:
+        """Fetch the local article mapped to (platform, remote_id), creating both
+        the article and its identity mapping if no mapping exists yet.
+
+        The identity lookup, article creation, and identity insert all happen
+        inside a single workspace-lock acquisition so that two concurrent sync
+        calls for the same remote article cannot each create a separate local
+        article (see PR #69 review: the previous two-step
+        get_remote_article_identity + create_imported_article sequence left a
+        check-then-act race window between separate lock acquisitions).
+        """
+        platform = platform.strip().lower()
+        remote_id = remote_id.strip()
+        with self._workspace_lock.acquire():
+            existing = self._con.execute(
+                """SELECT article_id FROM remote_article_identities
+                   WHERE user_id=? AND platform=? AND remote_id=?""",
+                (user_id, platform, remote_id),
+            ).fetchone()
+            if existing is not None:
+                article = self.get_article(user_id, existing["article_id"])
+                if article is not None:
+                    return article, False
+
+            article_id = f"art_{uuid.uuid4().hex[:8]}"
+            timestamp = remote_updated_at or _ts(_now())
+            body_path = self._write_body(article_id, body)
+            self._con.execute(
+                """INSERT INTO articles
+                   (id, title, body, body_path, word_count, gate, source, source_platform,
+                    canonical_url, created_at, updated_at, user_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    article_id,
+                    title,
+                    "",
+                    body_path,
+                    len(body.split()),
+                    "pending",
+                    "remote",
+                    platform,
+                    canonical_url,
+                    timestamp,
+                    timestamp,
+                    user_id,
+                ),
+            )
+            for dest_platform in _PLATFORMS:
+                self._con.execute(
+                    "INSERT INTO article_destinations "
+                    "(article_id, platform, status, label) VALUES (?,?,?,?)",
+                    (article_id, dest_platform, "none", "—"),
+                )
+            self._add_timeline(article_id, f"Imported from {platform.title()}")
+            self._insert_article_revision(
+                article_id,
+                1,
+                title,
+                body,
+                source="remote-sync",
+                description=f"Imported from {platform.title()}",
+                created_by=user_id,
+                created_at=timestamp,
+            )
+            now = _ts(_now())
+            self._con.execute(
+                """INSERT INTO remote_article_identities
+                   (user_id, platform, remote_id, article_id, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?)""",
+                (user_id, platform, remote_id, article_id, now, now),
+            )
+            self._con.commit()
+            return self.get_article(user_id, article_id), True  # type: ignore[return-value]
+
     def sync_remote_article_metadata(
         self,
         user_id: str,

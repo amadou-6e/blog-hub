@@ -37,6 +37,10 @@ def create_imported_article(user_id: str, *a, **kw):
     return _backend.create_imported_article(user_id, *a, **kw)
 
 
+def get_or_create_remote_article(user_id: str, *a, **kw):
+    return _backend.get_or_create_remote_article(user_id, *a, **kw)
+
+
 def sync_remote_article_metadata(user_id: str, *a, **kw):
     return _backend.sync_remote_article_metadata(user_id, *a, **kw)
 

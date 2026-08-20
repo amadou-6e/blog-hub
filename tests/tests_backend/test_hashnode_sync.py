@@ -343,3 +343,104 @@ def test_manual_sync_endpoint_requires_pat_and_returns_typed_result(client, monk
         f"/api/articles/{article_id}/assets/"
     )
     assert client.get(summary["previewImageUrl"]).content == b"thumbnail"
+
+
+def test_concurrent_first_sync_does_not_create_duplicate_articles(tmp_path):
+    import threading
+
+    store = _store(tmp_path)
+    try:
+        results: list[tuple[str, bool]] = []
+        errors: list[Exception] = []
+        barrier = threading.Barrier(5)
+
+        def worker():
+            barrier.wait()
+            try:
+                article, created = store.get_or_create_remote_article(
+                    store.SEED_USER_ID,
+                    "hashnode",
+                    "draft-1",
+                    title="Remote draft-1",
+                    body="# Remote draft-1\n\nBody for draft-1.\n",
+                )
+                results.append((article["id"], created))
+            except Exception as exc:  # pragma: no cover - failure path
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker) for _ in range(5)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert not errors, errors
+        assert len(results) == 5
+        article_ids = {article_id for article_id, _ in results}
+        assert len(article_ids) == 1, f"expected one article id, got {article_ids}"
+        assert sum(1 for _, created in results if created) == 1
+
+        _, total = store.list_articles(store.SEED_USER_ID, q="Remote draft-1")
+        assert total == 1
+        identity = store.get_remote_article_identity(
+            store.SEED_USER_ID, "hashnode", "draft-1",
+        )
+        assert identity is not None
+        assert identity["article_id"] in article_ids
+    finally:
+        store.close()
+
+
+def test_sync_reports_revision_conflict_on_concurrent_user_edit(tmp_path):
+    store = _store(tmp_path)
+    try:
+        remote_v1 = _remote("draft-1")
+        first = sync_hashnode_articles(
+            store.SEED_USER_ID,
+            "pat",
+            store=store,
+            client=FakeHashnodeClient(drafts=[remote_v1], published=[]),
+            image_fetcher=_valid_image,
+        )
+        assert first["articles"][0]["status"] == "succeeded"
+        article_id = first["articles"][0]["articleId"]
+
+        real_get_current = store.get_current_article_revision
+
+        def racing_get_current(user_id: str, aid: str):
+            current = real_get_current(user_id, aid)
+            if aid == article_id:
+                # Simulate a user's in-editor save landing between the sync's
+                # read of the current revision and its own write.
+                store.save_article_revision(
+                    user_id,
+                    aid,
+                    title="User's local title",
+                    content="User's local edit, not from Hashnode.",
+                    source="user",
+                    description="Concurrent user edit",
+                )
+            return current
+
+        store.get_current_article_revision = racing_get_current
+
+        remote_v2 = _remote(
+            "draft-1", body="# Remote draft-1\n\nChanged remote content.\n",
+        )
+        second = sync_hashnode_articles(
+            store.SEED_USER_ID,
+            "pat",
+            store=store,
+            client=FakeHashnodeClient(drafts=[remote_v2], published=[]),
+            image_fetcher=_valid_image,
+        )
+
+        article_result = second["articles"][0]
+        assert article_result["status"] == "failed"
+        assert article_result["error"] == "revision_conflict"
+
+        del store.get_current_article_revision
+        current = store.get_current_article_revision(store.SEED_USER_ID, article_id)
+        assert current["content"] == "User's local edit, not from Hashnode."
+    finally:
+        store.close()

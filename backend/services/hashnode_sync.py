@@ -8,6 +8,7 @@ from typing import Any, Callable, Protocol
 
 import backend.store as default_store
 from backend.services.image_ingest import IngestedImage, fetch_and_validate_image
+from backend.store.article_revisions import RevisionConflict
 from blogs.hashnode.client import HashnodeClient, HashnodeRemoteArticle
 
 
@@ -16,7 +17,9 @@ class HashnodeSyncStore(Protocol):
         self, user_id: str, platform: str, remote_id: str,
     ) -> dict | None: ...
 
-    def create_imported_article(self, user_id: str, *args, **kwargs) -> dict: ...
+    def get_or_create_remote_article(
+        self, user_id: str, platform: str, remote_id: str, **kwargs,
+    ) -> tuple[dict, bool]: ...
 
     def get_current_article_revision(self, user_id: str, article_id: str) -> dict | None: ...
 
@@ -69,6 +72,8 @@ def _cover_filename(remote_id: str) -> str:
 
 
 def _safe_error_code(exc: Exception) -> str:
+    if isinstance(exc, RevisionConflict):
+        return "revision_conflict"
     return "hashnode_request_failed" if exc.__class__.__module__.startswith(
         ("requests", "httpx", "blogs.hashnode")
     ) else "article_sync_failed"
@@ -142,33 +147,42 @@ def _sync_article(
     store: HashnodeSyncStore,
     image_fetcher: Callable[[str], IngestedImage],
 ) -> dict:
-    identity = store.get_remote_article_identity(user_id, "hashnode", remote.article_id)
     fingerprint = _fingerprint(remote)
     remote_updated_at = _iso(remote.updated_at)
     revision_created = False
 
-    if identity is None:
-        article = store.create_imported_article(
-            user_id,
-            remote.title,
-            remote.body_markdown,
-            "hashnode",
-            canonical_url=remote.canonical_url,
-            remote_updated_at=remote_updated_at,
-        )
-        article_id = article["id"]
+    article, created = store.get_or_create_remote_article(
+        user_id,
+        "hashnode",
+        remote.article_id,
+        title=remote.title,
+        body=remote.body_markdown,
+        canonical_url=remote.canonical_url,
+        remote_updated_at=remote_updated_at,
+    )
+    article_id = article["id"]
+
+    if created:
+        identity = None
         action = "imported"
         revision_created = True
     else:
-        article_id = identity["article_id"]
-        content_changed = identity.get("remote_content_fingerprint") != fingerprint
-        if identity.get("remote_content_fingerprint") is None:
-            current = store.get_current_article_revision(user_id, article_id)
+        identity = store.get_remote_article_identity(user_id, "hashnode", remote.article_id)
+        current = store.get_current_article_revision(user_id, article_id)
+        content_changed = (
+            identity is not None
+            and identity.get("remote_content_fingerprint") != fingerprint
+        )
+        if identity is None or identity.get("remote_content_fingerprint") is None:
             content_changed = current is None or (
                 current["title"] != remote.title
                 or current["content"] != remote.body_markdown
             )
         if content_changed:
+            # Pass the revision we just read as expected_revision_id so a
+            # concurrent user edit made between our read and this write is
+            # surfaced as a RevisionConflict instead of being silently
+            # overwritten (see PR #69 review).
             store.save_article_revision(
                 user_id,
                 article_id,
@@ -176,6 +190,7 @@ def _sync_article(
                 content=remote.body_markdown,
                 source="remote-sync",
                 description="Synchronized from Hashnode",
+                expected_revision_id=current["id"] if current else None,
             )
             revision_created = True
             action = "updated"

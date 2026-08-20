@@ -53,6 +53,19 @@ class ArticleStore(Protocol):
     ) -> dict:
         ...
 
+    def get_or_create_remote_article(
+        self,
+        user_id: str,
+        platform: str,
+        remote_id: str,
+        *,
+        title: str,
+        body: str,
+        canonical_url: str | None = None,
+        remote_updated_at: str | None = None,
+    ) -> tuple[dict, bool]:
+        ...
+
     def sync_remote_article_metadata(
         self,
         user_id: str,
