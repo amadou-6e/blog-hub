@@ -33,14 +33,20 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from hashnode_browser import check_hashnode_profile, upload_hashnode_draft
+from medium_browser import check_medium_profile
 from skyvern_browser import (
     SkyvernUnavailable,
     close_hashnode_login,
+    close_medium_login,
     delete_hashnode_profile,
+    delete_medium_profile,
     finish_hashnode_login,
+    finish_medium_login,
     get_hashnode_login,
+    get_medium_login,
     profile_directory,
     start_hashnode_login,
+    start_medium_login,
 )
 
 app = FastAPI(title="BlogHub CLI Runner", version="0.1.0")
@@ -245,6 +251,32 @@ class HashnodeBrowserProfileRequest(BaseModel):
 
 _chat_processes: dict[str, subprocess.Popen] = {}
 
+_BROWSER_LOGIN = {
+    "hashnode": {
+        "start": start_hashnode_login,
+        "get": get_hashnode_login,
+        "close": close_hashnode_login,
+        "finish": finish_hashnode_login,
+        "delete": delete_hashnode_profile,
+        "check": check_hashnode_profile,
+    },
+    "medium": {
+        "start": start_medium_login,
+        "get": get_medium_login,
+        "close": close_medium_login,
+        "finish": finish_medium_login,
+        "delete": delete_medium_profile,
+        "check": check_medium_profile,
+    },
+}
+
+
+def _browser_provider(platform: str) -> dict:
+    provider = _BROWSER_LOGIN.get(platform)
+    if provider is None:
+        raise HTTPException(404, f"{platform} does not support browser login")
+    return provider
+
 
 @app.post("/browser/hashnode/upload")
 def hashnode_browser_upload(req: HashnodeBrowserUploadRequest):
@@ -265,8 +297,13 @@ def hashnode_browser_upload(req: HashnodeBrowserUploadRequest):
 
 @app.post("/browser/hashnode/login", status_code=201)
 def hashnode_browser_login(req: Optional[HashnodeBrowserLoginRequest] = None):
+    return browser_login("hashnode", req)
+
+
+@app.post("/browser/{platform}/login", status_code=201)
+def browser_login(platform: str, req: Optional[HashnodeBrowserLoginRequest] = None):
     try:
-        return start_hashnode_login(req.profile_id if req else None)
+        return _browser_provider(platform)["start"](req.profile_id if req else None)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except SkyvernUnavailable as exc:
@@ -275,8 +312,13 @@ def hashnode_browser_login(req: Optional[HashnodeBrowserLoginRequest] = None):
 
 @app.get("/browser/hashnode/login/{session_id}")
 def hashnode_browser_login_status(session_id: str):
+    return browser_login_status("hashnode", session_id)
+
+
+@app.get("/browser/{platform}/login/{session_id}")
+def browser_login_status(platform: str, session_id: str):
     try:
-        return get_hashnode_login(session_id)
+        return _browser_provider(platform)["get"](session_id)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except SkyvernUnavailable as exc:
@@ -285,8 +327,13 @@ def hashnode_browser_login_status(session_id: str):
 
 @app.delete("/browser/hashnode/login/{session_id}")
 def hashnode_browser_login_cancel(session_id: str):
+    return browser_login_cancel("hashnode", session_id)
+
+
+@app.delete("/browser/{platform}/login/{session_id}")
+def browser_login_cancel(platform: str, session_id: str):
     try:
-        close_hashnode_login(session_id)
+        _browser_provider(platform)["close"](session_id)
         return {"status": "canceled"}
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -298,14 +345,22 @@ def hashnode_browser_login_cancel(session_id: str):
 def hashnode_browser_login_complete(
     session_id: str, req: HashnodeBrowserLoginCompleteRequest,
 ):
+    return browser_login_complete("hashnode", session_id, req)
+
+
+@app.post("/browser/{platform}/login/{session_id}/complete")
+def browser_login_complete(
+    platform: str, session_id: str, req: HashnodeBrowserLoginCompleteRequest,
+):
     try:
-        profile = finish_hashnode_login(
+        provider = _browser_provider(platform)
+        profile = provider["finish"](
             session_id,
             req.profile_name,
             profile_id=req.profile_id,
             organization_id=req.organization_id,
         )
-        verification = check_hashnode_profile(profile_dir=profile["profile_dir"])
+        verification = provider["check"](profile_dir=profile["profile_dir"])
         return {**verification, **profile}
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -317,8 +372,13 @@ def hashnode_browser_login_complete(
 
 @app.delete("/browser/hashnode/profiles/{profile_id}")
 def hashnode_browser_profile_delete(profile_id: str):
+    return browser_profile_delete("hashnode", profile_id)
+
+
+@app.delete("/browser/{platform}/profiles/{profile_id}")
+def browser_profile_delete(platform: str, profile_id: str):
     try:
-        delete_hashnode_profile(profile_id)
+        _browser_provider(platform)["delete"](profile_id)
         return {"status": "disconnected"}
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc

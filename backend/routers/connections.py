@@ -52,6 +52,7 @@ _VALID_IDS = {"medium", "hashnode", "devto", "anthropic", "openai"}
 _BLOG_IDS = {"medium", "hashnode", "devto"}
 _CLI_IDS = {"anthropic", "openai"}
 _PROVIDER_MAP = {"anthropic": "anthropic", "openai": "openai"}
+_BROWSER_LOGIN_IDS = {"medium", "hashnode"}
 
 # ── Mock draft data ───────────────────────────────────────────────────────────
 # Real implementation would call each platform's API with the stored token.
@@ -487,9 +488,9 @@ class SubmitCodeRequest(BaseModel):
     code: str
 
 
-def _browser_connection_response(connection: dict | None) -> dict:
+def _browser_connection_response(platform: str, connection: dict | None) -> dict:
     if connection is None:
-        return {"platform": "hashnode", "status": "disconnected"}
+        return {"platform": platform, "status": "disconnected"}
     return {
         "platform": connection["platform"],
         "status": connection["status"],
@@ -505,92 +506,122 @@ def _browser_connection_response(connection: dict | None) -> dict:
 
 @router.get("/hashnode/browser-connection")
 def get_hashnode_browser_connection(request: Request):
+    return get_browser_connection(request, "hashnode")
+
+
+@router.get("/{conn_id}/browser-connection")
+def get_browser_connection(request: Request, conn_id: str):
+    if conn_id not in _BROWSER_LOGIN_IDS:
+        raise HTTPException(status_code=400, detail=f"{conn_id} does not support browser login")
     return _browser_connection_response(
-        store.get_browser_connection(request.state.user_id, "hashnode")
+        conn_id,
+        store.get_browser_connection(request.state.user_id, conn_id)
     )
 
 
 @router.post("/hashnode/browser-connection", status_code=201)
 def start_hashnode_browser_connection(request: Request):
-    previous = store.get_browser_connection(request.state.user_id, "hashnode")
+    return start_browser_connection(request, "hashnode")
+
+
+@router.post("/{conn_id}/browser-connection", status_code=201)
+def start_browser_connection(request: Request, conn_id: str):
+    if conn_id not in _BROWSER_LOGIN_IDS:
+        raise HTTPException(status_code=400, detail=f"{conn_id} does not support browser login")
+    previous = store.get_browser_connection(request.state.user_id, conn_id)
     if previous and previous.get("skyvern_session_id") and previous["status"] == "waiting_for_login":
         try:
-            runner.cancel_hashnode_browser_login(previous["skyvern_session_id"])
+            runner.cancel_browser_login(conn_id, previous["skyvern_session_id"])
         except runner.RunnerUnavailable:
             pass
     reusable_profile_id = previous.get("skyvern_profile_id") if previous else None
     try:
-        session = runner.start_hashnode_browser_login(reusable_profile_id)
+        session = runner.start_browser_login(conn_id, reusable_profile_id)
     except runner.RunnerUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     connection = store.start_browser_connection(
         request.state.user_id,
-        "hashnode",
+        conn_id,
         session_id=session["session_id"],
         organization_id=session["organization_id"],
         app_url=session["app_url"],
         profile_id=reusable_profile_id,
     )
-    return _browser_connection_response(connection)
+    return _browser_connection_response(conn_id, connection)
 
 
 @router.post("/hashnode/browser-connection/complete")
 def complete_hashnode_browser_connection(request: Request):
+    return complete_browser_connection(request, "hashnode")
+
+
+@router.post("/{conn_id}/browser-connection/complete")
+def complete_browser_connection(request: Request, conn_id: str):
+    if conn_id not in _BROWSER_LOGIN_IDS:
+        raise HTTPException(status_code=400, detail=f"{conn_id} does not support browser login")
     user_id = request.state.user_id
-    connection = store.get_browser_connection(user_id, "hashnode")
+    connection = store.get_browser_connection(user_id, conn_id)
     if not connection or connection["status"] != "waiting_for_login":
-        raise HTTPException(status_code=409, detail="No Hashnode browser login is active")
-    store.update_browser_connection(user_id, "hashnode", "verifying")
-    profile_name = "bloghub-" + hashlib.sha256(user_id.encode()).hexdigest()[:16]
+        raise HTTPException(status_code=409, detail=f"No {conn_id.title()} browser login is active")
+    store.update_browser_connection(user_id, conn_id, "verifying")
+    profile_name = f"bloghub-{conn_id}-" + hashlib.sha256(user_id.encode()).hexdigest()[:16]
     try:
-        result = runner.complete_hashnode_browser_login(
+        result = runner.complete_browser_login(
+            conn_id,
             connection["skyvern_session_id"],
             profile_name,
             profile_id=connection.get("skyvern_profile_id"),
             organization_id=connection.get("skyvern_organization_id"),
         )
     except runner.RunnerUnavailable as exc:
-        store.update_browser_connection(user_id, "hashnode", "failed", error=str(exc))
+        store.update_browser_connection(user_id, conn_id, "failed", error=str(exc))
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not result.get("authenticated"):
         failed = store.update_browser_connection(
-            user_id, "hashnode", "failed",
+            user_id, conn_id, "failed",
             profile_id=result.get("profile_id"),
-            error="Hashnode sign-in was not completed in the browser",
+            error=f"{conn_id.title()} sign-in was not completed in the browser",
         )
-        return _browser_connection_response(failed)
+        return _browser_connection_response(conn_id, failed)
     if result.get("organization_id") != connection["skyvern_organization_id"]:
         if result.get("profile_id"):
             try:
-                runner.delete_hashnode_browser_profile(result["profile_id"])
+                runner.delete_browser_profile(conn_id, result["profile_id"])
             except runner.RunnerUnavailable:
                 pass
         failed = store.update_browser_connection(
-            user_id, "hashnode", "failed",
+            user_id, conn_id, "failed",
             error="Browser profile ownership could not be verified",
         )
-        return _browser_connection_response(failed)
+        return _browser_connection_response(conn_id, failed)
     connected = store.update_browser_connection(
-        user_id, "hashnode", "connected", profile_id=result["profile_id"]
+        user_id, conn_id, "connected", profile_id=result["profile_id"]
     )
-    return _browser_connection_response(connected)
+    return _browser_connection_response(conn_id, connected)
 
 
 @router.delete("/hashnode/browser-connection")
 def disconnect_hashnode_browser_connection(request: Request):
-    connection = store.get_browser_connection(request.state.user_id, "hashnode")
+    return disconnect_browser_connection(request, "hashnode")
+
+
+@router.delete("/{conn_id}/browser-connection")
+def disconnect_browser_connection(request: Request, conn_id: str):
+    if conn_id not in _BROWSER_LOGIN_IDS:
+        raise HTTPException(status_code=400, detail=f"{conn_id} does not support browser login")
+    connection = store.get_browser_connection(request.state.user_id, conn_id)
     if connection and connection.get("skyvern_session_id") and connection["status"] == "waiting_for_login":
         try:
-            runner.cancel_hashnode_browser_login(connection["skyvern_session_id"])
+            runner.cancel_browser_login(conn_id, connection["skyvern_session_id"])
         except runner.RunnerUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
     if connection and connection.get("skyvern_profile_id"):
         try:
-            runner.delete_hashnode_browser_profile(connection["skyvern_profile_id"])
+            runner.delete_browser_profile(conn_id, connection["skyvern_profile_id"])
         except runner.RunnerUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-    store.delete_browser_connection(request.state.user_id, "hashnode")
-    return {"platform": "hashnode", "status": "disconnected"}
+    store.delete_browser_connection(request.state.user_id, conn_id)
+    return {"platform": conn_id, "status": "disconnected"}
 
 
 @router.post("/{conn_id}/submit-code")

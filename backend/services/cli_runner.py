@@ -162,26 +162,51 @@ def hashnode_browser_upload(
         raise RunnerUnavailable(f"Browser runner unavailable: {exc}") from exc
 
 
-def start_hashnode_browser_login(profile_id: str | None = None) -> dict:
+def start_browser_login(platform: str, profile_id: str | None = None) -> dict:
     if profile_id:
-        return _post("/browser/hashnode/login", profile_id=profile_id)
-    return _post("/browser/hashnode/login")
+        return _post(f"/browser/{platform}/login", profile_id=profile_id)
+    return _post(f"/browser/{platform}/login")
+
+
+def start_hashnode_browser_login(profile_id: str | None = None) -> dict:
+    return start_browser_login("hashnode", profile_id)
+
+
+def start_medium_browser_login(profile_id: str | None = None) -> dict:
+    return start_browser_login("medium", profile_id)
+
+
+def get_browser_login(platform: str, session_id: str) -> dict:
+    return _get(f"/browser/{platform}/login/{session_id}")
 
 
 def get_hashnode_browser_login(session_id: str) -> dict:
-    return _get(f"/browser/hashnode/login/{session_id}")
+    return get_browser_login("hashnode", session_id)
 
 
-def cancel_hashnode_browser_login(session_id: str) -> None:
+def get_medium_browser_login(session_id: str) -> dict:
+    return get_browser_login("medium", session_id)
+
+
+def cancel_browser_login(platform: str, session_id: str) -> None:
     try:
         with _client() as client:
-            response = client.delete(f"/browser/hashnode/login/{session_id}")
+            response = client.delete(f"/browser/{platform}/login/{session_id}")
             response.raise_for_status()
     except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
         raise RunnerUnavailable(f"Browser login runner unavailable: {exc}") from exc
 
 
-def complete_hashnode_browser_login(
+def cancel_hashnode_browser_login(session_id: str) -> None:
+    cancel_browser_login("hashnode", session_id)
+
+
+def cancel_medium_browser_login(session_id: str) -> None:
+    cancel_browser_login("medium", session_id)
+
+
+def complete_browser_login(
+    platform: str,
     session_id: str,
     profile_name: str,
     *,
@@ -191,7 +216,7 @@ def complete_hashnode_browser_login(
     try:
         with _client() as client:
             response = client.post(
-                f"/browser/hashnode/login/{session_id}/complete",
+                f"/browser/{platform}/login/{session_id}/complete",
                 json={
                     "profile_name": profile_name,
                     "profile_id": profile_id,
@@ -205,13 +230,53 @@ def complete_hashnode_browser_login(
         raise RunnerUnavailable(f"Browser login runner unavailable: {exc}") from exc
 
 
-def delete_hashnode_browser_profile(profile_id: str) -> None:
+def complete_hashnode_browser_login(
+    session_id: str,
+    profile_name: str,
+    *,
+    profile_id: str | None = None,
+    organization_id: str | None = None,
+) -> dict:
+    return complete_browser_login(
+        "hashnode",
+        session_id,
+        profile_name,
+        profile_id=profile_id,
+        organization_id=organization_id,
+    )
+
+
+def complete_medium_browser_login(
+    session_id: str,
+    profile_name: str,
+    *,
+    profile_id: str | None = None,
+    organization_id: str | None = None,
+) -> dict:
+    return complete_browser_login(
+        "medium",
+        session_id,
+        profile_name,
+        profile_id=profile_id,
+        organization_id=organization_id,
+    )
+
+
+def delete_browser_profile(platform: str, profile_id: str) -> None:
     try:
         with _client() as client:
-            response = client.delete(f"/browser/hashnode/profiles/{profile_id}")
+            response = client.delete(f"/browser/{platform}/profiles/{profile_id}")
             response.raise_for_status()
     except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
         raise RunnerUnavailable(f"Browser login runner unavailable: {exc}") from exc
+
+
+def delete_hashnode_browser_profile(profile_id: str) -> None:
+    delete_browser_profile("hashnode", profile_id)
+
+
+def delete_medium_browser_profile(profile_id: str) -> None:
+    delete_browser_profile("medium", profile_id)
 
 
 def run_task(
