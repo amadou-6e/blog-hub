@@ -521,6 +521,207 @@ class SQLiteStore(
             self._con.commit()
             return self.get_article(user_id, article_id)  # type: ignore[return-value]
 
+    def create_imported_article(
+        self,
+        user_id: str,
+        title: str,
+        body: str,
+        source_platform: str,
+        canonical_url: str | None = None,
+        remote_updated_at: str | None = None,
+    ) -> dict:
+        with self._workspace_lock.acquire():
+            article_id = f"art_{uuid.uuid4().hex[:8]}"
+            timestamp = remote_updated_at or _ts(_now())
+            body_path = self._write_body(article_id, body)
+            self._con.execute(
+                """INSERT INTO articles
+                   (id, title, body, body_path, word_count, gate, source, source_platform,
+                    canonical_url, created_at, updated_at, user_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    article_id,
+                    title,
+                    "",
+                    body_path,
+                    len(body.split()),
+                    "pending",
+                    "remote",
+                    source_platform,
+                    canonical_url,
+                    timestamp,
+                    timestamp,
+                    user_id,
+                ),
+            )
+            for platform in _PLATFORMS:
+                self._con.execute(
+                    "INSERT INTO article_destinations "
+                    "(article_id, platform, status, label) VALUES (?,?,?,?)",
+                    (article_id, platform, "none", "—"),
+                )
+            self._add_timeline(article_id, f"Imported from {source_platform.title()}")
+            self._insert_article_revision(
+                article_id,
+                1,
+                title,
+                body,
+                source="remote-sync",
+                description=f"Imported from {source_platform.title()}",
+                created_by=user_id,
+                created_at=timestamp,
+            )
+            self._con.commit()
+            return self.get_article(user_id, article_id)  # type: ignore[return-value]
+
+    def get_or_create_remote_article(
+        self,
+        user_id: str,
+        platform: str,
+        remote_id: str,
+        *,
+        title: str,
+        body: str,
+        canonical_url: str | None = None,
+        remote_updated_at: str | None = None,
+    ) -> tuple[dict, bool]:
+        """Fetch the local article mapped to (platform, remote_id), creating both
+        the article and its identity mapping if no mapping exists yet.
+
+        The identity lookup, article creation, and identity insert all happen
+        inside a single workspace-lock acquisition so that two concurrent sync
+        calls for the same remote article cannot each create a separate local
+        article (see PR #69 review: the previous two-step
+        get_remote_article_identity + create_imported_article sequence left a
+        check-then-act race window between separate lock acquisitions).
+        """
+        platform = platform.strip().lower()
+        remote_id = remote_id.strip()
+        with self._workspace_lock.acquire():
+            existing = self._con.execute(
+                """SELECT article_id FROM remote_article_identities
+                   WHERE user_id=? AND platform=? AND remote_id=?""",
+                (user_id, platform, remote_id),
+            ).fetchone()
+            if existing is not None:
+                article = self.get_article(user_id, existing["article_id"])
+                if article is not None:
+                    return article, False
+
+            article_id = f"art_{uuid.uuid4().hex[:8]}"
+            timestamp = remote_updated_at or _ts(_now())
+            body_path = self._write_body(article_id, body)
+            self._con.execute(
+                """INSERT INTO articles
+                   (id, title, body, body_path, word_count, gate, source, source_platform,
+                    canonical_url, created_at, updated_at, user_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    article_id,
+                    title,
+                    "",
+                    body_path,
+                    len(body.split()),
+                    "pending",
+                    "remote",
+                    platform,
+                    canonical_url,
+                    timestamp,
+                    timestamp,
+                    user_id,
+                ),
+            )
+            for dest_platform in _PLATFORMS:
+                self._con.execute(
+                    "INSERT INTO article_destinations "
+                    "(article_id, platform, status, label) VALUES (?,?,?,?)",
+                    (article_id, dest_platform, "none", "—"),
+                )
+            self._add_timeline(article_id, f"Imported from {platform.title()}")
+            self._insert_article_revision(
+                article_id,
+                1,
+                title,
+                body,
+                source="remote-sync",
+                description=f"Imported from {platform.title()}",
+                created_by=user_id,
+                created_at=timestamp,
+            )
+            now = _ts(_now())
+            self._con.execute(
+                """INSERT INTO remote_article_identities
+                   (user_id, platform, remote_id, article_id, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?)""",
+                (user_id, platform, remote_id, article_id, now, now),
+            )
+            self._con.commit()
+            return self.get_article(user_id, article_id), True  # type: ignore[return-value]
+
+    def sync_remote_article_metadata(
+        self,
+        user_id: str,
+        article_id: str,
+        *,
+        platform: str,
+        status: str,
+        url: str | None,
+        remote_id: str,
+        canonical_url: str | None,
+        remote_updated_at: str | None,
+    ) -> bool:
+        label = "Published" if status == "published" else "Draft"
+        draft_id = remote_id if status == "draft" else None
+        with self._workspace_lock.acquire():
+            article = self._con.execute(
+                "SELECT * FROM articles WHERE id=? AND user_id=?",
+                (article_id, user_id),
+            ).fetchone()
+            if article is None:
+                raise KeyError(article_id)
+            destination = self._con.execute(
+                """SELECT status, label, url, draft_id FROM article_destinations
+                   WHERE article_id=? AND platform=?""",
+                (article_id, platform),
+            ).fetchone()
+            article_changed = (
+                article["canonical_url"] != canonical_url
+                or article["source"] != "remote"
+                or article["source_platform"] != platform
+            )
+            destination_changed = destination is None or any((
+                destination["status"] != status,
+                destination["label"] != label,
+                destination["url"] != url,
+                destination["draft_id"] != draft_id,
+            ))
+            timestamp = remote_updated_at or article["updated_at"]
+            with self._con:
+                self._con.execute(
+                    """UPDATE articles
+                       SET canonical_url=?, source='remote', source_platform=?, updated_at=?
+                       WHERE id=? AND user_id=?""",
+                    (canonical_url, platform, timestamp, article_id, user_id),
+                )
+                self._con.execute(
+                    """INSERT INTO article_destinations
+                       (article_id, platform, status, label, url, draft_id, error)
+                       VALUES (?,?,?,?,?,?,NULL)
+                       ON CONFLICT(article_id, platform) DO UPDATE SET
+                         status=excluded.status,
+                         label=excluded.label,
+                         url=excluded.url,
+                         draft_id=excluded.draft_id,
+                         error=NULL""",
+                    (article_id, platform, status, label, url, draft_id),
+                )
+                if destination_changed:
+                    self._add_timeline(
+                        article_id,
+                        f"{platform.title()} remote status synchronized ({label})",
+                    )
+            return article_changed or destination_changed
+
     def update_article_body(self,
                             user_id: str,
                             article_id: str,
@@ -1034,6 +1235,18 @@ class SQLiteStore(
                 "mime_type": row["mime_type"],
                 "data": data,
             }
+
+    def get_article_asset_by_filename(
+        self, user_id: str, article_id: str, filename: str,
+    ) -> dict | None:
+        row = self._con.execute(
+            """SELECT aa.id, aa.filename, aa.mime_type
+               FROM article_assets aa
+               JOIN articles a ON a.id=aa.article_id
+               WHERE aa.article_id=? AND aa.filename=? AND a.user_id=?""",
+            (article_id, filename, user_id),
+        ).fetchone()
+        return dict(row) if row else None
 
     def reset(self) -> None:
         """Drop all data and re-seed. Used by the /api/dev/reset endpoint in tests."""

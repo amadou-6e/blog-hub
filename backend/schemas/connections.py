@@ -115,3 +115,34 @@ class DraftContent(BaseModel):
     body: str
     canonical_url: Optional[str] = None
     cover_image: Optional[str] = None
+
+
+class HashnodeSyncSourceError(_CamelModel):
+    source: str
+    error: str
+
+
+class HashnodeSyncArticleResult(_CamelModel):
+    remote_id: str
+    article_id: Optional[str] = None
+    status: str
+    action: str
+    revision_created: bool
+    image_status: str
+    error: Optional[str] = None
+
+
+class HashnodeSyncResponse(_CamelModel):
+    status: str
+    started_at: datetime
+    completed_at: datetime
+    fetched: int
+    imported: int
+    updated: int
+    metadata_updated: int
+    unchanged: int
+    failed: int
+    images_downloaded: int
+    images_failed: int
+    source_errors: list[HashnodeSyncSourceError]
+    articles: list[HashnodeSyncArticleResult]
