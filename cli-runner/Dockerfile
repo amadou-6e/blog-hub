@@ -19,7 +19,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN patchright install --with-deps chromium
-COPY main.py hashnode_browser.py skyvern_browser.py browser_selectors.json ./
+COPY main.py hashnode_browser.py medium_browser.py skyvern_browser.py browser_selectors.json ./
 
 # Credential directories (will be overridden by named volumes in docker-compose)
 RUN mkdir -p /root/.claude /root/.config/openai /data/skyvern-browser-sessions

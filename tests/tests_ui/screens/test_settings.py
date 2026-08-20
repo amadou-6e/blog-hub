@@ -34,6 +34,16 @@ def _hashnode_browser_payload(status="disconnected", authorization_url=None):
     }
 
 
+def _browser_payload(platform, status="disconnected", authorization_url=None):
+    return {
+        "platform": platform,
+        "status": status,
+        "authorizationUrl": authorization_url,
+        "verifiedAt": None,
+        "error": None,
+    }
+
+
 def _show_disconnected_hashnode(page):
     page.route(
         f"{BASE_URL}/api/connections/hashnode/browser-connection",
@@ -80,6 +90,21 @@ def test_hashnode_api_token_choice_opens_credential_input(settings_page):
     card.get_by_role("button", name=re.compile(r"API token")).click()
 
     assert card.locator("#key-input-hashnode").is_visible()
+
+
+def test_medium_connect_opens_browser_login_choice(settings_page):
+    settings_page.route(
+        f"{BASE_URL}/api/connections/medium/browser-connection",
+        lambda route: route.fulfill(json=_browser_payload("medium")),
+    )
+    settings_page.reload()
+    card = settings_page.locator("#plat-card-medium")
+
+    card.get_by_role("button", name="Connect").click()
+
+    menu = card.locator("#medium-method-menu")
+    assert menu.get_by_role("button", name=re.compile(r"API token")).is_visible()
+    assert menu.get_by_role("button", name=re.compile(r"Browser login")).is_visible()
 
 
 def test_hashnode_browser_login_opens_normal_tab(settings_page, context):

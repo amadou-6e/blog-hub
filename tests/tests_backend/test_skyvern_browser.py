@@ -50,6 +50,28 @@ def test_start_login_uses_non_expiring_live_profile_session(monkeypatch):
     assert seen["payload"]["timeout"] is None
 
 
+def test_start_medium_login_uses_medium_signin_url(monkeypatch):
+    seen = {}
+
+    def request(method, url, **kwargs):
+        seen.update(method=method, url=url, payload=kwargs["json"])
+        return FakeResponse({
+            "browser_session_id": "pbs_session123",
+            "organization_id": "o_org123",
+            "app_url": "http://skyvern-ui:8080/browser-session/pbs_session123",
+            "status": "created",
+        })
+
+    monkeypatch.setenv("SKYVERN_API_KEY", "local-key")
+    monkeypatch.setattr(skyvern_browser.httpx, "request", request)
+    result = skyvern_browser.start_medium_login()
+    assert result["app_url"] == (
+        "http://localhost:8083/browser-session/pbs_session123/stream"
+        "?embed=true&purpose=medium-login"
+    )
+    assert seen["payload"]["url"] == "https://medium.com/m/signin"
+
+
 def test_start_login_reuses_identity_provider_profile(monkeypatch):
     seen = {}
 
