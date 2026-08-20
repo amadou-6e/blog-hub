@@ -114,6 +114,7 @@ class ArticleStore(Protocol):
         error: str | None,
         label: str | None,
         draft_id: str | None,
+        status: str | None = None,
     ) -> None:
         ...
 
@@ -186,6 +187,29 @@ class ArticleStore(Protocol):
         ...
 
     def get_job(self, user_id: str, job_id: str) -> dict | None:
+        ...
+
+    # ── Browser publishing ──────────────────────────────────────────────────
+
+    def create_browser_publish_run(
+        self, user_id: str, article_id: str, *, platform: str,
+        mode: str = "draft",
+    ) -> dict:
+        ...
+
+    def get_browser_publish_run(self, user_id: str, run_id: str) -> dict | None:
+        ...
+
+    def approve_browser_publish_run(self, user_id: str, run_id: str) -> dict:
+        ...
+
+    def complete_browser_publish_run(
+        self, user_id: str, run_id: str, *, result: dict | None = None,
+        error: str | None = None,
+    ) -> dict:
+        ...
+
+    def recover_browser_publish_runs(self) -> int:
         ...
 
     # ── Browser connections ────────────────────────────────────────────────

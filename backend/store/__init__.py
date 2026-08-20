@@ -178,6 +178,29 @@ def complete_job(user_id: str, *a, **kw):
     return _backend.complete_job(user_id, *a, **kw)
 
 
+# ── Browser publishing ──────────────────────────────────────────────────────
+
+
+def create_browser_publish_run(user_id: str, *a, **kw):
+    return _backend.create_browser_publish_run(user_id, *a, **kw)
+
+
+def get_browser_publish_run(user_id: str, *a, **kw):
+    return _backend.get_browser_publish_run(user_id, *a, **kw)
+
+
+def approve_browser_publish_run(user_id: str, *a, **kw):
+    return _backend.approve_browser_publish_run(user_id, *a, **kw)
+
+
+def complete_browser_publish_run(user_id: str, *a, **kw):
+    return _backend.complete_browser_publish_run(user_id, *a, **kw)
+
+
+def recover_browser_publish_runs():
+    return _backend.recover_browser_publish_runs()
+
+
 # ── Browser connections ────────────────────────────────────────────────────
 
 

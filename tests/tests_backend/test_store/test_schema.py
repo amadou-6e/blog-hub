@@ -36,11 +36,19 @@ def test_fresh_database_has_current_schema_and_seed_user(tmp_path):
             "agent_approvals",
             "agent_checkpoints",
             "agent_session_outputs",
+            "browser_publish_runs",
             "browser_connections",
         } <= tables
         assert store._con.execute(
             "SELECT COUNT(*) FROM users WHERE id=?", (SEED_USER_ID,)
         ).fetchone()[0] == 1
+        publish_columns = {
+            row[1]
+            for row in store._con.execute(
+                "PRAGMA table_info(browser_publish_runs)"
+            )
+        }
+        assert "mode" in publish_columns
     finally:
         store.close()
 

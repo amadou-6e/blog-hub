@@ -16,7 +16,7 @@ SEED_USER_HASH = "$2b$12$BJsbJlf3SZUMUISLA8oASeFn.Q3U.Ar6TqoIFtu0F9OlYyev.DZLC"
 # Bump when sql/schema.sql changes in a way that isn't safe to layer onto an
 # existing database (e.g. a dropped/renamed column). Operators reset by
 # deleting the database file; there is no in-place upgrade path.
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 7
 
 _SCHEMA_SQL_PATH = Path(__file__).resolve().parent / "sql" / "schema.sql"
 

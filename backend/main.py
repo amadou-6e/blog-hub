@@ -45,6 +45,7 @@ def startup_cleanup():
     store.delete_expired_sessions()
     store.expire_connection_auth_flows()
     store.recover_agent_sessions()
+    store.recover_browser_publish_runs()
     store.cleanup_agent_sessions(
         retention_days=int(os.environ.get("BLOGHUB_AGENT_SESSION_RETENTION_DAYS", "90"))
     )

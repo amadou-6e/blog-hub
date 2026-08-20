@@ -32,6 +32,7 @@ from backend.store.locking import WorkspaceLock
 from backend.store.agent_sessions import AgentSessionStoreMixin
 from backend.store.article_revisions import ArticleRevisionStoreMixin
 from backend.store.connection_auth import ConnectionAuthStoreMixin
+from backend.store.browser_publish import BrowserPublishStoreMixin
 from backend.store.browser_connections import BrowserConnectionStoreMixin
 from backend.store.schema import (
     SEED_USER_EMAIL as DEFAULT_SEED_USER_EMAIL,
@@ -221,6 +222,7 @@ def _seed_articles() -> list[dict]:
 
 class SQLiteStore(
     BrowserConnectionStoreMixin,
+    BrowserPublishStoreMixin,
     ConnectionAuthStoreMixin,
     AgentSessionStoreMixin,
     ArticleRevisionStoreMixin,
@@ -607,9 +609,10 @@ class SQLiteStore(
         error: str | None = None,
         label: str | None = None,
         draft_id: str | None = None,
+        status: str | None = None,
     ) -> None:
         if success:
-            new_status = "draft"
+            new_status = status or "draft"
             new_label = label or "Draft"
             self._con.execute(
                 """UPDATE article_destinations
@@ -617,7 +620,8 @@ class SQLiteStore(
                    WHERE article_id=? AND platform=?""",
                 (new_status, new_label, url, draft_id, article_id, platform),
             )
-            self._add_timeline(article_id, f"Draft pushed to {platform.title()}")
+            event = "Published to" if new_status == "published" else "Draft pushed to"
+            self._add_timeline(article_id, f"{event} {platform.title()}")
         else:
             self._con.execute(
                 """UPDATE article_destinations
@@ -982,6 +986,7 @@ class SQLiteStore(
             self._con.executescript("""
                 DELETE FROM article_chat_log;
                 DELETE FROM agent_sessions;
+                DELETE FROM browser_publish_runs;
                 DELETE FROM browser_connections;
                 DELETE FROM article_patch_revisions;
                 DELETE FROM article_patches;
