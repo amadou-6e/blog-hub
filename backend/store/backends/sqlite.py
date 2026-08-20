@@ -323,6 +323,21 @@ class SQLiteStore(
                 return full.read_text(encoding="utf-8")
         return row["body"]
 
+    def _local_preview_image_url(self, article_id: str) -> str | None:
+        row = self._con.execute(
+            """SELECT rai.cover_asset_id
+               FROM remote_article_identities rai
+               JOIN article_assets aa
+                 ON aa.id=rai.cover_asset_id AND aa.article_id=rai.article_id
+               WHERE rai.article_id=? AND rai.cover_asset_id IS NOT NULL
+               ORDER BY rai.updated_at DESC, rai.platform, rai.remote_id
+               LIMIT 1""",
+            (article_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return f"/api/articles/{article_id}/assets/{row['cover_asset_id']}"
+
     # ── Article assembly ─────────────────────────────────────────────────────
 
     def _load_article(self, row: sqlite3.Row) -> dict:
@@ -367,6 +382,8 @@ class SQLiteStore(
                 row["source_platform"],
             "canonical_url":
                 row["canonical_url"],
+            "preview_image_url":
+                self._local_preview_image_url(aid),
             "created_at":
                 _dt(row["created_at"]),
             "updated_at":
@@ -981,6 +998,42 @@ class SQLiteStore(
             )
             self._con.commit()
             return rel
+
+    def read_article_asset(
+        self, user_id: str, article_id: str, asset_id: int,
+    ) -> dict | None:
+        """Read a registered asset without exposing its filesystem location."""
+        with self._workspace_lock.acquire():
+            row = self._con.execute(
+                """SELECT aa.id, aa.filename, aa.asset_path, aa.mime_type
+                   FROM article_assets aa
+                   JOIN articles a ON a.id=aa.article_id
+                   WHERE aa.id=? AND aa.article_id=? AND a.user_id=?""",
+                (asset_id, article_id, user_id),
+            ).fetchone()
+            if row is None:
+                return None
+
+            assets_root = (
+                self._blobs_dir / "articles" / article_id / "assets"
+            ).resolve()
+            candidate = (self._blobs_dir / row["asset_path"]).resolve()
+            try:
+                candidate.relative_to(assets_root)
+            except ValueError:
+                return None
+            try:
+                if not candidate.is_file():
+                    return None
+                data = candidate.read_bytes()
+            except OSError:
+                return None
+            return {
+                "id": row["id"],
+                "filename": row["filename"],
+                "mime_type": row["mime_type"],
+                "data": data,
+            }
 
     def reset(self) -> None:
         """Drop all data and re-seed. Used by the /api/dev/reset endpoint in tests."""
