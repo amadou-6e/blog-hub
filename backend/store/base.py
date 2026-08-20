@@ -188,6 +188,22 @@ class ArticleStore(Protocol):
     def get_job(self, user_id: str, job_id: str) -> dict | None:
         ...
 
+    # ── Browser connections ────────────────────────────────────────────────
+
+    def get_browser_connection(self, user_id: str, platform: str) -> dict | None:
+        ...
+
+    def start_browser_connection(self, user_id: str, platform: str, **kwargs: Any) -> dict:
+        ...
+
+    def update_browser_connection(
+        self, user_id: str, platform: str, status: str, **kwargs: Any
+    ) -> dict:
+        ...
+
+    def delete_browser_connection(self, user_id: str, platform: str) -> bool:
+        ...
+
     def complete_job(self, user_id: str, job_id: str, result: dict | None = None, error: str | None = None) -> None:
         ...
 

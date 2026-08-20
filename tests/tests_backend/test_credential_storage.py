@@ -77,6 +77,34 @@ def test_startup_migrates_plaintext_and_disconnect_erases_it(credential_environm
     assert tuple(row) == ("", "disconnected")
 
 
+def test_startup_encrypts_existing_browser_stream_url(credential_environment):
+    tmp_path, _ = credential_environment
+    store = _store(tmp_path)
+    store.start_browser_connection(
+        store.SEED_USER_ID,
+        "hashnode",
+        session_id="pbs_session",
+        organization_id="o_org",
+        app_url="http://localhost:8083/browser-session/pbs_session",
+    )
+    store._con.execute(
+        "UPDATE browser_connections SET app_url='http://localhost/legacy-stream'"
+    )
+    store._con.commit()
+    store._con.close()
+
+    reopened = _store(tmp_path)
+    raw = reopened._con.execute(
+        "SELECT app_url FROM browser_connections WHERE platform='hashnode'"
+    ).fetchone()[0]
+
+    assert raw.startswith("enc:v1:")
+    assert "legacy-stream" not in raw
+    assert reopened.get_browser_connection(
+        reopened.SEED_USER_ID, "hashnode"
+    )["app_url"] == "http://localhost/legacy-stream"
+
+
 def test_startup_migrates_legacy_fernet_ciphertext(credential_environment):
     tmp_path, _ = credential_environment
     store = _store(tmp_path)

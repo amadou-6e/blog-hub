@@ -1,0 +1,7 @@
+FROM public.ecr.aws/skyvern/skyvern-ui@sha256:69ffc56b25e96f5909d53f4c06574fed2bf331747d18cf715fb36debb070e1d5
+
+COPY skyvern_ui_browser_embed.css /tmp/bloghub-browser-embed.css
+COPY patch_skyvern_ui.cjs /tmp/patch-skyvern-ui.cjs
+RUN cat /tmp/bloghub-browser-embed.css >> /app/dist.template/assets/index--bCtSXVO.css \
+    && node /tmp/patch-skyvern-ui.cjs \
+    && rm /tmp/bloghub-browser-embed.css /tmp/patch-skyvern-ui.cjs

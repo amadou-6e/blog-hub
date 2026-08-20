@@ -32,6 +32,7 @@ from backend.store.locking import WorkspaceLock
 from backend.store.agent_sessions import AgentSessionStoreMixin
 from backend.store.article_revisions import ArticleRevisionStoreMixin
 from backend.store.connection_auth import ConnectionAuthStoreMixin
+from backend.store.browser_connections import BrowserConnectionStoreMixin
 from backend.store.schema import (
     SEED_USER_EMAIL as DEFAULT_SEED_USER_EMAIL,
     SEED_USER_HASH as DEFAULT_SEED_USER_HASH,
@@ -218,7 +219,12 @@ def _seed_articles() -> list[dict]:
 # ─── SQLiteStore ──────────────────────────────────────────────────────────────
 
 
-class SQLiteStore(ConnectionAuthStoreMixin, AgentSessionStoreMixin, ArticleRevisionStoreMixin):
+class SQLiteStore(
+    BrowserConnectionStoreMixin,
+    ConnectionAuthStoreMixin,
+    AgentSessionStoreMixin,
+    ArticleRevisionStoreMixin,
+):
 
     def __init__(self, db_path: str, blobs_dir: str = "data/blobs") -> None:
         self._db_path = db_path
@@ -237,6 +243,7 @@ class SQLiteStore(ConnectionAuthStoreMixin, AgentSessionStoreMixin, ArticleRevis
         with self._workspace_lock.acquire():
             apply_schema(self._con)
             self.reencrypt_connection_credentials()
+            self.reencrypt_browser_connection_credentials()
             self._seed_if_empty()
             self._ensure_initial_article_revisions()
             self._ensure_patch_revision_links()
@@ -975,6 +982,7 @@ class SQLiteStore(ConnectionAuthStoreMixin, AgentSessionStoreMixin, ArticleRevis
             self._con.executescript("""
                 DELETE FROM article_chat_log;
                 DELETE FROM agent_sessions;
+                DELETE FROM browser_connections;
                 DELETE FROM article_patch_revisions;
                 DELETE FROM article_patches;
                 DELETE FROM article_comments;
