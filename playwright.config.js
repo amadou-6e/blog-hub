@@ -10,9 +10,10 @@ const PYTHON_COMMAND = process.env.BLOGHUB_PLAYWRIGHT_PYTHON_COMMAND || `"${PYTH
 
 module.exports = defineConfig({
   testDir: './tests',
-  outputDir: './tests/results',
+  outputDir: './tests/results/artifacts',
   timeout: 15_000,
   retries: 0,
+  workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI
     ? [['list'], ['html', { outputFolder: 'tests/results/html', open: 'never' }], ['json', { outputFile: 'tests/results/report.json' }]]
     : [['list'], ['json', { outputFile: 'tests/results/report.json' }]],
