@@ -113,12 +113,14 @@ def _is_safe_ip(ip: IPv4Address | IPv6Address) -> bool:
     if isinstance(ip, IPv6Address) and ip.ipv4_mapped is not None:
         ip = ip.ipv4_mapped
     return not (
-        ip.is_loopback
+        not ip.is_global
+        or ip.is_loopback
         or ip.is_link_local
         or ip.is_private
         or ip.is_multicast
         or ip.is_reserved
         or ip.is_unspecified
+        or (isinstance(ip, IPv6Address) and ip.is_site_local)
     )
 
 

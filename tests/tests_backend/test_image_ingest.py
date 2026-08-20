@@ -139,11 +139,13 @@ class TestUnsafeDestinations:
         "10.0.0.5",           # private
         "172.16.0.1",         # private
         "192.168.1.1",        # private
+        "100.64.0.1",         # shared carrier-grade NAT space
         "0.0.0.0",             # unspecified
         "224.0.0.1",           # multicast
         "[::1]",                # IPv6 loopback
         "[fe80::1]",             # IPv6 link-local
         "[fc00::1]",              # IPv6 unique local (private)
+        "[fec0::1]",              # deprecated IPv6 site-local
     ])
     def test_malicious_destinations_are_rejected(self, host, monkeypatch):
         # "localhost" resolves via DNS in this implementation; everything
