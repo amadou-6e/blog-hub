@@ -27,12 +27,23 @@ def test_online_backup_contains_database_and_referenced_blobs(tmp_path):
             b"png-content",
             "image/png",
         )
+        store.upsert_remote_article_identity(
+            store.SEED_USER_ID,
+            "art_001",
+            "hashnode",
+            "remote-backup-test",
+            remote_content_fingerprint="sha256:backup",
+            last_sync_status="succeeded",
+            last_sync_result={"articlesUpdated": 1},
+            last_synced_at="2026-08-20T08:00:00+00:00",
+        )
         bundle = store.create_backup(str(tmp_path / "backups"))
         manifest = verify_backup(bundle)
 
         assert manifest["summary"]["schema_version"] == SCHEMA_VERSION
         assert manifest["summary"]["counts"]["articles"] == 6
         assert manifest["summary"]["counts"]["article_assets"] == 1
+        assert manifest["summary"]["counts"]["remote_article_identities"] == 1
         assert manifest["summary"]["counts"]["article_revisions"] == 6
         assert manifest["summary"]["referenced_blob_count"] == 7
         assert (

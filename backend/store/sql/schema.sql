@@ -1,10 +1,8 @@
 -- BlogHub SQLite schema.
 --
--- This is the single source of truth for the database shape. BlogHub does
--- not migrate schemas in place: when this file changes, delete the runtime
--- database (data/bloghub.db) and let it be recreated fresh. All statements
--- are idempotent so re-running this file against an already-current
--- database is a no-op.
+-- This is the single source of truth for the database shape. Additive changes
+-- are idempotent and migrate in place when BlogHub opens an older database.
+-- Destructive changes require an explicit migration and recovery plan.
 
 CREATE TABLE IF NOT EXISTS users (
     id            TEXT PRIMARY KEY,
@@ -36,6 +34,9 @@ CREATE TABLE IF NOT EXISTS articles (
     updated_at      TEXT NOT NULL,
     user_id         TEXT REFERENCES users(id) ON DELETE CASCADE
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_articles_id_user
+    ON articles(id, user_id);
 
 CREATE TABLE IF NOT EXISTS article_destinations (
     article_id  TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
@@ -118,6 +119,31 @@ CREATE TABLE IF NOT EXISTS article_assets (
     mime_type   TEXT,
     created_at  TEXT NOT NULL,
     UNIQUE(article_id, filename)
+);
+
+CREATE TABLE IF NOT EXISTS remote_article_identities (
+    user_id                   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    platform                  TEXT NOT NULL,
+    remote_id                 TEXT NOT NULL,
+    article_id                TEXT NOT NULL,
+    remote_content_fingerprint TEXT,
+    subtitle                  TEXT,
+    cover_asset_id            INTEGER REFERENCES article_assets(id) ON DELETE SET NULL,
+    last_sync_status          TEXT CHECK (
+        last_sync_status IS NULL OR
+        last_sync_status IN ('succeeded', 'partial', 'failed')
+    ),
+    last_sync_result_json     TEXT,
+    last_sync_error           TEXT,
+    remote_created_at         TEXT,
+    remote_updated_at         TEXT,
+    last_sync_started_at      TEXT,
+    last_synced_at            TEXT,
+    created_at                TEXT NOT NULL,
+    updated_at                TEXT NOT NULL,
+    PRIMARY KEY (user_id, platform, remote_id),
+    FOREIGN KEY (article_id, user_id)
+        REFERENCES articles(id, user_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS article_comments (
@@ -292,6 +318,9 @@ CREATE INDEX IF NOT EXISTS idx_article_timeline_article
 
 CREATE INDEX IF NOT EXISTS idx_article_revisions_article
     ON article_revisions(article_id, revision_number DESC);
+
+CREATE INDEX IF NOT EXISTS idx_remote_articles_local_article
+    ON remote_article_identities(user_id, article_id);
 
 CREATE INDEX IF NOT EXISTS idx_article_comments_article
     ON article_comments(article_id);
