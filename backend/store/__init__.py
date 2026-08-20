@@ -41,6 +41,10 @@ def store_asset(user_id: str, *a, **kw):
     return _backend.store_asset(user_id, *a, **kw)
 
 
+def read_article_asset(user_id: str, *a, **kw):
+    return _backend.read_article_asset(user_id, *a, **kw)
+
+
 def update_article_title(user_id: str, *a, **kw):
     return _backend.update_article_title(user_id, *a, **kw)
 
