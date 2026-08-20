@@ -31,8 +31,8 @@ jobs:
 
     env:
       BLOGHUB_DB_PATH: ":memory:"
-      BLOGHUB_BLOBS_DIR: ${{ runner.temp }}/bloghub-blobs
-      BLOGHUB_CREDENTIAL_KEY_FILE: ${{ runner.temp }}/bloghub-credential-keys.json
+      BLOGHUB_BLOBS_DIR: /tmp/bloghub-blobs
+      BLOGHUB_CREDENTIAL_KEY_FILE: /tmp/bloghub-credential-keys.json
       DEVTO_API_KEY: ""
       HASHNODE_PAT: ""
       HASHNODE_PUBLICATION_ID: ""
@@ -90,8 +90,8 @@ jobs:
 
     env:
       BLOGHUB_DB_PATH: ":memory:"
-      BLOGHUB_BLOBS_DIR: ${{ runner.temp }}/bloghub-blobs
-      BLOGHUB_CREDENTIAL_KEY_FILE: ${{ runner.temp }}/bloghub-credential-keys.json
+      BLOGHUB_BLOBS_DIR: /tmp/bloghub-blobs
+      BLOGHUB_CREDENTIAL_KEY_FILE: /tmp/bloghub-credential-keys.json
       BLOGHUB_DISABLE_AUTH: "true"
       DEVTO_API_KEY: ""
       HASHNODE_PAT: ""
