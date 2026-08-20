@@ -75,6 +75,7 @@ writes credentials into the mounted volume.
 cd blog-hub
 bash scripts/run-unit-tests.sh
 npm run check:contracts
+npm run test:playwright:ci
 
 # UI browser tests (requires backend on :8000 and cli-runner on :8001)
 .venv/Scripts/python.exe -m uvicorn backend.main:app --port 8000
@@ -87,5 +88,5 @@ npm run check:contracts
 The Playwright UI test for Claude login (`test_claude_browser_login_full_loopback_flow`) captures
 the callback URL from failed network requests via `page.on("request", ...)` — no manual copy needed.
 
-GitHub CI is documented in `docs/ci.md`. Browser and live-provider tests remain
-opt-in until their dedicated Playwright workflow lands.
+GitHub CI is documented in `docs/ci.md`. Live-provider browser login tests remain
+opt-in and are excluded from the default Playwright gate.

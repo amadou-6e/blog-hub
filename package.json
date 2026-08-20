@@ -4,6 +4,7 @@
     "private": true,
     "scripts": {
         "test": "playwright test",
+        "test:playwright:ci": "bash scripts/run-playwright-tests.sh",
         "test:headed": "playwright test --headed",
         "test:debug": "playwright test --debug",
         "generate:types": "node scripts/generate-types.mjs",
