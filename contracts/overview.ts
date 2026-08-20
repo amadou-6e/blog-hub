@@ -64,6 +64,8 @@ export interface ArticleSummary {
     updatedAt: string;
     wordCount: number;                // character count is derived client-side
     gate: GateStatus;
+    /** Authenticated local cover URL, or null to use the deterministic fallback. */
+    previewImageUrl: string | null;
     destinations: Record<Platform, PlatformSummary>;
     /** Last 5 timeline events, newest first. Full history on article-detail. */
     recentTimeline: TimelineEvent[];
