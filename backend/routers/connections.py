@@ -32,7 +32,10 @@ from fastapi.responses import HTMLResponse
 import backend.services.cli_runner as runner
 import backend.services.connection_auth as agent_auth
 import backend.store as store
-from backend.services.hashnode_sync import sync_hashnode_articles
+from backend.services.hashnode_sync import (
+    sync_hashnode_articles,
+    sync_hashnode_browser_records,
+)
 from backend.schemas.connections import (
     ActiveAgentAuthFlowsResponse,
     AgentAuthCallbackRequest,
@@ -845,20 +848,34 @@ def _fetch_devto_article_body(token: str, article_id: str) -> str:
 
 @router.post("/hashnode/sync", response_model=HashnodeSyncResponse)
 def sync_hashnode(request: Request):
-    """Import every PAT-visible Hashnode draft and published article."""
+    """Import Hashnode through browser login for non-Pro or PAT for Pro."""
     user_id: str = request.state.user_id
+    browser_connection = store.get_browser_connection(user_id, "hashnode")
+    if browser_connection and browser_connection["status"] == "connected":
+        try:
+            retrieval = runner.hashnode_browser_articles(
+                organization_id=browser_connection["skyvern_organization_id"],
+                profile_id=browser_connection["skyvern_profile_id"],
+            )
+        except runner.RunnerUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return sync_hashnode_browser_records(user_id, retrieval)
+
     token = store.get_connection_token(user_id, "hashnode") or os.environ.get("HASHNODE_PAT")
     if not token:
         raise HTTPException(
             status_code=409,
-            detail={"error": "hashnode_pat_required"},
+            detail={
+                "error": "hashnode_connection_required",
+                "message": "Connect Hashnode with browser login or a Pro API token",
+            },
         )
     if token == "cli_session":
         raise HTTPException(
             status_code=409,
             detail={
-                "error": "hashnode_pat_required",
-                "message": "Browser-profile retrieval is not supported by this sync path",
+                "error": "hashnode_browser_profile_required",
+                "message": "Reconnect Hashnode browser login to restore its profile",
             },
         )
     return sync_hashnode_articles(user_id, token)

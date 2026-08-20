@@ -112,6 +112,41 @@ test.describe('Settings screen', () => {
     expect(body.token).toBe('sk-ant-test');
   });
 
+  test('[contract] connected Hashnode browser profile can sync articles', async ({ page }) => {
+    await page.route('**/api/connections/hashnode/browser-connection', route => route.fulfill({
+      json: {
+        platform: 'hashnode',
+        status: 'connected',
+        authorizationUrl: null,
+        verifiedAt: '2026-08-20T08:00:00Z',
+        error: null,
+      },
+    }));
+    await page.route('**/api/connections/hashnode/sync', route => route.fulfill({
+      json: {
+        status: 'succeeded',
+        fetched: 104,
+        imported: 103,
+        updated: 1,
+      },
+    }));
+    await page.reload();
+
+    const requestPromise = page.waitForRequest(
+      request => request.url().endsWith('/api/connections/hashnode/sync')
+        && request.method() === 'POST',
+    );
+    const card = page.locator('#plat-card-hashnode');
+    await card.getByRole('button', { name: 'Sync articles' }).click();
+    await requestPromise;
+
+    await expect(card.getByRole('status')).toHaveText(
+      '104 articles synced · 103 new · 1 updated',
+    );
+    await expect(card.getByText('Refresh login', { exact: true })).toHaveCount(0);
+    await expect(card.getByText('Test', { exact: true })).toHaveCount(0);
+  });
+
   // ── 3. Browser login flow ────────────────────────────────────────────────────
 
   /**

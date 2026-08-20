@@ -185,6 +185,238 @@ def test_hashnode_markdown_normalization_accepts_editor_formatting():
     )
 
 
+def test_browser_article_normalizes_authenticated_hashnode_payload():
+    result = hashnode_browser._browser_article(
+        {
+            "_id": "mongo-id",
+            "cuid": "post-cuid",
+            "title": "  Browser post  ",
+            "contentMarkdown": "# Browser post\n",
+            "subtitle": "A subtitle",
+            "originalArticleURL": "https://example.com/original",
+            "coverImage": {"url": "https://cdn.example/cover.png"},
+            "dateAdded": "2026-08-19T08:00:00Z",
+            "dateUpdated": "2026-08-20T08:00:00Z",
+            "slug": "browser-post",
+            "publication": {"username": "tensorworks"},
+        },
+        remote_id="fallback",
+        published=True,
+    )
+
+    assert result == {
+        "remote_id": "post-cuid",
+        "title": "Browser post",
+        "body_markdown": "# Browser post\n",
+        "subtitle": "A subtitle",
+        "canonical_url": "https://example.com/original",
+        "url": "https://tensorworks.hashnode.dev/browser-post",
+        "published": True,
+        "updated_at": "2026-08-20T08:00:00Z",
+        "created_at": "2026-08-19T08:00:00Z",
+        "cover_image_url": "https://cdn.example/cover.png",
+    }
+
+
+def test_browser_article_preserves_blank_draft_with_stable_fallback_title():
+    result = hashnode_browser._browser_article(
+        {"_id": "69c6400c10e664c5dab32874", "title": "", "contentMarkdown": ""},
+        remote_id="69c6400c10e664c5dab32874",
+        published=False,
+    )
+
+    assert result["remote_id"] == "69c6400c10e664c5dab32874"
+    assert result["title"] == "Untitled Hashnode draft (69c6400c)"
+    assert result["body_markdown"] == ""
+
+
+class ListingLocator:
+    def __init__(self, page, selector):
+        self.page = page
+        self.selector = selector
+
+    @property
+    def first(self):
+        return self
+
+    def is_visible(self, timeout=None):
+        return "Load more" in self.selector and bool(self.page.batches)
+
+    def click(self):
+        self.page.ids.extend(self.page.batches.pop(0))
+
+    def all(self):
+        return [object() for _ in self.page.ids]
+
+    def evaluate_all(self, _script):
+        marker = "edit" if "/edit/" in self.selector else "draft"
+        return [f"https://hashnode.com/{marker}/{item}" for item in self.page.ids]
+
+
+class ListingPage:
+    def __init__(self):
+        self.ids = ["first"]
+        self.batches = [["second", "third"], ["fourth"]]
+
+    def locator(self, selector):
+        return ListingLocator(self, selector)
+
+    def wait_for_timeout(self, _timeout):
+        return None
+
+
+def test_browser_listing_exhausts_every_load_more_batch():
+    page = ListingPage()
+
+    complete = hashnode_browser._exhaust_listing(
+        page, {"load_more": ["button:has-text('Load more')"]},
+    )
+
+    assert complete is True
+    assert hashnode_browser._listing_ids(page, published=False) == [
+        "first", "second", "third", "fourth",
+    ]
+
+
+class RetrievalResponse:
+    ok = True
+
+    def __init__(self, payload):
+        self.payload = payload
+
+    def json(self):
+        return self.payload
+
+
+class RetrievalRequest:
+    def get(self, url):
+        if "/api/drafts/" in url:
+            return RetrievalResponse({
+                "success": True,
+                "draft": {
+                    "_id": "draft-one",
+                    "title": "Draft one",
+                    "contentMarkdown": "Draft body",
+                },
+            })
+        return RetrievalResponse({
+            "success": True,
+            "post": {
+                "_id": "mongo-post",
+                "cuid": "post-one",
+                "title": "Post one",
+                "contentMarkdown": "Post body",
+                "slug": "post-one",
+                "publication": {"username": "tensorworks"},
+            },
+        })
+
+
+class RetrievalLocator:
+    def __init__(self, page, selector):
+        self.page = page
+        self.selector = selector
+
+    @property
+    def first(self):
+        return self
+
+    def is_visible(self, timeout=None):
+        if "role='tab'" in self.selector:
+            return True
+        return False
+
+    def click(self):
+        self.page.mode = "published" if "Published" in self.selector else "drafts"
+
+    def count(self):
+        return len(self._ids())
+
+    def all(self):
+        return [object() for _ in self._ids()]
+
+    def inner_text(self):
+        return "Drafts\n1\nPublished\n1"
+
+    def evaluate_all(self, _script):
+        marker = "edit" if self.page.mode == "published" else "draft"
+        return [f"https://hashnode.com/{marker}/{item}" for item in self._ids()]
+
+    def _ids(self):
+        if "/edit/" in self.selector and self.page.mode == "published":
+            return ["post-one"]
+        if "/draft/" in self.selector and self.page.mode == "drafts":
+            return ["draft-one"]
+        if "/draft/" in self.selector and "/edit/" in self.selector:
+            return [self.page.mode]
+        return []
+
+
+class RetrievalPage:
+    def __init__(self):
+        self.url = "about:blank"
+        self.mode = None
+        self.request = RetrievalRequest()
+        self.closed = False
+
+    def goto(self, url, **_kwargs):
+        self.url = url
+
+    def locator(self, selector):
+        return RetrievalLocator(self, selector)
+
+    def wait_for_timeout(self, _timeout):
+        return None
+
+    def close(self):
+        self.closed = True
+
+
+class RetrievalContext:
+    def __init__(self):
+        self.created_pages = []
+        self.closed = False
+
+    def new_page(self):
+        page = RetrievalPage()
+        self.created_pages.append(page)
+        return page
+
+    def close(self):
+        self.closed = True
+
+
+def test_browser_retrieval_combines_explicit_draft_and_published_tabs(monkeypatch):
+    context = RetrievalContext()
+    playwright = SimpleNamespace(
+        chromium=SimpleNamespace(
+            launch_persistent_context=lambda *_args, **_kwargs: context,
+        ),
+    )
+    class Manager:
+        def __enter__(self):
+            return playwright
+
+        def __exit__(self, *_args):
+            return None
+
+    monkeypatch.setitem(
+        sys.modules,
+        "patchright.sync_api",
+        SimpleNamespace(sync_playwright=lambda: Manager()),
+    )
+
+    result = hashnode_browser.retrieve_hashnode_articles(profile_dir="/tmp/profile")
+
+    assert result["errors"] == []
+    assert [(item["remote_id"], item["published"]) for item in result["articles"]] == [
+        ("draft-one", False),
+        ("post-one", True),
+    ]
+    assert len(context.created_pages) == 2
+    assert all(page.closed for page in context.created_pages)
+    assert context.closed is True
+
 def test_public_publish_requires_final_confirmation(monkeypatch):
     page = FakePage()
     sync_api = SimpleNamespace(sync_playwright=lambda: PlaywrightManager(page))

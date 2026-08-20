@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 import re
 import sqlite3
@@ -58,6 +59,171 @@ def _normalized_markdown(markdown: str) -> str:
     normalized = re.sub(r"\n{3,}", "\n\n", normalized)
     normalized = re.sub(r"(^- .+)\n\n(?=- )", r"\1\n", normalized, flags=re.MULTILINE)
     return normalized.strip()
+
+
+def _remote_timestamp(value: object) -> str | None:
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value / 1000, tz=timezone.utc).isoformat()
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _image_url(value: object) -> str | None:
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, dict):
+        candidate = value.get("url")
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
+
+
+def _browser_article(payload: dict, *, remote_id: str, published: bool) -> dict:
+    publication = payload.get("publication") or {}
+    publication_name = publication.get("username") if isinstance(publication, dict) else None
+    slug = payload.get("slug")
+    public_url = (
+        f"https://{publication_name}.hashnode.dev/{slug}"
+        if published and publication_name and slug else None
+    )
+    title = str(payload.get("title") or "").strip()
+    if not title and not published:
+        title = f"Untitled Hashnode draft ({remote_id[:8]})"
+    return {
+        "remote_id": str(payload.get("cuid") or payload.get("_id") or remote_id),
+        "title": title,
+        "body_markdown": str(payload.get("contentMarkdown") or ""),
+        "subtitle": str(payload.get("subtitle") or "").strip() or None,
+        "canonical_url": str(payload.get("originalArticleURL") or "").strip() or None,
+        "url": public_url,
+        "published": published,
+        "updated_at": _remote_timestamp(payload.get("dateUpdated")),
+        "created_at": _remote_timestamp(payload.get("dateAdded")),
+        "cover_image_url": _image_url(payload.get("coverImage") or payload.get("ogImage")),
+    }
+
+
+def _listing_ids(page, *, published: bool) -> list[str]:
+    marker = "/edit/" if published else "/draft/"
+    selector = f'a[href*="{marker}"]'
+    hrefs = page.locator(selector).evaluate_all("els => els.map(e => e.href)")
+    result: list[str] = []
+    for href in hrefs:
+        remote_id = str(href).rstrip("/").rsplit(marker, 1)[-1].split("?", 1)[0]
+        if remote_id and remote_id not in result:
+            result.append(remote_id)
+    return result
+
+
+def _wait_for_listing(page, *, published: bool, timeout_ms: int = 25_000) -> bool:
+    selector = 'a[href*="/edit/"]' if published else 'a[href*="/draft/"]'
+    label = "Published" if published else "Drafts"
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        if page.locator(selector).count():
+            return True
+        try:
+            body = page.locator("body").inner_text()
+            match = re.search(rf"(?:^|\n){label}\s*\n(\d+)(?:\n|$)", body)
+            if match and int(match.group(1)) == 0:
+                return True
+        except Exception:
+            pass
+        page.wait_for_timeout(250)
+    return False
+
+
+def _exhaust_listing(page, selectors: dict, *, max_clicks: int = 100) -> bool:
+    """Click every Hashnode load-more batch. Returns False on a stalled control."""
+    article_links = 'a[href*="/draft/"], a[href*="/edit/"]'
+    for _ in range(max_clicks):
+        load_more, _ = _first_visible(page, selectors["load_more"])
+        if load_more is None:
+            return True
+        before = len(page.locator(article_links).all())
+        load_more.click()
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            page.wait_for_timeout(250)
+            if len(page.locator(article_links).all()) > before:
+                break
+        else:
+            return False
+    return False
+
+
+def retrieve_hashnode_articles(*, profile_dir: str) -> dict:
+    """Retrieve all Hashnode drafts and posts through an authenticated profile."""
+    from patchright.sync_api import sync_playwright
+
+    selectors = json.loads(SELECTORS_PATH.read_text(encoding="utf-8"))
+    articles: list[dict] = []
+    errors: list[dict] = []
+    with sync_playwright() as playwright:
+        context = playwright.chromium.launch_persistent_context(
+            profile_dir, headless=True, viewport={"width": 1440, "height": 1000},
+        )
+        try:
+            for source, published, tab_selector in (
+                ("drafts", False, "drafts_tab"),
+                ("published", True, "published_tab"),
+            ):
+                page = context.new_page()
+                try:
+                    page.goto(
+                        "https://hashnode.com/drafts",
+                        wait_until="domcontentloaded",
+                        timeout=60_000,
+                    )
+                    if any(part in page.url.lower() for part in ("signin", "login", "onboard")):
+                        errors.append({"source": source, "error": "hashnode_login_required"})
+                        continue
+                    tab, _ = _wait_first_visible(
+                        page, selectors[tab_selector], timeout_ms=25_000,
+                    )
+                    if tab is None:
+                        errors.append({"source": source, "error": "listing_tab_unavailable"})
+                        continue
+                    tab.click()
+                    if not _wait_for_listing(page, published=published):
+                        errors.append({"source": source, "error": "listing_retrieval_failed"})
+                        continue
+                    if not _exhaust_listing(page, selectors):
+                        errors.append({"source": source, "error": "listing_pagination_stalled"})
+                    remote_ids = _listing_ids(page, published=published)
+                except Exception:
+                    errors.append({"source": source, "error": "listing_retrieval_failed"})
+                    continue
+
+                endpoint = "posts" if published else "drafts"
+                payload_key = "post" if published else "draft"
+                for remote_id in remote_ids:
+                    try:
+                        response = page.request.get(
+                            f"https://hashnode.com/api/{endpoint}/{remote_id}"
+                        )
+                        payload = response.json() if response.ok else {}
+                        record = payload.get(payload_key) if payload.get("success") else None
+                        if not isinstance(record, dict):
+                            raise ValueError("article payload unavailable")
+                        article = _browser_article(
+                            record, remote_id=remote_id, published=published,
+                        )
+                        if not article["title"]:
+                            raise ValueError("article title unavailable")
+                        articles.append(article)
+                    except Exception:
+                        errors.append({
+                            "source": source,
+                            "remote_id": remote_id,
+                            "error": "article_retrieval_failed",
+                        })
+                page.close()
+        finally:
+            context.close()
+
+    return {"articles": articles, "errors": errors}
 
 
 def upload_hashnode_draft(

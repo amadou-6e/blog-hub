@@ -56,6 +56,15 @@ def _iso(value: datetime | None) -> str | None:
     return value.astimezone(timezone.utc).isoformat()
 
 
+def _datetime(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 def _fingerprint(article: HashnodeRemoteArticle) -> str:
     normalized = json.dumps(
         {"title": article.title.strip(), "markdown": article.body_markdown},
@@ -239,6 +248,7 @@ def _sync_article(
         last_sync_status=article_status,
         last_sync_result=sync_result,
         last_sync_error=image_error,
+        remote_created_at=remote.raw.get("browser_created_at"),
         remote_updated_at=remote_updated_at,
         last_sync_started_at=started_at,
         last_synced_at=completed_at,
@@ -254,18 +264,18 @@ def _sync_article(
     }
 
 
-def sync_hashnode_articles(
+def _sync_remote_articles(
     user_id: str,
-    token: str,
+    remote_articles: list[HashnodeRemoteArticle],
+    source_errors: list[dict],
     *,
     store: HashnodeSyncStore = default_store,
-    client: HashnodeClient | None = None,
     image_fetcher: Callable[[str], IngestedImage] = fetch_and_validate_image,
+    failed_articles: list[dict] | None = None,
 ) -> dict[str, Any]:
-    """Run one bounded, synchronous Hashnode synchronization pass."""
+    """Synchronize normalized Hashnode records from any retrieval adapter."""
     started_at = _now().isoformat()
-    remote_articles, source_errors = _fetch_sources(client or HashnodeClient(token))
-    article_results: list[dict] = []
+    article_results: list[dict] = list(failed_articles or [])
     counters = {
         "imported": 0,
         "updated": 0,
@@ -276,6 +286,7 @@ def sync_hashnode_articles(
         "imagesFailed": 0,
     }
 
+    counters["failed"] = len(article_results)
     for remote in remote_articles:
         try:
             result = _sync_article(
@@ -329,3 +340,82 @@ def sync_hashnode_articles(
         "sourceErrors": source_errors,
         "articles": article_results,
     }
+
+
+def sync_hashnode_articles(
+    user_id: str,
+    token: str,
+    *,
+    store: HashnodeSyncStore = default_store,
+    client: HashnodeClient | None = None,
+    image_fetcher: Callable[[str], IngestedImage] = fetch_and_validate_image,
+) -> dict[str, Any]:
+    """Run one synchronous Hashnode GraphQL synchronization pass."""
+    remote_articles, source_errors = _fetch_sources(client or HashnodeClient(token))
+    return _sync_remote_articles(
+        user_id,
+        remote_articles,
+        source_errors,
+        store=store,
+        image_fetcher=image_fetcher,
+    )
+
+
+def sync_hashnode_browser_records(
+    user_id: str,
+    retrieval: dict,
+    *,
+    store: HashnodeSyncStore = default_store,
+    image_fetcher: Callable[[str], IngestedImage] = fetch_and_validate_image,
+) -> dict[str, Any]:
+    """Synchronize records returned by the authenticated browser runner."""
+    remote_articles: list[HashnodeRemoteArticle] = []
+    source_errors: list[dict] = []
+    failed_articles: list[dict] = []
+    for error in retrieval.get("errors") or []:
+        if error.get("remote_id"):
+            failed_articles.append({
+                "remoteId": str(error["remote_id"]),
+                "articleId": None,
+                "status": "failed",
+                "action": "failed",
+                "revisionCreated": False,
+                "imageStatus": "not_attempted",
+                "error": str(error.get("error") or "article_retrieval_failed"),
+            })
+        else:
+            source_errors.append({
+                "source": str(error.get("source") or "browser"),
+                "error": str(error.get("error") or "browser_retrieval_failed"),
+            })
+
+    for record in retrieval.get("articles") or []:
+        try:
+            remote_articles.append(HashnodeRemoteArticle(
+                article_id=str(record["remote_id"]),
+                title=str(record["title"]),
+                url=record.get("url"),
+                canonical_url=record.get("canonical_url"),
+                subtitle=record.get("subtitle"),
+                body_markdown=str(record.get("body_markdown") or ""),
+                published=bool(record.get("published")),
+                updated_at=_datetime(record.get("updated_at")),
+                cover_image_url=record.get("cover_image_url"),
+                raw={
+                    "browser_created_at": record.get("created_at"),
+                    "retrieval": "browser",
+                },
+            ))
+        except (KeyError, TypeError, ValueError):
+            source_errors.append({
+                "source": "browser",
+                "error": "invalid_article_record",
+            })
+    return _sync_remote_articles(
+        user_id,
+        remote_articles,
+        source_errors,
+        store=store,
+        image_fetcher=image_fetcher,
+        failed_articles=failed_articles,
+    )
