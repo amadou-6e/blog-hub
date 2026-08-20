@@ -1,8 +1,12 @@
 import io
+import hashlib
+import re
 import zipfile
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, Request, UploadFile
+from fastapi.responses import Response
 from typing import Literal, Optional
 
 from pydantic import BaseModel
@@ -129,7 +133,68 @@ class ArticleDetailResponse(BaseModel):
     gate: str
     source: str
     source_platform: Optional[str] = None
+    preview_image_url: Optional[str] = None
     destinations: dict[str, ArticleDestinationDetail]
+
+
+_MIME_TYPE = re.compile(r"^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$")
+
+
+def _asset_media_type(value: str | None) -> str:
+    if value and _MIME_TYPE.fullmatch(value.strip()):
+        return value.strip().lower()
+    return "application/octet-stream"
+
+
+def _asset_content_disposition(filename: str, media_type: str) -> str:
+    leaf = filename.replace("\\", "/").rsplit("/", 1)[-1]
+    leaf = "".join(character for character in leaf if 32 <= ord(character) < 127)
+    leaf = leaf[:255] or "asset"
+    ascii_name = re.sub(r'[^A-Za-z0-9._ -]', "_", leaf).strip(". ") or "asset"
+    disposition = "inline" if media_type in {
+        "image/avif",
+        "image/gif",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+    } else "attachment"
+    return (
+        f'{disposition}; filename="{ascii_name}"; '
+        f"filename*=UTF-8''{quote(leaf, safe='')}"
+    )
+
+
+def _etag_matches(request: Request, etag: str) -> bool:
+    candidates = {
+        candidate.strip() for candidate in request.headers.get("if-none-match", "").split(",")
+    }
+    return "*" in candidates or etag in candidates or f"W/{etag}" in candidates
+
+
+@router.get("/{article_id}/assets/{asset_id}", response_class=Response)
+def get_article_asset(request: Request, article_id: str, asset_id: int):
+    asset = store.read_article_asset(request.state.user_id, article_id, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    etag = f'"{hashlib.sha256(asset["data"]).hexdigest()}"'
+    media_type = _asset_media_type(asset["mime_type"])
+    headers = {
+        "ETag": etag,
+        "Cache-Control": "private, max-age=3600, must-revalidate",
+        "Vary": "Cookie",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": _asset_content_disposition(
+            asset["filename"], media_type,
+        ),
+    }
+    if _etag_matches(request, etag):
+        return Response(status_code=304, headers=headers)
+    return Response(
+        content=asset["data"],
+        media_type=media_type,
+        headers=headers,
+    )
 
 
 @router.get("/{article_id}", response_model=ArticleDetailResponse)
@@ -152,6 +217,7 @@ def get_article(request: Request, article_id: str):
         gate=article["gate"],
         source=article["source"],
         source_platform=article.get("source_platform"),
+        preview_image_url=article.get("preview_image_url"),
         destinations={
             k:
                 ArticleDestinationDetail(

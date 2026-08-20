@@ -82,6 +82,11 @@ class ArticleStore(Protocol):
     ) -> str:
         ...
 
+    def read_article_asset(
+        self, user_id: str, article_id: str, asset_id: int,
+    ) -> dict | None:
+        ...
+
     def delete_articles(self, user_id: str, ids: list[str], force: bool = False) -> list[str]:
         ...
 
