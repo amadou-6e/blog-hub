@@ -157,6 +157,18 @@ def test_deterministic_selectors_fill_and_verify_autosaved_draft(monkeypatch):
     assert page.filled["textarea[placeholder*='writing markdown' i]"] == "# A title"
 
 
+def test_extension_page_entrypoint_uses_core_owned_page():
+    page = FakePage()
+
+    result = hashnode_browser.upload_hashnode_page(
+        page, title="Extension title", article_md="# Extension title"
+    )
+
+    assert result["success"] is True
+    assert result["draft_id"] == "draft_test"
+    assert page.filled["textarea[placeholder*='title' i]"] == "Extension title"
+
+
 def test_missing_deterministic_selector_fails(monkeypatch):
     page = FakePage()
     page.visible.clear()

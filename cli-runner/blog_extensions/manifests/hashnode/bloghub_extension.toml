@@ -1,0 +1,11 @@
+[extension]
+protocol_version = 1
+id = "bloghub.hashnode"
+platform = "hashnode"
+display_name = "Hashnode"
+version = "1.0.0"
+capabilities = ["create_draft", "publish"]
+
+[entrypoints]
+login = "blog_extensions.builtin.hashnode:HashnodeLoginAdapter"
+operations = "blog_extensions.builtin.hashnode:HashnodeOperationsAdapter"

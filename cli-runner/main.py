@@ -22,6 +22,7 @@ import threading
 import time
 import urllib.parse
 import uuid
+from pathlib import Path
 from typing import Iterator, Optional
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -30,23 +31,25 @@ _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from hashnode_browser import check_hashnode_profile, upload_hashnode_draft
-from medium_browser import check_medium_profile
+from blog_extensions import (
+    ArticleInput,
+    Capability,
+    OperationNotSupported,
+    OperationRequest as ExtensionOperationRequest,
+    PUBLIC_OR_DESTRUCTIVE_CAPABILITIES,
+    get_registry,
+)
+from blog_extensions.runtime import execute_operation
 from skyvern_browser import (
     SkyvernUnavailable,
-    close_hashnode_login,
-    close_medium_login,
-    delete_hashnode_profile,
-    delete_medium_profile,
-    finish_hashnode_login,
-    finish_medium_login,
-    get_hashnode_login,
-    get_medium_login,
+    close_browser_login,
+    delete_browser_profile,
+    finish_browser_login,
+    get_browser_login,
     profile_directory,
-    start_hashnode_login,
-    start_medium_login,
+    start_browser_login,
 )
 
 app = FastAPI(title="BlogHub CLI Runner", version="0.1.0")
@@ -227,6 +230,27 @@ class ChatRequest(BaseModel):
     api_key: Optional[str] = None
 
 
+class BrowserArticleRequest(BaseModel):
+    title: str
+    body: str
+    remote_id: Optional[str] = None
+    subtitle: Optional[str] = None
+    cover_url: Optional[str] = None
+    canonical_url: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
+
+
+class BrowserOperationRequest(BaseModel):
+    organization_id: str
+    profile_id: str
+    article: Optional[BrowserArticleRequest] = None
+    remote_id: Optional[str] = None
+    cursor: Optional[str] = None
+    limit: int = Field(default=50, ge=1, le=100)
+    approved: bool = False
+
+
 class HashnodeBrowserUploadRequest(BaseModel):
     organization_id: str
     profile_id: str
@@ -251,48 +275,89 @@ class HashnodeBrowserProfileRequest(BaseModel):
 
 _chat_processes: dict[str, subprocess.Popen] = {}
 
-_BROWSER_LOGIN = {
-    "hashnode": {
-        "start": start_hashnode_login,
-        "get": get_hashnode_login,
-        "close": close_hashnode_login,
-        "finish": finish_hashnode_login,
-        "delete": delete_hashnode_profile,
-        "check": check_hashnode_profile,
-    },
-    "medium": {
-        "start": start_medium_login,
-        "get": get_medium_login,
-        "close": close_medium_login,
-        "finish": finish_medium_login,
-        "delete": delete_medium_profile,
-        "check": check_medium_profile,
-    },
-}
+def _browser_extension(platform: str):
+    try:
+        return get_registry().get(platform)
+    except KeyError as exc:
+        raise HTTPException(404, f"{platform} browser extension is not installed") from exc
 
 
-def _browser_provider(platform: str) -> dict:
-    provider = _BROWSER_LOGIN.get(platform)
-    if provider is None:
-        raise HTTPException(404, f"{platform} does not support browser login")
-    return provider
+def _article_input(article: BrowserArticleRequest | None) -> ArticleInput | None:
+    if article is None:
+        return None
+    return ArticleInput(
+        title=article.title,
+        body=article.body,
+        remote_id=article.remote_id,
+        subtitle=article.subtitle,
+        cover_url=article.cover_url,
+        canonical_url=article.canonical_url,
+        tags=tuple(article.tags),
+        metadata=article.metadata,
+    )
 
 
-@app.post("/browser/hashnode/upload")
-def hashnode_browser_upload(req: HashnodeBrowserUploadRequest):
+def _extension_operation_request(req: BrowserOperationRequest) -> ExtensionOperationRequest:
+    return ExtensionOperationRequest(
+        article=_article_input(req.article),
+        remote_id=req.remote_id,
+        cursor=req.cursor,
+        limit=req.limit,
+    )
+
+
+@app.get("/browser/extensions")
+def browser_extensions():
+    return {"protocol_version": 1, "extensions": get_registry().descriptors()}
+
+
+@app.get("/browser/{platform}/capabilities")
+def browser_capabilities(platform: str):
+    return _browser_extension(platform).descriptor()
+
+
+@app.post("/browser/{platform}/operations/{operation}")
+def browser_operation(platform: str, operation: str, req: BrowserOperationRequest):
+    extension = _browser_extension(platform)
+    try:
+        capability = Capability(operation)
+    except ValueError as exc:
+        raise HTTPException(404, f"Unknown browser operation: {operation}") from exc
+    if capability not in extension.manifest.capabilities:
+        raise HTTPException(409, str(OperationNotSupported(platform, operation)))
+    if capability in PUBLIC_OR_DESTRUCTIVE_CAPABILITIES and not req.approved:
+        raise HTTPException(409, f"{operation} requires explicit user approval")
     try:
         profile_dir = profile_directory(req.organization_id, req.profile_id)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     if not profile_dir.is_dir():
-        raise HTTPException(409, "Hashnode browser profile is unavailable")
+        raise HTTPException(409, f"{platform.title()} browser profile is unavailable")
     try:
-        return upload_hashnode_draft(
-            profile_dir=str(profile_dir), title=req.title, article_md=req.article_md,
-            publish=req.publish,
+        return execute_operation(
+            extension,
+            profile_dir=profile_dir,
+            operation=capability,
+            request=_extension_operation_request(req),
         )
+    except OperationNotSupported as exc:
+        raise HTTPException(409, str(exc)) from exc
     except Exception as exc:
         return {"success": False, "error": _safe_reason(str(exc))}
+
+
+@app.post("/browser/hashnode/upload")
+def hashnode_browser_upload(req: HashnodeBrowserUploadRequest):
+    return browser_operation(
+        "hashnode",
+        "publish" if req.publish else "create_draft",
+        BrowserOperationRequest(
+            organization_id=req.organization_id,
+            profile_id=req.profile_id,
+            article=BrowserArticleRequest(title=req.title, body=req.article_md),
+            approved=req.publish,
+        ),
+    )
 
 
 @app.post("/browser/hashnode/login", status_code=201)
@@ -302,8 +367,13 @@ def hashnode_browser_login(req: Optional[HashnodeBrowserLoginRequest] = None):
 
 @app.post("/browser/{platform}/login", status_code=201)
 def browser_login(platform: str, req: Optional[HashnodeBrowserLoginRequest] = None):
+    extension = _browser_extension(platform)
     try:
-        return _browser_provider(platform)["start"](req.profile_id if req else None)
+        return start_browser_login(
+            platform,
+            req.profile_id if req else None,
+            login_url=extension.login.login_url,
+        )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except SkyvernUnavailable as exc:
@@ -317,8 +387,9 @@ def hashnode_browser_login_status(session_id: str):
 
 @app.get("/browser/{platform}/login/{session_id}")
 def browser_login_status(platform: str, session_id: str):
+    _browser_extension(platform)
     try:
-        return _browser_provider(platform)["get"](session_id)
+        return get_browser_login(session_id, platform)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except SkyvernUnavailable as exc:
@@ -332,8 +403,9 @@ def hashnode_browser_login_cancel(session_id: str):
 
 @app.delete("/browser/{platform}/login/{session_id}")
 def browser_login_cancel(platform: str, session_id: str):
+    _browser_extension(platform)
     try:
-        _browser_provider(platform)["close"](session_id)
+        close_browser_login(session_id)
         return {"status": "canceled"}
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -352,15 +424,16 @@ def hashnode_browser_login_complete(
 def browser_login_complete(
     platform: str, session_id: str, req: HashnodeBrowserLoginCompleteRequest,
 ):
+    extension = _browser_extension(platform)
     try:
-        provider = _browser_provider(platform)
-        profile = provider["finish"](
+        profile = finish_browser_login(
             session_id,
             req.profile_name,
+            platform,
             profile_id=req.profile_id,
             organization_id=req.organization_id,
         )
-        verification = provider["check"](profile_dir=profile["profile_dir"])
+        verification = extension.login.verify_profile(Path(profile["profile_dir"]))
         return {**verification, **profile}
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -377,8 +450,9 @@ def hashnode_browser_profile_delete(profile_id: str):
 
 @app.delete("/browser/{platform}/profiles/{profile_id}")
 def browser_profile_delete(platform: str, profile_id: str):
+    _browser_extension(platform)
     try:
-        _browser_provider(platform)["delete"](profile_id)
+        delete_browser_profile(profile_id)
         return {"status": "disconnected"}
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc

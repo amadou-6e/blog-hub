@@ -18,14 +18,15 @@ def test_browser_publish_requires_approval_and_completes(client, monkeypatch):
     _connect()
     seen = {}
 
-    def upload(**kwargs):
+    def upload(platform, operation, **kwargs):
+        seen.update(platform=platform, operation=operation)
         seen.update(kwargs)
         return {
             "success": True, "method": "deterministic",
             "url": "https://hashnode.com/draft/example", "draft_id": "example",
         }
 
-    monkeypatch.setattr(browser_publish.runner, "hashnode_browser_upload", upload)
+    monkeypatch.setattr(browser_publish.runner, "browser_operation", upload)
     created = client.post(
         "/api/articles/art_001/browser-publish/hashnode",
     )
@@ -41,7 +42,8 @@ def test_browser_publish_requires_approval_and_completes(client, monkeypatch):
     assert persisted["status"] == "completed"
     assert persisted["result"]["method"] == "deterministic"
     assert persisted["mode"] == "draft"
-    assert seen["publish"] is False
+    assert seen["operation"] == "create_draft"
+    assert seen["approved"] is True
     assert seen["profile_id"] == "bp_test"
     assert seen["organization_id"] == "o_test"
 
@@ -51,8 +53,10 @@ def test_public_publish_mode_is_durable_and_updates_destination(client, monkeypa
     seen = {}
     monkeypatch.setattr(
         browser_publish.runner,
-        "hashnode_browser_upload",
-        lambda **kwargs: seen.update(kwargs) or {
+        "browser_operation",
+        lambda platform, operation, **kwargs: seen.update(
+            kwargs, platform=platform, operation=operation
+        ) or {
             "success": True,
             "method": "deterministic",
             "status": "published",
@@ -69,7 +73,7 @@ def test_public_publish_mode_is_durable_and_updates_destination(client, monkeypa
 
     client.post(f"/api/articles/art_001/browser-publish/{run['id']}/approve")
 
-    assert seen["publish"] is True
+    assert seen["operation"] == "publish"
     article = client.get("/api/articles/art_001").json()
     assert article["destinations"]["hashnode"]["status"] == "published"
     assert article["destinations"]["hashnode"]["url"] == (
@@ -80,8 +84,8 @@ def test_public_publish_mode_is_durable_and_updates_destination(client, monkeypa
 def test_browser_publish_cannot_be_approved_twice(client, monkeypatch):
     _connect()
     monkeypatch.setattr(
-        browser_publish.runner, "hashnode_browser_upload",
-        lambda **_kwargs: {"success": True, "method": "deterministic"},
+        browser_publish.runner, "browser_operation",
+        lambda *_args, **_kwargs: {"success": True, "method": "deterministic"},
     )
     run = client.post(
         "/api/articles/art_001/browser-publish/hashnode",
@@ -105,8 +109,8 @@ def test_browser_publish_requires_connected_browser_profile(client):
 def test_manual_handoff_is_retained_on_failed_browser_login(client, monkeypatch):
     _connect()
     monkeypatch.setattr(
-        browser_publish.runner, "hashnode_browser_upload",
-        lambda **_kwargs: {
+        browser_publish.runner, "browser_operation",
+        lambda *_args, **_kwargs: {
             "success": False,
             "error": "Hashnode browser session is not authenticated",
             "manual_handoff": {
@@ -131,8 +135,10 @@ def test_approved_run_uploads_the_revision_captured_at_request(client, monkeypat
     article = client.get("/api/articles/art_001").json()
     seen = {}
     monkeypatch.setattr(
-        browser_publish.runner, "hashnode_browser_upload",
-        lambda **kwargs: seen.update(kwargs) or {"success": True, "method": "deterministic"},
+        browser_publish.runner, "browser_operation",
+        lambda platform, operation, **kwargs: seen.update(
+            kwargs, platform=platform, operation=operation
+        ) or {"success": True, "method": "deterministic"},
     )
     run = client.post(
         "/api/articles/art_001/browser-publish/hashnode",
@@ -142,7 +148,7 @@ def test_approved_run_uploads_the_revision_captured_at_request(client, monkeypat
         "base_revision_id": article["revision_id"],
     })
     client.post(f"/api/articles/art_001/browser-publish/{run['id']}/approve")
-    assert seen["article_md"] == article["content"]
+    assert seen["article"]["body"] == article["content"]
 
 
 def test_interrupted_external_write_is_not_replayed(client):
