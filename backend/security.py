@@ -6,18 +6,27 @@ import re
 from typing import Any
 
 _REDACTIONS = (
-    re.compile(r'(?i)("(?:access_token|refresh_token|token|code|cookie|api_key|client_secret)"\s*:\s*")[^"]*(")'),
+    re.compile(r'(?i)("(?:access_token|refresh_token|token|code|cookie|set-cookie|api_key|client_secret|password|session|authorization|proxy_authorization)"\s*:\s*")[^"]*(")'),
     re.compile(r"(?i)((?:authorization|proxy-authorization)\s*[:=]\s*(?:bearer\s+)?)[^\s,;]+"),
-    re.compile(r"(?i)((?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|auth[-_ ]?code|client[-_ ]?secret|token)\s*[:=]\s*)[^\s,;]+"),
+    re.compile(r"(?i)((?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|auth[-_ ]?code|client[-_ ]?secret|password|session|token)\s*[:=]\s*)[^\s,;]+"),
     re.compile(r"(?i)([?&](?:code|state|token)=)[^&#\s]+"),
-    re.compile(r"(?i)(cookie\s*[:=]\s*)[^\r\n]+"),
+    re.compile(r"(?i)((?:cookie|set-cookie)\s*[:=]\s*)[^\r\n]+"),
+    re.compile(r"(?i)(\bbearer\s+)[A-Za-z0-9._~+/=-]+"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
+    re.compile(r"\b(?:sk-[A-Za-z0-9_-]{12,}|gh[opsu]_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]{12,})\b"),
 )
 
 
 def redact_secrets(value: Any) -> str:
     redacted = str(value)
     for pattern in _REDACTIONS:
-        redacted = pattern.sub(r"\1[REDACTED]\2" if pattern.groups == 2 else r"\1[REDACTED]", redacted)
+        if pattern.groups == 2:
+            replacement = r"\1[REDACTED]\2"
+        elif pattern.groups == 1:
+            replacement = r"\1[REDACTED]"
+        else:
+            replacement = "[REDACTED]"
+        redacted = pattern.sub(replacement, redacted)
     return redacted
 
 

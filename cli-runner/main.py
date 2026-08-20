@@ -28,6 +28,22 @@ from typing import Iterator, Optional
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 _DEVICE_CODE_RE = re.compile(r"\b[A-Z0-9]{4}-[A-Z0-9]{4,6}\b")
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+_SECRET_REDACTIONS = (
+    re.compile(r"(?i)((?:cookie|set-cookie)\s*[:=]\s*)[^\r\n]+"),
+    re.compile(
+        r'(?i)(["\']?(?:access_token|refresh_token|token|code|cookie|set-cookie|'
+        r'api_key|client_secret|password|session|authorization|'
+        r'proxy_authorization)["\']?\s*[:=]\s*["\']?)'
+        r'[^\s,;"\'}]+(["\']?)'
+    ),
+    re.compile(
+        r"(?i)((?:authorization|proxy-authorization)\s*[:=]\s*"
+        r"(?:bearer|basic)?\s*)[^\s,;]+"
+    ),
+    re.compile(r"(?i)(\bbearer\s+)[A-Za-z0-9._~+/=-]+"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
+    re.compile(r"\b(?:sk-[A-Za-z0-9_-]{12,}|gh[opsu]_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]{12,})\b"),
+)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -181,13 +197,21 @@ class StatusResponse(BaseModel):
 
 
 def _safe_reason(value: str | None) -> str:
-    """Return an actionable error with auth URLs and one-time codes removed."""
+    """Return an actionable error with credentials and auth artifacts removed."""
     cleaned = _ANSI_RE.sub("", value or "Provider login failed")
     cleaned = _URL_RE.sub("[redacted-url]", cleaned)
     cleaned = _DEVICE_CODE_RE.sub("[redacted-code]", cleaned)
     cleaned = re.sub(
         r"(?i)((?:code|state|token)=)[^\s&#]+", r"\1[redacted]", cleaned
     )
+    for pattern in _SECRET_REDACTIONS:
+        if pattern.groups == 2:
+            replacement = r"\1[redacted]\2"
+        elif pattern.groups == 1:
+            replacement = r"\1[redacted]"
+        else:
+            replacement = "[redacted]"
+        cleaned = pattern.sub(replacement, cleaned)
     return " ".join(cleaned.split())[:300]
 
 

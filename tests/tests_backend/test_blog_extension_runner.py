@@ -93,3 +93,23 @@ def test_generic_operation_passes_normalized_article_to_runtime(tmp_path, monkey
     assert seen["operation"].value == "create_draft"
     assert seen["request"].article.tags == ("one", "two")
     assert seen["extension"].manifest.platform == "hashnode"
+
+
+def test_adapter_exception_is_sanitized_at_runner_boundary(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner_main, "profile_directory", lambda *_args: tmp_path)
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError(
+            "Playwright failed with Cookie: session=browser-secret; theme=dark"
+        )
+
+    monkeypatch.setattr(runner_main, "execute_operation", fail)
+    request = runner_main.BrowserOperationRequest(
+        organization_id="o_test", profile_id="bp_test"
+    )
+
+    result = runner_main.browser_operation("hashnode", "create_draft", request)
+
+    assert result["success"] is False
+    assert "browser-secret" not in result["error"]
+    assert "[redacted]" in result["error"]

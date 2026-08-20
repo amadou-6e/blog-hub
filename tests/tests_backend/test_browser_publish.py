@@ -130,6 +130,48 @@ def test_manual_handoff_is_retained_on_failed_browser_login(client, monkeypatch)
     assert persisted["result"]["manual_handoff"]["reason"] == "hashnode_login_required"
 
 
+def test_browser_publish_redacts_adapter_error_before_persistence(client, monkeypatch):
+    _connect()
+    monkeypatch.setattr(
+        browser_publish.runner,
+        "browser_operation",
+        lambda *_args, **_kwargs: {
+            "success": False,
+            "error": "Authorization: Bearer adapter-secret-token",
+        },
+    )
+    run = client.post("/api/articles/art_001/browser-publish/hashnode").json()
+
+    client.post(f"/api/articles/art_001/browser-publish/{run['id']}/approve")
+
+    persisted = client.get(
+        f"/api/articles/art_001/browser-publish/{run['id']}"
+    ).json()
+    assert "adapter-secret-token" not in persisted["error"]
+    assert "adapter-secret-token" not in persisted["result"]["error"]
+    assert "[REDACTED]" in persisted["error"]
+
+
+def test_browser_publish_redacts_transport_exception_before_persistence(
+    client, monkeypatch
+):
+    _connect()
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("Cookie: session=transport-secret; path=/")
+
+    monkeypatch.setattr(browser_publish.runner, "browser_operation", fail)
+    run = client.post("/api/articles/art_001/browser-publish/hashnode").json()
+
+    client.post(f"/api/articles/art_001/browser-publish/{run['id']}/approve")
+
+    persisted = client.get(
+        f"/api/articles/art_001/browser-publish/{run['id']}"
+    ).json()
+    assert "transport-secret" not in persisted["error"]
+    assert "[REDACTED]" in persisted["error"]
+
+
 def test_approved_run_uploads_the_revision_captured_at_request(client, monkeypatch):
     _connect()
     article = client.get("/api/articles/art_001").json()

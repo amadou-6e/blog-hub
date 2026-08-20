@@ -3,6 +3,11 @@ from __future__ import annotations
 
 import backend.services.cli_runner as runner
 import backend.store as store
+from backend.security import redact_secrets
+
+
+def _safe_error(value: object, fallback: str) -> str:
+    return redact_secrets(value or fallback)[:500]
 
 
 def execute_run(*, user_id: str, run_id: str) -> None:
@@ -33,7 +38,10 @@ def execute_run(*, user_id: str, run_id: str) -> None:
             approved=True,
         )
         if not result.get("success"):
-            error = result.get("error") or f"{platform.title()} upload failed"
+            error = _safe_error(
+                result.get("error"), f"{platform.title()} upload failed"
+            )
+            result = {**result, "error": error}
             store.apply_push_result(
                 user_id, run["article_id"], platform, success=False,
                 error=error, label="Browser upload failed",
@@ -50,11 +58,12 @@ def execute_run(*, user_id: str, run_id: str) -> None:
         )
         store.complete_browser_publish_run(user_id, run_id, result=result)
     except Exception as exc:
+        error = _safe_error(exc, f"{platform.title()} upload failed")
         store.apply_push_result(
             user_id, run["article_id"], platform, success=False,
-            error=str(exc)[:500], label="Browser upload failed",
+            error=error, label="Browser upload failed",
         )
-        store.complete_browser_publish_run(user_id, run_id, error=str(exc)[:500])
+        store.complete_browser_publish_run(user_id, run_id, error=error)
 
 
 def execute_hashnode_run(*, user_id: str, run_id: str) -> None:

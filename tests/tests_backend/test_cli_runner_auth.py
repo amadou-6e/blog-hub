@@ -25,6 +25,19 @@ def test_runner_redacts_callback_secrets_and_device_codes():
     assert "ABCD-EFGH" not in reason
 
 
+def test_runner_redacts_browser_adapter_credentials():
+    runner = _runner_module()
+    reason = runner._safe_reason(
+        "request failed Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature "
+        "Cookie: session=browser-secret; csrf=private api_key=sk-adapter-secret123"
+    )
+    assert "eyJhbGci" not in reason
+    assert "browser-secret" not in reason
+    assert "private" not in reason
+    assert "sk-adapter" not in reason
+    assert "[redacted]" in reason
+
+
 def test_runner_normalizes_actionable_failure_states():
     runner = _runner_module()
     assert runner._failure_status("access denied")[0] == "rejected"
