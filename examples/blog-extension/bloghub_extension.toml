@@ -1,0 +1,11 @@
+[extension]
+protocol_version = 1
+id = "example.local-blog"
+platform = "local-blog"
+display_name = "Local Blog"
+version = "1.0.0"
+capabilities = ["create_draft", "publish"]
+
+[entrypoints]
+login = "local_blog_extension:LoginAdapter"
+operations = "local_blog_extension:OperationsAdapter"

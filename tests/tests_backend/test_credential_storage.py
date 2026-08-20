@@ -181,7 +181,9 @@ def test_invalid_environment_key_fails_configuration(credential_environment, mon
     "value",
     [
         'Authorization: Bearer sk-test-secret',
+        '{"authorization":"Bearer browser-secret","status":401}',
         'api_key=sk-test-secret',
+        'password=private-secret',
         '{"access_token":"oauth-secret","ok":true}',
         'Cookie: session=private; theme=dark',
         'auth_code=temporary-code',

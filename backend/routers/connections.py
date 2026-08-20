@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import re
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -54,7 +55,12 @@ _VALID_IDS = {"medium", "hashnode", "devto", "anthropic", "openai"}
 _BLOG_IDS = {"medium", "hashnode", "devto"}
 _CLI_IDS = {"anthropic", "openai"}
 _PROVIDER_MAP = {"anthropic": "anthropic", "openai": "openai"}
-_BROWSER_LOGIN_IDS = {"medium", "hashnode"}
+_BROWSER_EXTENSION_ID = re.compile(r"^[a-z][a-z0-9_.-]{1,79}$")
+
+
+def _require_browser_extension_id(platform: str) -> None:
+    if not _BROWSER_EXTENSION_ID.fullmatch(platform):
+        raise HTTPException(status_code=400, detail="Invalid browser extension id")
 
 # ── Mock draft data ───────────────────────────────────────────────────────────
 # Real implementation would call each platform's API with the stored token.
@@ -228,6 +234,14 @@ def list_connections(request: Request):
     user_id: str = request.state.user_id
     return ConnectionListResponse(
         connections=[ConnectionInfo(**c) for c in store.list_connections(user_id)])
+
+
+@router.get("/browser-extensions")
+def list_browser_extensions():
+    try:
+        return {"extensions": runner.browser_extensions()}
+    except runner.RunnerUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 # ── Provider-neutral AI agent authentication ─────────────────────────────────
@@ -513,8 +527,7 @@ def get_hashnode_browser_connection(request: Request):
 
 @router.get("/{conn_id}/browser-connection")
 def get_browser_connection(request: Request, conn_id: str):
-    if conn_id not in _BROWSER_LOGIN_IDS:
-        raise HTTPException(status_code=400, detail=f"{conn_id} does not support browser login")
+    _require_browser_extension_id(conn_id)
     return _browser_connection_response(
         conn_id,
         store.get_browser_connection(request.state.user_id, conn_id)
@@ -528,8 +541,7 @@ def start_hashnode_browser_connection(request: Request):
 
 @router.post("/{conn_id}/browser-connection", status_code=201)
 def start_browser_connection(request: Request, conn_id: str):
-    if conn_id not in _BROWSER_LOGIN_IDS:
-        raise HTTPException(status_code=400, detail=f"{conn_id} does not support browser login")
+    _require_browser_extension_id(conn_id)
     previous = store.get_browser_connection(request.state.user_id, conn_id)
     if previous and previous.get("skyvern_session_id") and previous["status"] == "waiting_for_login":
         try:
@@ -559,8 +571,7 @@ def complete_hashnode_browser_connection(request: Request):
 
 @router.post("/{conn_id}/browser-connection/complete")
 def complete_browser_connection(request: Request, conn_id: str):
-    if conn_id not in _BROWSER_LOGIN_IDS:
-        raise HTTPException(status_code=400, detail=f"{conn_id} does not support browser login")
+    _require_browser_extension_id(conn_id)
     user_id = request.state.user_id
     connection = store.get_browser_connection(user_id, conn_id)
     if not connection or connection["status"] != "waiting_for_login":
@@ -609,8 +620,7 @@ def disconnect_hashnode_browser_connection(request: Request):
 
 @router.delete("/{conn_id}/browser-connection")
 def disconnect_browser_connection(request: Request, conn_id: str):
-    if conn_id not in _BROWSER_LOGIN_IDS:
-        raise HTTPException(status_code=400, detail=f"{conn_id} does not support browser login")
+    _require_browser_extension_id(conn_id)
     connection = store.get_browser_connection(request.state.user_id, conn_id)
     if connection and connection.get("skyvern_session_id") and connection["status"] == "waiting_for_login":
         try:

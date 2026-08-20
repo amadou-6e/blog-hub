@@ -145,15 +145,51 @@ def hashnode_browser_upload(
     *, organization_id: str, profile_id: str, title: str, article_md: str,
     publish: bool = False,
 ) -> dict:
-    """Create or publish a Hashnode article through the browser runner."""
+    """Compatibility wrapper around the generic browser extension operation."""
+    return browser_operation(
+        "hashnode",
+        "publish" if publish else "create_draft",
+        organization_id=organization_id,
+        profile_id=profile_id,
+        article={"title": title, "body": article_md},
+        approved=publish,
+    )
+
+
+def browser_extensions() -> list[dict]:
+    return _get("/browser/extensions").get("extensions", [])
+
+
+def browser_extension(platform: str) -> dict:
+    return _get(f"/browser/{platform}/capabilities")
+
+
+def browser_operation(
+    platform: str,
+    operation: str,
+    *,
+    organization_id: str,
+    profile_id: str,
+    article: dict | None = None,
+    remote_id: str | None = None,
+    cursor: str | None = None,
+    limit: int = 50,
+    approved: bool = False,
+) -> dict:
+    """Execute a normalized operation through an installed browser extension."""
     payload = {
-        "organization_id": organization_id, "profile_id": profile_id,
-        "title": title, "article_md": article_md, "publish": publish,
+        "organization_id": organization_id,
+        "profile_id": profile_id,
+        "article": article,
+        "remote_id": remote_id,
+        "cursor": cursor,
+        "limit": limit,
+        "approved": approved,
     }
     try:
         with _client() as client:
             response = client.post(
-                "/browser/hashnode/upload", json=payload,
+                f"/browser/{platform}/operations/{operation}", json=payload,
                 timeout=httpx.Timeout(connect=3, read=300, write=30, pool=5),
             )
             response.raise_for_status()

@@ -5,6 +5,24 @@ import backend.services.cli_runner as runner
 import backend.store as store
 
 
+def test_browser_extension_capabilities_are_exposed_to_the_ui(client, monkeypatch):
+    monkeypatch.setattr(
+        connections_router.runner,
+        "browser_extensions",
+        lambda: [{
+            "id": "bloghub.hashnode",
+            "platform": "hashnode",
+            "capabilities": ["create_draft", "publish"],
+        }],
+    )
+
+    response = client.get("/api/connections/browser-extensions")
+
+    assert response.status_code == 200
+    assert response.json()["extensions"][0]["platform"] == "hashnode"
+    assert "publish" in response.json()["extensions"][0]["capabilities"]
+
+
 def test_hashnode_browser_login_persists_only_profile_references(client, monkeypatch):
     monkeypatch.setattr(
         connections_router.runner,
@@ -119,6 +137,8 @@ def test_hashnode_browser_disconnect_deletes_remote_profile(client, monkeypatch)
     assert response.status_code == 200
     assert deleted == [("hashnode", "bp_profile")]
     assert store.get_browser_connection("user_seed", "hashnode") is None
+
+
 def test_hashnode_browser_disconnect_retains_profile_when_remote_cleanup_fails(
     client, monkeypatch,
 ):

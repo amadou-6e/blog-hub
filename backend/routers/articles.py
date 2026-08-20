@@ -540,29 +540,30 @@ def push_article(request: Request, article_id: str, body: dict = {}):
     return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
 
 
-class HashnodeBrowserPublishRequest(BaseModel):
+class BrowserPublishRequest(BaseModel):
     mode: Literal["draft", "publish"] = "draft"
 
 
-@router.post("/{article_id}/browser-publish/hashnode", status_code=201)
-def request_hashnode_browser_publish(
+@router.post("/{article_id}/browser-publish/{platform}", status_code=201)
+def request_browser_publish(
     request: Request,
     article_id: str,
-    body: HashnodeBrowserPublishRequest = HashnodeBrowserPublishRequest(),
+    platform: str,
+    body: BrowserPublishRequest = BrowserPublishRequest(),
 ):
     if store.get_article(request.state.user_id, article_id) is None:
         raise HTTPException(status_code=404, detail="Article not found")
     browser_connection = store.get_browser_connection(
-        request.state.user_id, "hashnode"
+        request.state.user_id, platform
     )
     if not browser_connection or browser_connection["status"] != "connected":
         raise HTTPException(
             status_code=409,
-            detail="Connect Hashnode with browser login before browser publishing",
+            detail=f"Connect {platform.title()} with browser login before browser publishing",
         )
     return store.create_browser_publish_run(
         request.state.user_id, article_id,
-        platform="hashnode", mode=body.mode,
+        platform=platform, mode=body.mode,
     )
 
 
@@ -575,7 +576,7 @@ def get_browser_publish(request: Request, article_id: str, run_id: str):
 
 
 @router.post("/{article_id}/browser-publish/{run_id}/approve", status_code=202)
-def approve_hashnode_browser_publish(
+def approve_browser_publish(
     request: Request, article_id: str, run_id: str,
     background_tasks: BackgroundTasks,
 ):
@@ -587,7 +588,7 @@ def approve_hashnode_browser_publish(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     background_tasks.add_task(
-        browser_publish.execute_hashnode_run,
+        browser_publish.execute_run,
         user_id=request.state.user_id, run_id=run_id,
     )
     return approved

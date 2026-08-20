@@ -90,3 +90,14 @@ the callback URL from failed network requests via `page.on("request", ...)` — 
 
 GitHub CI is documented in `docs/ci.md`. Live-provider browser login tests remain
 opt-in and are excluded from the default Playwright gate.
+
+## Browser Blog Extensions
+
+Browser-backed blog platforms use the versioned extension contract documented
+in `docs/blog-extensions.md`. Each trusted extension supplies separate login and
+operations adapters plus a manifest. The CLI runner owns the persistent
+Playwright context and discovers only administrator-mounted extension paths.
+
+Hashnode and Medium are built-in protocol-1 adapters. New platforms must not add
+platform-specific runner routes; expose their behavior through the extension
+capabilities and normalized operation contract.

@@ -87,10 +87,20 @@ _LOGIN_URLS = {
 }
 
 
-def start_browser_login(platform: str, profile_id: str | None = None) -> dict:
-    login_url = _LOGIN_URLS.get(platform)
+def start_browser_login(
+    platform: str,
+    profile_id: str | None = None,
+    *,
+    login_url: str | None = None,
+) -> dict:
+    # The fallback keeps old direct callers working. The runner passes the URL
+    # from the installed extension manifest through its login adapter.
+    login_url = login_url or _LOGIN_URLS.get(platform)
     if login_url is None:
         raise ValueError(f"{platform} does not support browser login")
+    parsed_login = urlsplit(login_url)
+    if parsed_login.scheme != "https" or not parsed_login.netloc:
+        raise ValueError("Browser login URL must use HTTPS")
     if profile_id is not None and not _PROFILE_ID.fullmatch(profile_id):
         raise ValueError("Invalid Skyvern profile id")
     payload = {
