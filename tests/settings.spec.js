@@ -128,7 +128,9 @@ test.describe('Settings screen', () => {
    *  6. Poll /api/connections/anthropic/cli-login-status until connected.
    *  7. Assert the card shows Connected.
    */
-  test('Claude browser login: full loopback OAuth flow', async ({ page, context }) => {
+  test('Claude browser login: full loopback OAuth flow @live', async ({ page, context }) => {
+    test.skip(!process.env.BLOGHUB_LIVE_BROWSER_LOGIN, 'Live provider login is opt-in.');
+
     await openAiProviders(page);
 
     // Start login — runner spawns claude auth login and returns the loopback URL

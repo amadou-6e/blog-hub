@@ -8,6 +8,7 @@ The default PR checks are intentionally deterministic:
 ```bash
 bash scripts/run-unit-tests.sh
 npm run check:contracts
+npm run test:playwright:ci
 ```
 
 The `Unit test gate` job is the required Python gate for ordinary PRs. It runs
@@ -17,5 +18,6 @@ pytest with strict marker validation and explicitly excludes tests marked
 cleared in the baseline workflow.
 
 Playwright/browser coverage is tracked separately in issue #56. Those tests
-need browser setup, screenshots/traces on failure, and fixture-backed provider
-states before they become a required CI gate.
+run in the `Playwright gate` job with `BLOGHUB_DISABLE_AUTH=true` and fixture
+state from the in-memory store. Live provider browser login is tagged `@live`
+and remains opt-in through `BLOGHUB_LIVE_BROWSER_LOGIN=1`.
