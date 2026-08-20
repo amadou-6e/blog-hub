@@ -14,6 +14,16 @@ def _connect() -> None:
     )
 
 
+def _connect_medium() -> None:
+    store.start_browser_connection(
+        "user_seed", "medium", session_id="pbs_medium",
+        organization_id="o_medium", app_url="http://localhost/login",
+    )
+    store.update_browser_connection(
+        "user_seed", "medium", "connected", profile_id="bp_medium"
+    )
+
+
 def test_browser_publish_requires_approval_and_completes(client, monkeypatch):
     _connect()
     seen = {}
@@ -75,6 +85,51 @@ def test_public_publish_mode_is_durable_and_updates_destination(client, monkeypa
     assert article["destinations"]["hashnode"]["url"] == (
         "https://example.hashnode.dev/test"
     )
+
+
+def test_medium_browser_publish_renders_html_and_dispatches_medium_worker(
+    client, monkeypatch,
+):
+    _connect_medium()
+    seen = {}
+    monkeypatch.setattr(
+        browser_publish.runner,
+        "medium_browser_upload",
+        lambda **kwargs: seen.update(kwargs) or {
+            "success": True,
+            "method": "deterministic",
+            "status": "draft",
+            "url": "https://medium.com/p/abc123/edit",
+            "draft_id": "abc123",
+        },
+    )
+
+    run = client.post(
+        "/api/articles/art_001/browser-publish/medium",
+    ).json()
+    approved = client.post(
+        f"/api/articles/art_001/browser-publish/{run['id']}/approve"
+    )
+
+    assert approved.status_code == 202
+    assert seen["profile_id"] == "bp_medium"
+    assert seen["organization_id"] == "o_medium"
+    assert "<!doctype" not in seen["article_html"].lower()
+    assert "<article" not in seen["article_html"].lower()
+    assert "<h1" not in seen["article_html"].lower()
+    assert len(seen["article_html"]) > 20
+    assert seen["publish"] is False
+    persisted = client.get(
+        f"/api/articles/art_001/browser-publish/{run['id']}"
+    ).json()
+    assert persisted["status"] == "completed"
+    article = client.get("/api/articles/art_001").json()
+    assert article["destinations"]["medium"]["status"] == "draft"
+
+
+def test_medium_browser_publish_requires_connected_profile(client):
+    response = client.post("/api/articles/art_001/browser-publish/medium")
+    assert response.status_code == 409
 
 
 def test_browser_publish_cannot_be_approved_twice(client, monkeypatch):

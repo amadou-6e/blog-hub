@@ -162,6 +162,56 @@ def hashnode_browser_upload(
         raise RunnerUnavailable(f"Browser runner unavailable: {exc}") from exc
 
 
+def medium_browser_upload(
+    *, organization_id: str, profile_id: str, title: str, article_html: str,
+    publish: bool = False,
+) -> dict:
+    payload = {
+        "organization_id": organization_id, "profile_id": profile_id,
+        "title": title, "article_html": article_html, "publish": publish,
+    }
+    try:
+        with _client() as client:
+            response = client.post(
+                "/browser/medium/upload", json=payload,
+                timeout=httpx.Timeout(connect=3, read=300, write=30, pool=5),
+            )
+            response.raise_for_status()
+            return response.json()
+    except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
+        raise RunnerUnavailable(f"Browser runner unavailable: {exc}") from exc
+
+
+def list_medium_browser_articles(*, organization_id: str, profile_id: str) -> list[dict]:
+    try:
+        with _client() as client:
+            response = client.get(
+                "/browser/medium/articles",
+                params={"organization_id": organization_id, "profile_id": profile_id},
+                timeout=httpx.Timeout(connect=3, read=180, write=10, pool=5),
+            )
+            response.raise_for_status()
+            return response.json().get("articles", [])
+    except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
+        raise RunnerUnavailable(f"Browser runner unavailable: {exc}") from exc
+
+
+def get_medium_browser_article(
+    article_id: str, *, organization_id: str, profile_id: str,
+) -> dict:
+    try:
+        with _client() as client:
+            response = client.get(
+                f"/browser/medium/articles/{article_id}",
+                params={"organization_id": organization_id, "profile_id": profile_id},
+                timeout=httpx.Timeout(connect=3, read=180, write=10, pool=5),
+            )
+            response.raise_for_status()
+            return response.json()
+    except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
+        raise RunnerUnavailable(f"Browser runner unavailable: {exc}") from exc
+
+
 def start_browser_login(platform: str, profile_id: str | None = None) -> dict:
     if profile_id:
         return _post(f"/browser/{platform}/login", profile_id=profile_id)

@@ -33,7 +33,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from hashnode_browser import check_hashnode_profile, upload_hashnode_draft
-from medium_browser import check_medium_profile
+from medium_browser import (
+    check_medium_profile,
+    get_medium_article,
+    list_medium_articles,
+    upload_medium_draft,
+)
 from skyvern_browser import (
     SkyvernUnavailable,
     close_hashnode_login,
@@ -235,6 +240,14 @@ class HashnodeBrowserUploadRequest(BaseModel):
     publish: bool = False
 
 
+class MediumBrowserUploadRequest(BaseModel):
+    organization_id: str
+    profile_id: str
+    title: str
+    article_html: str
+    publish: bool = False
+
+
 class HashnodeBrowserLoginCompleteRequest(BaseModel):
     profile_name: str
     profile_id: Optional[str] = None
@@ -293,6 +306,48 @@ def hashnode_browser_upload(req: HashnodeBrowserUploadRequest):
         )
     except Exception as exc:
         return {"success": False, "error": _safe_reason(str(exc))}
+
+
+def _browser_profile_dir(organization_id: str, profile_id: str, platform: str):
+    try:
+        profile_dir = profile_directory(organization_id, profile_id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if not profile_dir.is_dir():
+        raise HTTPException(409, f"{platform.title()} browser profile is unavailable")
+    return profile_dir
+
+
+@app.post("/browser/medium/upload")
+def medium_browser_upload(req: MediumBrowserUploadRequest):
+    profile_dir = _browser_profile_dir(req.organization_id, req.profile_id, "medium")
+    try:
+        return upload_medium_draft(
+            profile_dir=str(profile_dir), title=req.title,
+            article_html=req.article_html, publish=req.publish,
+        )
+    except Exception as exc:
+        return {"success": False, "error": _safe_reason(str(exc))}
+
+
+@app.get("/browser/medium/articles")
+def medium_browser_articles(organization_id: str, profile_id: str):
+    profile_dir = _browser_profile_dir(organization_id, profile_id, "medium")
+    try:
+        return list_medium_articles(profile_dir=str(profile_dir))
+    except Exception as exc:
+        raise HTTPException(502, _safe_reason(str(exc))) from exc
+
+
+@app.get("/browser/medium/articles/{article_id}")
+def medium_browser_article(article_id: str, organization_id: str, profile_id: str):
+    profile_dir = _browser_profile_dir(organization_id, profile_id, "medium")
+    try:
+        return get_medium_article(profile_dir=str(profile_dir), article_id=article_id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, _safe_reason(str(exc))) from exc
 
 
 @app.post("/browser/hashnode/login", status_code=201)
