@@ -631,8 +631,8 @@ let currentPage       = 1;     // number of raw pages currently loaded (from pag
 let totalArticleCount = 0;     // server-reported total, across all pages
 let isLoadingMore     = false; // a "Load more" fetch is in flight
 let loadMoreError     = null;  // message from the last failed "Load more" attempt
-let loadGeneration     = 0;    // bumped on every full reload / filter change to
-                                // invalidate stale in-flight page-load responses
+let overviewLoadGeneration = 0; // invalidates stale full-overview reloads
+let pageLoadGeneration     = 0; // invalidates stale incremental page loads
 const loadedArticleIds = new Set();
 
 // --- Helpers -------------------------------------------------------
@@ -735,7 +735,7 @@ async function fetchArticlePages(pagesToLoad, generation) {
   let total = 0;
   for (let page = 1; page <= pagesToLoad; page += 1) {
     const payload = await fetchJson(articlesPageUrl(page));
-    if (generation !== loadGeneration) return null; // superseded — discard
+    if (generation !== overviewLoadGeneration) return null; // superseded — discard
     items = items.concat(payload.items);
     total = payload.total;
   }
@@ -746,7 +746,8 @@ async function fetchArticlePages(pagesToLoad, generation) {
 // action-triggered refresh (push/inspect/etc.) never collapses an already
 // expanded list back down to the first 100 articles.
 async function loadOverview() {
-  const generation = (loadGeneration += 1);
+  const generation = (overviewLoadGeneration += 1);
+  pageLoadGeneration += 1;
   isLoadingMore = false;
   loadMoreError = null;
 
@@ -756,7 +757,7 @@ async function loadOverview() {
     fetchJson('/api/connections'),
   ]);
 
-  if (generation !== loadGeneration || articlesResult === null) return; // stale
+  if (generation !== overviewLoadGeneration || articlesResult === null) return; // stale
 
   loadedArticleIds.clear();
   ARTICLES = articlesResult.items.map((raw, index) => {
@@ -773,10 +774,29 @@ async function loadOverview() {
     <span style="width:6px;height:6px;border-radius:50%;background:#4ade80;display:inline-block;"></span>
     ${connected.length} platforms connected
   `;
+
+  if (hasActiveFilters()) await loadRemainingArticlesForFilters();
 }
 
 function hasMoreArticles() {
   return ARTICLES.length < totalArticleCount;
+}
+
+function hasActiveFilters() {
+  const query = document.getElementById('search-input').value.trim();
+  return query.length > 0 || statusFilter !== 'all' || platformFilter.size > 0;
+}
+
+function appendArticlePage(payload, page) {
+  const newItems = payload.items.filter(raw => !loadedArticleIds.has(raw.id));
+  const startIndex = ARTICLES.length;
+  const mapped = newItems.map((raw, i) => {
+    loadedArticleIds.add(raw.id);
+    return buildLiveArticle(raw, startIndex + i);
+  });
+  ARTICLES = ARTICLES.concat(mapped);
+  totalArticleCount = payload.total;
+  currentPage = page;
 }
 
 // Incremental "Load more": fetches the next raw page and appends it without
@@ -784,7 +804,7 @@ function hasMoreArticles() {
 // existing cards is untouched — see renderCard()).
 async function loadMoreArticles() {
   if (isLoadingMore || !hasMoreArticles()) return;
-  const generation = loadGeneration;
+  const generation = pageLoadGeneration;
   const nextPage = currentPage + 1;
 
   isLoadingMore = true;
@@ -793,24 +813,38 @@ async function loadMoreArticles() {
 
   try {
     const payload = await fetchJson(articlesPageUrl(nextPage));
-    if (generation !== loadGeneration) return; // a full reload / filter change superseded this
-
-    const newItems = payload.items.filter(raw => !loadedArticleIds.has(raw.id));
-    const startIndex = ARTICLES.length;
-    const mapped = newItems.map((raw, i) => {
-      loadedArticleIds.add(raw.id);
-      return buildLiveArticle(raw, startIndex + i);
-    });
-
-    ARTICLES = ARTICLES.concat(mapped);
-    totalArticleCount = payload.total;
-    currentPage = nextPage;
+    if (generation !== pageLoadGeneration) return; // superseded
+    appendArticlePage(payload, nextPage);
   } catch (error) {
-    if (generation === loadGeneration) {
+    if (generation === pageLoadGeneration) {
       loadMoreError = error.message || 'Failed to load more articles.';
     }
   } finally {
-    if (generation === loadGeneration) isLoadingMore = false;
+    if (generation === pageLoadGeneration) isLoadingMore = false;
+    render();
+  }
+}
+
+async function loadRemainingArticlesForFilters() {
+  if (isLoadingMore || !hasActiveFilters() || !hasMoreArticles()) return;
+  const generation = pageLoadGeneration;
+  isLoadingMore = true;
+  loadMoreError = null;
+  render();
+
+  try {
+    while (generation === pageLoadGeneration && hasMoreArticles()) {
+      const nextPage = currentPage + 1;
+      const payload = await fetchJson(articlesPageUrl(nextPage));
+      if (generation !== pageLoadGeneration) return;
+      appendArticlePage(payload, nextPage);
+    }
+  } catch (error) {
+    if (generation === pageLoadGeneration) {
+      loadMoreError = error.message || 'Failed to load all articles for filtering.';
+    }
+  } finally {
+    if (generation === pageLoadGeneration) isLoadingMore = false;
     render();
   }
 }
@@ -822,7 +856,7 @@ async function loadMoreArticles() {
 // state the user has since changed. The user can simply press "Load more"
 // again once filters settle.
 function invalidateInFlightPageLoad() {
-  loadGeneration += 1;
+  pageLoadGeneration += 1;
   isLoadingMore = false;
   loadMoreError = null;
 }
@@ -1236,7 +1270,12 @@ function render() {
   const filtered = ARTICLES.filter(matchesFilters).sort((a, b) => a.urgency - b.urgency);
   document.getElementById('article-count').textContent = `${filtered.length} article${filtered.length !== 1 ? 's' : ''}`;
 
-  if (filtered.length === 0) { noRes.style.display = 'flex'; renderLoadMoreRegion(); syncDetailsPanel(); return; }
+  if (filtered.length === 0) {
+    if (!isLoadingMore) noRes.style.display = 'flex';
+    renderLoadMoreRegion();
+    syncDetailsPanel();
+    return;
+  }
   filtered.forEach(a => grid.appendChild(renderCard(a)));
   renderLoadMoreRegion();
   syncDetailsPanel();
@@ -1333,6 +1372,7 @@ function togglePlatform(p, el) {
 function applyFilters() {
   invalidateInFlightPageLoad();
   render();
+  void loadRemainingArticlesForFilters();
 }
 
 function clearFilters() {

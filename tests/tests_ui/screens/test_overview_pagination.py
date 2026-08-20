@@ -181,6 +181,44 @@ def test_changing_filter_while_page_load_in_flight_does_not_corrupt_state(page):
     page.unroute(re.compile(r"/api/articles\?.*"))
 
 
+def test_filter_change_during_initial_load_does_not_discard_page_one(page):
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    _login(page)
+
+    def _delay_page_one(route, request):
+        if "page=1" in request.url:
+            page.wait_for_timeout(300)
+        route.continue_()
+
+    page.route(re.compile(r"/api/articles\?.*"), _delay_page_one)
+    page.goto(OVERVIEW_URL)
+    page.locator("#search-input").fill("article")
+
+    page.wait_for_selector(".article-card")
+    assert page.locator(".article-card").count() > 0
+
+    page.unroute(re.compile(r"/api/articles\?.*"))
+
+
+def test_search_automatically_includes_matches_beyond_page_one(page):
+    page.set_viewport_size({"width": 1440, "height": 1000})
+    _login(page)
+    target = page.request.post(
+        f"{BASE_URL}/api/articles",
+        data={"title": "Unique deep pagination target"},
+    )
+    assert target.ok
+    _seed_extra_articles(page, 110, prefix="Newer filler article")
+
+    page.goto(OVERVIEW_URL)
+    page.wait_for_selector(".article-card")
+    page.locator("#search-input").fill("Unique deep pagination target")
+
+    match = page.locator(".article-card").filter(has_text="Unique deep pagination target")
+    match.wait_for()
+    assert match.count() == 1
+
+
 # ── preview-tab selection survives incremental rendering ───────────────────
 
 
