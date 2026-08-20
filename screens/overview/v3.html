@@ -296,6 +296,67 @@
       border-radius: 0;
     }
 
+    /* Load-more region */
+    #load-more-region {
+      margin-top: 16px;
+    }
+    #load-more-region:empty {
+      margin-top: 0;
+    }
+    .load-more-panel {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      padding: 20px 0 8px;
+      width: 100%;
+    }
+    .load-more-status {
+      font-size: 12px;
+      color: #5a6080;
+      font-family: 'JetBrains Mono', monospace;
+      text-align: center;
+    }
+    .load-more-btn {
+      font-size: 12px;
+      font-weight: 500;
+      padding: 8px 18px;
+      border-radius: 6px;
+      background: #181c27;
+      color: #c9cfe0;
+      border: 1px solid #252a38;
+      cursor: pointer;
+      font-family: inherit;
+      transition: border-color 100ms, color 100ms, background 100ms;
+    }
+    .load-more-btn:hover  { border-color: #3a3f52; color: #e8eaf2; background: #1b2030; }
+    .load-more-btn:focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }
+    .load-more-btn:disabled { cursor: default; opacity: 0.6; }
+    .load-more-error {
+      font-size: 12px;
+      color: #f87171;
+      text-align: center;
+    }
+    .load-more-retry-btn {
+      font-size: 12px;
+      font-weight: 500;
+      padding: 8px 18px;
+      border-radius: 6px;
+      background: #1e1818;
+      color: #f87171;
+      border: 1px solid #3a2828;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .load-more-retry-btn:hover { border-color: #4d2a2a; }
+    .load-more-retry-btn:focus-visible { outline: 2px solid #f87171; outline-offset: 2px; }
+    .load-more-skeletons {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      width: 100%;
+    }
+
     @media (max-width: 760px) {
       .article-card {
         height: auto;
@@ -455,6 +516,8 @@
     <div id="grid-area" style="flex:1;overflow-y:auto;padding:24px 32px;">
       <div id="card-grid" style="display:grid;grid-template-columns:minmax(0, 750px);justify-content:center;gap:12px;width:100%;margin:0 auto;"></div>
 
+      <div id="load-more-region" style="display:grid;grid-template-columns:minmax(0, 750px);justify-content:center;width:100%;margin:0 auto;"></div>
+
       <div id="empty-state" style="display:none;flex-direction:column;align-items:center;justify-content:center;min-height:360px;text-align:center;">
         <div style="font-size:40px;color:#252a38;margin-bottom:16px;line-height:1;">?</div>
         <div style="color:#e8eaf2;font-weight:600;font-size:15px;margin-bottom:6px;">Nothing here yet</div>
@@ -562,6 +625,16 @@ let detailsPanelOpen = true;
 // Per-card active preview platform: Map<articleId, 'medium'|'hashnode'|'devto'>
 const activePreview = new Map();
 
+// --- Pagination state ------------------------------------------------
+const PAGE_SIZE = 100;
+let currentPage       = 1;     // number of raw pages currently loaded (from page 1)
+let totalArticleCount = 0;     // server-reported total, across all pages
+let isLoadingMore     = false; // a "Load more" fetch is in flight
+let loadMoreError     = null;  // message from the last failed "Load more" attempt
+let overviewLoadGeneration = 0; // invalidates stale full-overview reloads
+let pageLoadGeneration     = 0; // invalidates stale incremental page loads
+const loadedArticleIds = new Set();
+
 // --- Helpers -------------------------------------------------------
 const DOT_COLOR = {
   draft: '#6ea8fe', ready: '#4ade80', published: '#38bdf8',
@@ -651,12 +724,49 @@ async function fetchJson(url, options = {}) {
   return response.json();
 }
 
+function articlesPageUrl(page) {
+  return `/api/articles?sortBy=updatedAt&sortDir=desc&page=${page}&pageSize=${PAGE_SIZE}`;
+}
+
+// Fetch pages 1..pagesToLoad and concatenate them, preserving server order.
+// Returns null if a newer load generation started while this was in flight.
+async function fetchArticlePages(pagesToLoad, generation) {
+  let items = [];
+  let total = 0;
+  for (let page = 1; page <= pagesToLoad; page += 1) {
+    const payload = await fetchJson(articlesPageUrl(page));
+    if (generation !== overviewLoadGeneration) return null; // superseded — discard
+    items = items.concat(payload.items);
+    total = payload.total;
+  }
+  return { items, total };
+}
+
+// Full reload: re-fetches from page 1 up to the current pagination depth, so an
+// action-triggered refresh (push/inspect/etc.) never collapses an already
+// expanded list back down to the first 100 articles.
 async function loadOverview() {
-  const [articlesPayload, connectionsPayload] = await Promise.all([
-    fetchJson('/api/articles?sortBy=updatedAt&sortDir=desc&page=1&pageSize=100'),
+  const generation = (overviewLoadGeneration += 1);
+  pageLoadGeneration += 1;
+  isLoadingMore = false;
+  loadMoreError = null;
+
+  const pagesToLoad = Math.max(1, currentPage);
+  const [articlesResult, connectionsPayload] = await Promise.all([
+    fetchArticlePages(pagesToLoad, generation),
     fetchJson('/api/connections'),
   ]);
-  ARTICLES = articlesPayload.items.map(buildLiveArticle);
+
+  if (generation !== overviewLoadGeneration || articlesResult === null) return; // stale
+
+  loadedArticleIds.clear();
+  ARTICLES = articlesResult.items.map((raw, index) => {
+    loadedArticleIds.add(raw.id);
+    return buildLiveArticle(raw, index);
+  });
+  totalArticleCount = articlesResult.total;
+  currentPage = pagesToLoad;
+
   const connected = connectionsPayload.connections.filter(
     item => ['medium', 'hashnode', 'devto'].includes(item.id) && item.status === 'connected'
   );
@@ -664,6 +774,91 @@ async function loadOverview() {
     <span style="width:6px;height:6px;border-radius:50%;background:#4ade80;display:inline-block;"></span>
     ${connected.length} platforms connected
   `;
+
+  if (hasActiveFilters()) await loadRemainingArticlesForFilters();
+}
+
+function hasMoreArticles() {
+  return ARTICLES.length < totalArticleCount;
+}
+
+function hasActiveFilters() {
+  const query = document.getElementById('search-input').value.trim();
+  return query.length > 0 || statusFilter !== 'all' || platformFilter.size > 0;
+}
+
+function appendArticlePage(payload, page) {
+  const newItems = payload.items.filter(raw => !loadedArticleIds.has(raw.id));
+  const startIndex = ARTICLES.length;
+  const mapped = newItems.map((raw, i) => {
+    loadedArticleIds.add(raw.id);
+    return buildLiveArticle(raw, startIndex + i);
+  });
+  ARTICLES = ARTICLES.concat(mapped);
+  totalArticleCount = payload.total;
+  currentPage = page;
+}
+
+// Incremental "Load more": fetches the next raw page and appends it without
+// touching already-rendered cards (so activePreview / selection state for
+// existing cards is untouched — see renderCard()).
+async function loadMoreArticles() {
+  if (isLoadingMore || !hasMoreArticles()) return;
+  const generation = pageLoadGeneration;
+  const nextPage = currentPage + 1;
+
+  isLoadingMore = true;
+  loadMoreError = null;
+  render();
+
+  try {
+    const payload = await fetchJson(articlesPageUrl(nextPage));
+    if (generation !== pageLoadGeneration) return; // superseded
+    appendArticlePage(payload, nextPage);
+  } catch (error) {
+    if (generation === pageLoadGeneration) {
+      loadMoreError = error.message || 'Failed to load more articles.';
+    }
+  } finally {
+    if (generation === pageLoadGeneration) isLoadingMore = false;
+    render();
+  }
+}
+
+async function loadRemainingArticlesForFilters() {
+  if (isLoadingMore || !hasActiveFilters() || !hasMoreArticles()) return;
+  const generation = pageLoadGeneration;
+  isLoadingMore = true;
+  loadMoreError = null;
+  render();
+
+  try {
+    while (generation === pageLoadGeneration && hasMoreArticles()) {
+      const nextPage = currentPage + 1;
+      const payload = await fetchJson(articlesPageUrl(nextPage));
+      if (generation !== pageLoadGeneration) return;
+      appendArticlePage(payload, nextPage);
+    }
+  } catch (error) {
+    if (generation === pageLoadGeneration) {
+      loadMoreError = error.message || 'Failed to load all articles for filtering.';
+    }
+  } finally {
+    if (generation === pageLoadGeneration) isLoadingMore = false;
+    render();
+  }
+}
+
+// Any change to search/status/platform filters invalidates an in-flight
+// "Load more" response: the response itself is still valid data, but by the
+// time it would land the user has already moved on to a different filtered
+// view, so we drop it rather than risk it landing after — and clobbering —
+// state the user has since changed. The user can simply press "Load more"
+// again once filters settle.
+function invalidateInFlightPageLoad() {
+  pageLoadGeneration += 1;
+  isLoadingMore = false;
+  loadMoreError = null;
 }
 
 async function runArticleAction(article, overrideKind = null) {
@@ -975,18 +1170,98 @@ function renderSkeleton() {
   return card;
 }
 
+// --- Load-more region -------------------------------------------------
+// Renders the count/status text plus whichever control applies: a "Load
+// more" button, an in-progress state (skeleton cards + status text), an
+// error/retry state, or a "you've seen everything" completion message.
+// This region lives below #card-grid so appending to it never resizes or
+// reflows already-rendered cards above it.
+function renderLoadMoreRegion() {
+  const region = document.getElementById('load-more-region');
+  region.innerHTML = '';
+
+  const loadedCount = ARTICLES.length;
+  if (loadedCount === 0) return;
+
+  const panel = document.createElement('div');
+  panel.className = 'load-more-panel';
+
+  if (isLoadingMore) {
+    const skeletons = document.createElement('div');
+    skeletons.className = 'load-more-skeletons';
+    for (let i = 0; i < 3; i += 1) skeletons.appendChild(renderSkeleton());
+    panel.appendChild(skeletons);
+
+    const status = document.createElement('div');
+    status.className = 'load-more-status';
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    status.textContent = `Loading more articles… (showing ${loadedCount} of ${totalArticleCount})`;
+    panel.appendChild(status);
+  } else if (loadMoreError) {
+    const message = document.createElement('div');
+    message.className = 'load-more-error';
+    message.setAttribute('role', 'alert');
+    message.textContent = `Couldn't load more articles: ${loadMoreError}`;
+    panel.appendChild(message);
+
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'load-more-retry-btn';
+    retry.textContent = 'Retry';
+    retry.onclick = () => loadMoreArticles();
+    panel.appendChild(retry);
+  } else if (hasMoreArticles()) {
+    const status = document.createElement('div');
+    status.className = 'load-more-status';
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    status.id = 'load-more-status';
+    status.textContent = `Showing ${loadedCount} of ${totalArticleCount} articles`;
+    panel.appendChild(status);
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.id = 'load-more-button';
+    button.className = 'load-more-btn';
+    button.setAttribute('aria-describedby', 'load-more-status');
+    button.textContent = 'Load more';
+    button.onclick = () => loadMoreArticles();
+    panel.appendChild(button);
+  } else {
+    const status = document.createElement('div');
+    status.className = 'load-more-status';
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    status.textContent = totalArticleCount === 1
+      ? 'Showing the only article'
+      : `Showing all ${totalArticleCount} articles`;
+    panel.appendChild(status);
+  }
+
+  region.appendChild(panel);
+}
+
 // --- Render --------------------------------------------------------
 function render() {
   const grid    = document.getElementById('card-grid');
   const emptyEl = document.getElementById('empty-state');
   const noRes   = document.getElementById('no-results');
+  const loadMoreRegion = document.getElementById('load-more-region');
   grid.innerHTML = '';
   emptyEl.style.display = 'none';
   noRes.style.display   = 'none';
 
-  if (showEmpty)    { emptyEl.style.display = 'flex'; document.getElementById('article-count').textContent = '0 articles'; syncDetailsPanel(); return; }
+  if (showEmpty)    {
+    emptyEl.style.display = 'flex';
+    loadMoreRegion.innerHTML = '';
+    document.getElementById('article-count').textContent = '0 articles';
+    syncDetailsPanel();
+    return;
+  }
   if (showSkeleton) {
     for (let i = 0; i < 5; i++) grid.appendChild(renderSkeleton());
+    loadMoreRegion.innerHTML = '';
     document.getElementById('article-count').textContent = '— articles';
     syncDetailsPanel();
     return;
@@ -995,8 +1270,14 @@ function render() {
   const filtered = ARTICLES.filter(matchesFilters).sort((a, b) => a.urgency - b.urgency);
   document.getElementById('article-count').textContent = `${filtered.length} article${filtered.length !== 1 ? 's' : ''}`;
 
-  if (filtered.length === 0) { noRes.style.display = 'flex'; syncDetailsPanel(); return; }
+  if (filtered.length === 0) {
+    if (!isLoadingMore) noRes.style.display = 'flex';
+    renderLoadMoreRegion();
+    syncDetailsPanel();
+    return;
+  }
   filtered.forEach(a => grid.appendChild(renderCard(a)));
+  renderLoadMoreRegion();
   syncDetailsPanel();
 }
 
@@ -1088,7 +1369,11 @@ function togglePlatform(p, el) {
   applyFilters();
 }
 
-function applyFilters() { render(); }
+function applyFilters() {
+  invalidateInFlightPageLoad();
+  render();
+  void loadRemainingArticlesForFilters();
+}
 
 function clearFilters() {
   document.getElementById('search-input').value = '';
@@ -1097,6 +1382,7 @@ function clearFilters() {
   document.querySelectorAll('.pill-filter').forEach(b => b.classList.remove('active'));
   document.getElementById('sf-all').classList.add('active');
   document.querySelectorAll('.pill-platform').forEach(b => b.classList.remove('active'));
+  invalidateInFlightPageLoad();
   render();
 }
 
