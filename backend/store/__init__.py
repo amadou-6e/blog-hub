@@ -33,6 +33,14 @@ def create_article(user_id: str, *a, **kw):
     return _backend.create_article(user_id, *a, **kw)
 
 
+def create_imported_article(user_id: str, *a, **kw):
+    return _backend.create_imported_article(user_id, *a, **kw)
+
+
+def sync_remote_article_metadata(user_id: str, *a, **kw):
+    return _backend.sync_remote_article_metadata(user_id, *a, **kw)
+
+
 def update_article_body(user_id: str, *a, **kw):
     return _backend.update_article_body(user_id, *a, **kw)
 
@@ -43,6 +51,10 @@ def store_asset(user_id: str, *a, **kw):
 
 def read_article_asset(user_id: str, *a, **kw):
     return _backend.read_article_asset(user_id, *a, **kw)
+
+
+def get_article_asset_by_filename(user_id: str, *a, **kw):
+    return _backend.get_article_asset_by_filename(user_id, *a, **kw)
 
 
 def update_article_title(user_id: str, *a, **kw):

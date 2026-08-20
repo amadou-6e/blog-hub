@@ -32,6 +32,7 @@ from fastapi.responses import HTMLResponse
 import backend.services.cli_runner as runner
 import backend.services.connection_auth as agent_auth
 import backend.store as store
+from backend.services.hashnode_sync import sync_hashnode_articles
 from backend.schemas.connections import (
     ActiveAgentAuthFlowsResponse,
     AgentAuthCallbackRequest,
@@ -41,6 +42,7 @@ from backend.schemas.connections import (
     DraftContent,
     DraftListResponse,
     DraftSummary,
+    HashnodeSyncResponse,
     OAuthStartResponse,
     SaveTokenRequest,
     SaveTokenResponse,
@@ -839,6 +841,27 @@ def _fetch_devto_article_body(token: str, article_id: str) -> str:
 
 
 # ── Draft list ───────────────────────────────────────────────────────────────
+
+
+@router.post("/hashnode/sync", response_model=HashnodeSyncResponse)
+def sync_hashnode(request: Request):
+    """Import every PAT-visible Hashnode draft and published article."""
+    user_id: str = request.state.user_id
+    token = store.get_connection_token(user_id, "hashnode") or os.environ.get("HASHNODE_PAT")
+    if not token:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "hashnode_pat_required"},
+        )
+    if token == "cli_session":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "hashnode_pat_required",
+                "message": "Browser-profile retrieval is not supported by this sync path",
+            },
+        )
+    return sync_hashnode_articles(user_id, token)
 
 
 @router.get("/{conn_id}/drafts", response_model=DraftListResponse)
