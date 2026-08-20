@@ -127,6 +127,19 @@ def test_medium_browser_publish_renders_html_and_dispatches_medium_worker(
     assert article["destinations"]["medium"]["status"] == "draft"
 
 
+def test_medium_fragment_removes_title_after_leading_content():
+    rendered = (
+        "<article><blockquote>Context first</blockquote>"
+        "<h1>Article title</h1><p>Article body</p></article>"
+    )
+
+    fragment = browser_publish._medium_article_fragment(rendered)
+
+    assert "<h1>" not in fragment
+    assert "<blockquote>Context first</blockquote>" in fragment
+    assert "<p>Article body</p>" in fragment
+
+
 def test_medium_browser_publish_requires_connected_profile(client):
     response = client.post("/api/articles/art_001/browser-publish/medium")
     assert response.status_code == 409

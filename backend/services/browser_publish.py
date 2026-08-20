@@ -15,7 +15,7 @@ def _medium_article_fragment(rendered_html: str) -> str:
     )
     fragment = match.group(1) if match else rendered_html
     return re.sub(
-        r"^\s*<h1[^>]*>[\s\S]*?</h1>\s*", "", fragment,
+        r"<h1[^>]*>[\s\S]*?</h1>\s*", "", fragment,
         count=1, flags=re.IGNORECASE,
     )
 
