@@ -32,7 +32,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from hashnode_browser import check_hashnode_profile, upload_hashnode_draft
+from hashnode_browser import (
+    check_hashnode_profile,
+    retrieve_hashnode_articles,
+    upload_hashnode_draft,
+)
 from medium_browser import check_medium_profile
 from skyvern_browser import (
     SkyvernUnavailable,
@@ -235,6 +239,11 @@ class HashnodeBrowserUploadRequest(BaseModel):
     publish: bool = False
 
 
+class HashnodeBrowserSyncRequest(BaseModel):
+    organization_id: str
+    profile_id: str
+
+
 class HashnodeBrowserLoginCompleteRequest(BaseModel):
     profile_name: str
     profile_id: Optional[str] = None
@@ -293,6 +302,20 @@ def hashnode_browser_upload(req: HashnodeBrowserUploadRequest):
         )
     except Exception as exc:
         return {"success": False, "error": _safe_reason(str(exc))}
+
+
+@app.post("/browser/hashnode/articles")
+def hashnode_browser_articles(req: HashnodeBrowserSyncRequest):
+    try:
+        profile_dir = profile_directory(req.organization_id, req.profile_id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if not profile_dir.is_dir():
+        raise HTTPException(409, "Hashnode browser profile is unavailable")
+    try:
+        return retrieve_hashnode_articles(profile_dir=str(profile_dir))
+    except Exception as exc:
+        raise HTTPException(502, _safe_reason(str(exc))) from exc
 
 
 @app.post("/browser/hashnode/login", status_code=201)

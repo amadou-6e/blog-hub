@@ -162,6 +162,21 @@ def hashnode_browser_upload(
         raise RunnerUnavailable(f"Browser runner unavailable: {exc}") from exc
 
 
+def hashnode_browser_articles(*, organization_id: str, profile_id: str) -> dict:
+    """Retrieve all Hashnode articles through a persisted browser profile."""
+    try:
+        with _client() as client:
+            response = client.post(
+                "/browser/hashnode/articles",
+                json={"organization_id": organization_id, "profile_id": profile_id},
+                timeout=httpx.Timeout(connect=3, read=1800, write=30, pool=5),
+            )
+            response.raise_for_status()
+            return response.json()
+    except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
+        raise RunnerUnavailable(f"Browser runner unavailable: {exc}") from exc
+
+
 def start_browser_login(platform: str, profile_id: str | None = None) -> dict:
     if profile_id:
         return _post(f"/browser/{platform}/login", profile_id=profile_id)
