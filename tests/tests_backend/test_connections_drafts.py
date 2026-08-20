@@ -421,6 +421,7 @@ class TestGetDraftUnit:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.integration
 class TestDraftsIntegration:
 
     @pytest.fixture(autouse=True)

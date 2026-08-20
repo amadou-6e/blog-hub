@@ -49,7 +49,10 @@ def test_default_key_file_encrypts_without_plaintext(credential_environment):
     assert "sk-ant-secret" not in raw
     assert store.get_connection_token(store.SEED_USER_ID, "anthropic") == "sk-ant-secret"
     if os.name == "posix":
-        assert stat.S_IMODE(key_file.stat().st_mode) == 0o600
+        mode = stat.S_IMODE(key_file.stat().st_mode)
+        if mode != 0o600 and str(key_file).startswith("/mnt/"):
+            pytest.skip("WSL-mounted Windows filesystems do not preserve POSIX chmod")
+        assert mode == 0o600
 
 
 def test_startup_migrates_plaintext_and_disconnect_erases_it(credential_environment):

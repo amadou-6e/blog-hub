@@ -27,6 +27,11 @@ const cli = process.platform === "win32" && existsSync(binBase + ".cmd")
 
 mkdirSync(outDir, { recursive: true });
 
+if (!existsSync(specDir)) {
+  console.log("No .spec/backend directory found; using checked-in generated contracts.");
+  process.exit(0);
+}
+
 /**
  * Recursively find all swagger.yaml files under a directory.
  * Returns [{service, path}]
@@ -77,4 +82,3 @@ if (hadError) {
 } else {
   console.log("Done. Run `npm run check:types` to validate TS compatibility.");
 }
-

@@ -25,6 +25,7 @@ import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 import backend.store as store
+from backend.store.schema import SEED_USER_ID
 
 
 @pytest.fixture(autouse=True)
@@ -43,5 +44,5 @@ def client():
 @pytest.fixture
 def all_articles():
     """Return all seed articles (list of dicts)."""
-    items, _ = store.list_articles()
+    items, _ = store.list_articles(SEED_USER_ID)
     return items
