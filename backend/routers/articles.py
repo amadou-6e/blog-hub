@@ -474,7 +474,7 @@ def push_article(request: Request, article_id: str, body: dict = {}):
     return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
 
 
-class HashnodeBrowserPublishRequest(BaseModel):
+class BrowserPublishRequest(BaseModel):
     mode: Literal["draft", "publish"] = "draft"
 
 
@@ -482,7 +482,7 @@ class HashnodeBrowserPublishRequest(BaseModel):
 def request_hashnode_browser_publish(
     request: Request,
     article_id: str,
-    body: HashnodeBrowserPublishRequest = HashnodeBrowserPublishRequest(),
+    body: BrowserPublishRequest = BrowserPublishRequest(),
 ):
     if store.get_article(request.state.user_id, article_id) is None:
         raise HTTPException(status_code=404, detail="Article not found")
@@ -500,6 +500,28 @@ def request_hashnode_browser_publish(
     )
 
 
+@router.post("/{article_id}/browser-publish/medium", status_code=201)
+def request_medium_browser_publish(
+    request: Request,
+    article_id: str,
+    body: BrowserPublishRequest = BrowserPublishRequest(),
+):
+    if store.get_article(request.state.user_id, article_id) is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    browser_connection = store.get_browser_connection(
+        request.state.user_id, "medium"
+    )
+    if not browser_connection or browser_connection["status"] != "connected":
+        raise HTTPException(
+            status_code=409,
+            detail="Connect Medium with browser login before browser publishing",
+        )
+    return store.create_browser_publish_run(
+        request.state.user_id, article_id,
+        platform="medium", mode=body.mode,
+    )
+
+
 @router.get("/{article_id}/browser-publish/{run_id}")
 def get_browser_publish(request: Request, article_id: str, run_id: str):
     run = store.get_browser_publish_run(request.state.user_id, run_id)
@@ -509,7 +531,7 @@ def get_browser_publish(request: Request, article_id: str, run_id: str):
 
 
 @router.post("/{article_id}/browser-publish/{run_id}/approve", status_code=202)
-def approve_hashnode_browser_publish(
+def approve_browser_publish(
     request: Request, article_id: str, run_id: str,
     background_tasks: BackgroundTasks,
 ):
@@ -520,9 +542,11 @@ def approve_hashnode_browser_publish(
         approved = store.approve_browser_publish_run(request.state.user_id, run_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    executor = browser_publish.EXECUTORS.get(run["platform"])
+    if executor is None:
+        raise HTTPException(status_code=422, detail="Unsupported browser publish platform")
     background_tasks.add_task(
-        browser_publish.execute_hashnode_run,
-        user_id=request.state.user_id, run_id=run_id,
+        executor, user_id=request.state.user_id, run_id=run_id,
     )
     return approved
 

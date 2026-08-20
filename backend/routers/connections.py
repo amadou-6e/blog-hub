@@ -854,14 +854,22 @@ def list_drafts(
 
     Hashnode: GraphQL me { drafts } + me { posts }
     Dev.to:   GET /articles/me/unpublished  +  GET /articles/me
-    Medium:   falls back to _MOCK_DRAFTS (Medium API does not expose drafts)
+    Medium:   browser retrieval when connected through Skyvern; legacy mock
+              fallback for API-token-only development connections
     """
     user_id: str = request.state.user_id
     if conn_id not in _BLOG_IDS:
         raise HTTPException(status_code=404, detail=f"Unknown platform: {conn_id}")
 
     token = store.get_connection_token(user_id, conn_id)
-    if not token:
+    browser_connection = (
+        store.get_browser_connection(user_id, "medium")
+        if conn_id == "medium" else None
+    )
+    has_medium_browser = bool(
+        browser_connection and browser_connection["status"] == "connected"
+    )
+    if not token and not has_medium_browser:
         raise HTTPException(
             status_code=404,
             detail={
@@ -876,8 +884,14 @@ def list_drafts(
         elif conn_id == "devto":
             all_drafts = _fetch_devto_drafts(token)
         else:
-            # Medium: API does not support draft listing; use mock data
-            all_drafts = _MOCK_DRAFTS.get(conn_id, [])
+            if has_medium_browser:
+                all_drafts = runner.list_medium_browser_articles(
+                    organization_id=browser_connection["skyvern_organization_id"],
+                    profile_id=browser_connection["skyvern_profile_id"],
+                )
+            else:
+                # Legacy API-token connections cannot retrieve Medium drafts.
+                all_drafts = _MOCK_DRAFTS.get(conn_id, [])
     except HTTPException:
         raise
     except httpx.HTTPStatusError as exc:
@@ -914,14 +928,22 @@ def list_drafts(
 def get_draft(request: Request, conn_id: str, draft_id: str):
     """
     Return the full markdown body of a single article from the platform.
-    Fetches from the live platform API for Hashnode and Dev.to.
+    Fetches from the live platform API for Hashnode and Dev.to, or from the
+    persisted browser profile for Medium.
     """
     user_id: str = request.state.user_id
     if conn_id not in _BLOG_IDS:
         raise HTTPException(status_code=404, detail=f"Unknown platform: {conn_id}")
 
     token = store.get_connection_token(user_id, conn_id)
-    if not token:
+    browser_connection = (
+        store.get_browser_connection(user_id, "medium")
+        if conn_id == "medium" else None
+    )
+    has_medium_browser = bool(
+        browser_connection and browser_connection["status"] == "connected"
+    )
+    if not token and not has_medium_browser:
         raise HTTPException(
             status_code=404,
             detail={
@@ -947,7 +969,13 @@ def get_draft(request: Request, conn_id: str, draft_id: str):
             return DraftContent(**draft)
 
         else:
-            # Medium: use mock data
+            if has_medium_browser:
+                article = runner.get_medium_browser_article(
+                    draft_id,
+                    organization_id=browser_connection["skyvern_organization_id"],
+                    profile_id=browser_connection["skyvern_profile_id"],
+                )
+                return DraftContent(**article)
             drafts = _MOCK_DRAFTS.get(conn_id, [])
             draft = next((d for d in drafts if d["id"] == draft_id), None)
             if draft is None:

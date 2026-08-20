@@ -303,6 +303,32 @@ class TestListDraftsUnit:
         assert body["total"] == len(_MOCK_DRAFTS["medium"])
         assert len(body["drafts"]) > 0
 
+    def test_list_medium_uses_connected_browser_profile(self, client: TestClient):
+        store.start_browser_connection(
+            "user_seed", "medium", session_id="pbs_medium",
+            organization_id="o_medium", app_url="http://localhost/login",
+        )
+        store.update_browser_connection(
+            "user_seed", "medium", "connected", profile_id="bp_medium"
+        )
+        payload = [{
+            "id": "medium-1", "title": "A live Medium draft",
+            "snippet": "Retrieved in the browser", "word_count": 42,
+            "updated_at": "2026-08-20T00:00:00Z", "status": "draft",
+        }]
+
+        with patch(
+            "backend.routers.connections.runner.list_medium_browser_articles",
+            return_value=payload,
+        ) as fetch:
+            response = client.get("/api/connections/medium/drafts")
+
+        assert response.status_code == 200
+        assert response.json()["drafts"][0]["title"] == "A live Medium draft"
+        fetch.assert_called_once_with(
+            organization_id="o_medium", profile_id="bp_medium"
+        )
+
 
 class TestGetDraftUnit:
 
@@ -414,6 +440,33 @@ class TestGetDraftUnit:
         body = r.json()
         assert body["id"] == first_id
         assert len(body["body"]) > 0
+
+    def test_get_medium_article_uses_connected_browser_profile(self, client: TestClient):
+        store.start_browser_connection(
+            "user_seed", "medium", session_id="pbs_medium",
+            organization_id="o_medium", app_url="http://localhost/login",
+        )
+        store.update_browser_connection(
+            "user_seed", "medium", "connected", profile_id="bp_medium"
+        )
+        payload = {
+            "id": "medium-1", "title": "A live Medium draft",
+            "body": "# Retrieved\n\nReal browser content.", "word_count": 3,
+            "updated_at": "2026-08-20T00:00:00Z", "status": "draft",
+            "canonical_url": None, "cover_image": None,
+        }
+
+        with patch(
+            "backend.routers.connections.runner.get_medium_browser_article",
+            return_value=payload,
+        ) as fetch:
+            response = client.get("/api/connections/medium/drafts/medium-1")
+
+        assert response.status_code == 200
+        assert response.json()["body"].startswith("# Retrieved")
+        fetch.assert_called_once_with(
+            "medium-1", organization_id="o_medium", profile_id="bp_medium"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
