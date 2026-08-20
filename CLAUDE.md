@@ -73,7 +73,7 @@ writes credentials into the mounted volume.
 ```bash
 # CI baseline: unit tests and API contract checks
 cd blog-hub
-python -m pytest
+bash scripts/run-unit-tests.sh
 npm run check:contracts
 
 # UI browser tests (requires backend on :8000 and cli-runner on :8001)
