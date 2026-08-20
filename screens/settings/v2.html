@@ -216,6 +216,7 @@ let _browserConnections = {
   hashnode: { platform: 'hashnode', status: 'disconnected' },
 };
 let _browserMethodMenus = { medium: false, hashnode: false };
+let _hashnodeSync = { status: 'idle', message: '' };
 let _browserLoginTabs = {};
 let _browserLoginTabTimers = {};
 const _authTimers = new Map();
@@ -424,7 +425,9 @@ function browserPlatformCard(conn) {
   let actions = '';
   if (connected) {
     const connectedMethod = apiConnected && browserConnected ? 'both' : apiConnected ? 'api' : 'browser';
-    actions = `<button onclick="disconnectBrowserPlatformConnection('${id}', '${connectedMethod}')"
+    const syncAction = id === 'hashnode' ? `<button id="hashnode-sync" onclick="syncHashnodeArticles()" ${_hashnodeSync.status === 'running' ? 'disabled' : ''}
+      style="font-size:11px;padding:4px 10px;border-radius:4px;border:1px solid #252a38;background:transparent;color:#c9cfe0;cursor:${_hashnodeSync.status === 'running' ? 'wait' : 'pointer'};font-family:inherit;">${_hashnodeSync.status === 'running' ? 'Syncing…' : 'Sync articles'}</button>` : '';
+    actions = `${syncAction}<button onclick="disconnectBrowserPlatformConnection('${id}', '${connectedMethod}')"
       style="font-size:11px;color:#f87171;background:transparent;border:none;cursor:pointer;font-family:inherit;">Disconnect</button>`;
   } else if (waiting) {
     actions = `<button onclick="openBrowserLogin('${id}')"
@@ -470,6 +473,7 @@ function browserPlatformCard(conn) {
             </div>
             ${method ? `<div style="font-size:11px;color:#c9cfe0;margin-top:3px;">${method}</div>` : ''}
             <div style="font-size:10px;color:#5a6080;margin-top:3px;">${helper}</div>
+            ${id === 'hashnode' && _hashnodeSync.message ? `<div role="status" style="font-size:10px;color:${_hashnodeSync.status === 'failed' ? '#f87171' : _hashnodeSync.status === 'partial' ? '#fbbf24' : '#71d892'};margin-top:3px;">${esc(_hashnodeSync.message)}</div>` : ''}
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">${actions}</div>
@@ -503,6 +507,28 @@ function chooseBrowserPlatformApiToken(id) {
 function chooseBrowserPlatformLogin(id) {
   _browserMethodMenus[id] = false;
   startBrowserLogin(id);
+}
+
+async function syncHashnodeArticles() {
+  if (_hashnodeSync.status === 'running') return;
+  _hashnodeSync = { status: 'running', message: '' };
+  renderPlatforms(_connections.filter(c => c.type === 'blog'));
+  try {
+    const res = await fetch('/api/connections/hashnode/sync', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      const detail = data.detail;
+      throw new Error(typeof detail === 'string' ? detail : detail?.message || detail?.error || `HTTP ${res.status}`);
+    }
+    const status = data.status === 'partial' ? 'partial' : 'succeeded';
+    _hashnodeSync = {
+      status,
+      message: `${data.fetched} articles synced · ${data.imported} new · ${data.updated} updated`,
+    };
+  } catch (error) {
+    _hashnodeSync = { status: 'failed', message: error.message || 'Article sync failed' };
+  }
+  renderPlatforms(_connections.filter(c => c.type === 'blog'));
 }
 
 function createBrowserLoginTab(url='about:blank') {

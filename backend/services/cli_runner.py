@@ -198,6 +198,17 @@ def browser_operation(
         raise RunnerUnavailable(f"Browser runner unavailable: {exc}") from exc
 
 
+def hashnode_browser_articles(*, organization_id: str, profile_id: str) -> dict:
+    """Compatibility wrapper for Hashnode's extension list operation."""
+    return browser_operation(
+        "hashnode",
+        "list_articles",
+        organization_id=organization_id,
+        profile_id=profile_id,
+        limit=100,
+    )
+
+
 def start_browser_login(platform: str, profile_id: str | None = None) -> dict:
     if profile_id:
         return _post(f"/browser/{platform}/login", profile_id=profile_id)

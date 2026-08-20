@@ -24,7 +24,9 @@ def test_runner_discovers_builtin_extension_capabilities():
     payload = runner_main.browser_extensions()
 
     by_platform = {item["platform"]: item for item in payload["extensions"]}
-    assert by_platform["hashnode"]["capabilities"] == ["create_draft", "publish"]
+    assert by_platform["hashnode"]["capabilities"] == [
+        "create_draft", "list_articles", "publish",
+    ]
     assert by_platform["medium"]["capabilities"] == []
 
 

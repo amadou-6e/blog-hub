@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timezone
 
-from backend.services.hashnode_sync import sync_hashnode_articles
+from backend.services.hashnode_sync import (
+    sync_hashnode_articles,
+    sync_hashnode_browser_records,
+)
 from backend.services.image_ingest import (
     ImageIngestReason,
     IngestedImage,
@@ -293,7 +296,7 @@ def test_same_remote_id_is_isolated_per_user(tmp_path):
 def test_manual_sync_endpoint_requires_pat_and_returns_typed_result(client, monkeypatch):
     missing = client.post("/api/connections/hashnode/sync")
     assert missing.status_code == 409
-    assert missing.json()["detail"]["error"] == "hashnode_pat_required"
+    assert missing.json()["detail"]["error"] == "hashnode_connection_required"
 
     from backend.routers import connections
     import backend.store as global_store
@@ -444,3 +447,124 @@ def test_sync_reports_revision_conflict_on_concurrent_user_edit(tmp_path):
         assert current["content"] == "User's local edit, not from Hashnode."
     finally:
         store.close()
+
+
+def test_browser_records_use_the_same_idempotent_sync_pipeline(tmp_path):
+    store = _store(tmp_path)
+    retrieval = {
+        "success": True,
+        "articles": [{
+            "remote_id": "browser-draft",
+            "title": "Browser draft",
+            "body": "# Browser draft\n\nRetrieved content.\n",
+            "status": "draft",
+            "subtitle": "Retrieved without GraphQL",
+            "canonical_url": None,
+            "updated_at": "2026-08-20T08:00:00Z",
+            "created_at": "2026-08-19T08:00:00Z",
+            "cover_url": None,
+            "metadata": {"url": None},
+        }],
+        "diagnostics": {"errors": []},
+    }
+    try:
+        first = sync_hashnode_browser_records(
+            store.SEED_USER_ID, retrieval, store=store,
+        )
+        second = sync_hashnode_browser_records(
+            store.SEED_USER_ID, retrieval, store=store,
+        )
+
+        assert first["imported"] == 1
+        assert second["unchanged"] == 1
+        article_id = first["articles"][0]["articleId"]
+        identity = store.get_remote_article_identity(
+            store.SEED_USER_ID, "hashnode", "browser-draft",
+        )
+        assert identity["article_id"] == article_id
+        assert identity["remote_created_at"] == "2026-08-19T08:00:00Z"
+        assert len(store.list_article_revisions(store.SEED_USER_ID, article_id)) == 1
+    finally:
+        store.close()
+
+
+def test_browser_record_failures_are_partial_and_article_scoped(tmp_path):
+    store = _store(tmp_path)
+    try:
+        result = sync_hashnode_browser_records(
+            store.SEED_USER_ID,
+            {
+                "articles": [],
+                "errors": [{
+                    "source": "drafts",
+                    "remote_id": "unreadable-draft",
+                    "error": "article_retrieval_failed",
+                }],
+            },
+            store=store,
+        )
+
+        assert result["status"] == "partial"
+        assert result["failed"] == 1
+        assert result["articles"][0]["remoteId"] == "unreadable-draft"
+        assert result["articles"][0]["error"] == "article_retrieval_failed"
+    finally:
+        store.close()
+
+
+def test_manual_endpoint_prefers_connected_browser_profile(client, monkeypatch):
+    from backend.routers import connections
+    import backend.store as global_store
+
+    user_id = global_store._backend.SEED_USER_ID
+    global_store.start_browser_connection(
+        user_id,
+        "hashnode",
+        session_id="bs_test",
+        organization_id="o_test",
+        app_url="http://localhost/browser",
+        profile_id="bp_test",
+    )
+    global_store.update_browser_connection(
+        user_id, "hashnode", "connected", profile_id="bp_test",
+    )
+    global_store.save_connection(user_id, "hashnode", "pro-token")
+    retrieval = {"articles": [], "errors": []}
+    called = []
+
+    def retrieve(**kwargs):
+        called.append(kwargs)
+        return retrieval
+
+    monkeypatch.setattr(connections.runner, "hashnode_browser_articles", retrieve)
+    monkeypatch.setattr(
+        connections,
+        "sync_hashnode_browser_records",
+        lambda received_user_id, received: {
+            "status": "succeeded",
+            "startedAt": "2026-08-20T08:00:00Z",
+            "completedAt": "2026-08-20T08:00:01Z",
+            "fetched": 0,
+            "imported": 0,
+            "updated": 0,
+            "metadataUpdated": 0,
+            "unchanged": 0,
+            "failed": 0,
+            "imagesDownloaded": 0,
+            "imagesFailed": 0,
+            "sourceErrors": [],
+            "articles": [],
+        },
+    )
+    monkeypatch.setattr(
+        connections,
+        "sync_hashnode_articles",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("Pro API should not run when browser login is connected")
+        ),
+    )
+
+    response = client.post("/api/connections/hashnode/sync")
+
+    assert response.status_code == 200
+    assert called == [{"organization_id": "o_test", "profile_id": "bp_test"}]
