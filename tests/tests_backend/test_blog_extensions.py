@@ -35,7 +35,9 @@ def test_builtin_extensions_satisfy_the_versioned_contract():
     assert hashnode.manifest.capabilities == frozenset({
         Capability.LIST_ARTICLES, Capability.CREATE_DRAFT, Capability.PUBLISH,
     })
-    assert medium.manifest.capabilities == frozenset()
+    assert medium.manifest.capabilities == frozenset({
+        Capability.LIST_ARTICLES, Capability.GET_ARTICLE,
+    })
     assert [item["platform"] for item in registry.descriptors()] == [
         "hashnode", "medium",
     ]

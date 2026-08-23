@@ -27,7 +27,9 @@ def test_runner_discovers_builtin_extension_capabilities():
     assert by_platform["hashnode"]["capabilities"] == [
         "create_draft", "list_articles", "publish",
     ]
-    assert by_platform["medium"]["capabilities"] == []
+    assert by_platform["medium"]["capabilities"] == [
+        "get_article", "list_articles",
+    ]
 
 
 def test_login_dispatch_uses_extension_login_url(monkeypatch):

@@ -91,6 +91,7 @@ def _browser_article(payload: dict, *, remote_id: str, published: bool) -> dict:
     if not title and not published:
         title = f"Untitled Hashnode draft ({remote_id[:8]})"
     return {
+        "platform": "hashnode",
         "remote_id": str(payload.get("cuid") or payload.get("_id") or remote_id),
         "title": title,
         "body": str(payload.get("contentMarkdown") or ""),

@@ -217,6 +217,7 @@ def test_browser_article_normalizes_authenticated_hashnode_payload():
     )
 
     assert result == {
+        "platform": "hashnode",
         "remote_id": "post-cuid",
         "title": "Browser post",
         "body": "# Browser post\n",
