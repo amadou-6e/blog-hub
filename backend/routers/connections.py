@@ -37,6 +37,7 @@ from backend.services.hashnode_sync import (
     sync_hashnode_articles,
     sync_hashnode_browser_records,
 )
+from backend.services.medium_sync import sync_medium_browser_records
 from backend.schemas.connections import (
     ActiveAgentAuthFlowsResponse,
     AgentAuthCallbackRequest,
@@ -47,6 +48,7 @@ from backend.schemas.connections import (
     DraftListResponse,
     DraftSummary,
     HashnodeSyncResponse,
+    MediumSyncResponse,
     OAuthStartResponse,
     SaveTokenRequest,
     SaveTokenResponse,
@@ -889,6 +891,29 @@ def sync_hashnode(request: Request):
             },
         )
     return sync_hashnode_articles(user_id, token)
+
+
+@router.post("/medium/sync", response_model=MediumSyncResponse)
+def sync_medium(request: Request):
+    """Import Medium stories through the connected browser profile."""
+    user_id: str = request.state.user_id
+    browser_connection = store.get_browser_connection(user_id, "medium")
+    if not browser_connection or browser_connection["status"] != "connected":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "medium_browser_connection_required",
+                "message": "Connect Medium with browser login before synchronizing",
+            },
+        )
+    try:
+        retrieval = runner.medium_browser_articles(
+            organization_id=browser_connection["skyvern_organization_id"],
+            profile_id=browser_connection["skyvern_profile_id"],
+        )
+    except runner.RunnerUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return sync_medium_browser_records(user_id, retrieval)
 
 
 @router.get("/{conn_id}/drafts", response_model=DraftListResponse)

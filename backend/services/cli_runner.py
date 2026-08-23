@@ -209,6 +209,75 @@ def hashnode_browser_articles(*, organization_id: str, profile_id: str) -> dict:
     )
 
 
+def medium_browser_articles(*, organization_id: str, profile_id: str) -> dict:
+    """Retrieve Medium listings and hydrate each record with article detail."""
+    listing = browser_operation(
+        "medium",
+        "list_articles",
+        organization_id=organization_id,
+        profile_id=profile_id,
+        limit=100,
+    )
+    if not listing.get("success"):
+        return listing
+
+    articles: list[dict] = []
+    errors = list((listing.get("diagnostics") or {}).get("errors") or [])
+    for summary in listing.get("articles") or []:
+        remote_id = str(summary.get("remote_id") or "")
+        if not remote_id:
+            errors.append({"source": "listing", "error": "invalid_article_record"})
+            continue
+        try:
+            detail = browser_operation(
+                "medium",
+                "get_article",
+                organization_id=organization_id,
+                profile_id=profile_id,
+                remote_id=remote_id,
+            )
+        except RunnerUnavailable:
+            errors.append({
+                "source": "article_detail",
+                "remote_id": remote_id,
+                "error": "article_retrieval_failed",
+            })
+            continue
+        if not detail.get("success") or not detail.get("article"):
+            errors.append({
+                "source": "article_detail",
+                "remote_id": remote_id,
+                "error": detail.get("error") or "article_retrieval_failed",
+            })
+            continue
+        detail_article = detail["article"]
+        summary_metadata = summary.get("metadata") or {}
+        detail_metadata = detail_article.get("metadata") or {}
+        hydrated = {
+            **summary,
+            **detail_article,
+            "subtitle": detail_article.get("subtitle") or summary.get("subtitle"),
+            "cover_url": detail_article.get("cover_url") or summary.get("cover_url"),
+            "updated_at": detail_article.get("updated_at") or summary.get("updated_at"),
+            "metadata": {
+                **summary_metadata,
+                **{
+                    key: value for key, value in detail_metadata.items()
+                    if value is not None
+                },
+            },
+        }
+        articles.append(hydrated)
+
+    return {
+        "success": bool(articles) or not errors,
+        "articles": articles,
+        "next_cursor": listing.get("next_cursor"),
+        "diagnostics": {"errors": errors},
+        **({"error": "medium_retrieval_failed"} if errors and not articles else {}),
+    }
+
+
 def list_medium_browser_articles(
     *, organization_id: str, profile_id: str, limit: int = 100,
 ) -> list[dict]:
