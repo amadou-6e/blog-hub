@@ -6,6 +6,9 @@
   "title": ["textarea[placeholder*='title' i]", "input[placeholder*='title' i]"],
   "markdown_mode": ["button:has-text('Markdown')"],
   "content": ["textarea[placeholder*='writing markdown' i]"],
+  "drafts_tab": ["[role='tab']:has-text('Drafts')"],
+  "published_tab": ["[role='tab']:has-text('Published')"],
+  "load_more": ["button:has-text('Load more')"],
   "publish_open": ["button:has-text('Publish')"],
   "publish_confirm": ["[role='dialog'] button:has-text('Publish')"]
 }

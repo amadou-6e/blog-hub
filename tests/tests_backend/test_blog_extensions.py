@@ -33,7 +33,7 @@ def test_builtin_extensions_satisfy_the_versioned_contract():
     assert_extension_contract(medium)
 
     assert hashnode.manifest.capabilities == frozenset({
-        Capability.CREATE_DRAFT, Capability.PUBLISH,
+        Capability.LIST_ARTICLES, Capability.CREATE_DRAFT, Capability.PUBLISH,
     })
     assert medium.manifest.capabilities == frozenset()
     assert [item["platform"] for item in registry.descriptors()] == [
