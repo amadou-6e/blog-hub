@@ -1,8 +1,9 @@
-"""Synchronous PAT-backed Hashnode-to-workspace synchronization."""
+"""Synchronous remote-blog-to-workspace synchronization."""
 from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Protocol
 
@@ -65,7 +66,21 @@ def _datetime(value: object) -> datetime | None:
         return None
 
 
-def _fingerprint(article: HashnodeRemoteArticle) -> str:
+@dataclass(frozen=True)
+class RemoteSyncArticle:
+    article_id: str
+    title: str
+    body_markdown: str
+    published: bool
+    url: str | None = None
+    canonical_url: str | None = None
+    subtitle: str | None = None
+    updated_at: datetime | None = None
+    cover_image_url: str | None = None
+    raw: dict = field(default_factory=dict)
+
+
+def _fingerprint(article: HashnodeRemoteArticle | RemoteSyncArticle) -> str:
     normalized = json.dumps(
         {"title": article.title.strip(), "markdown": article.body_markdown},
         ensure_ascii=False,
@@ -75,15 +90,15 @@ def _fingerprint(article: HashnodeRemoteArticle) -> str:
     return "sha256:" + hashlib.sha256(normalized).hexdigest()
 
 
-def _cover_filename(remote_id: str) -> str:
+def _cover_filename(platform: str, remote_id: str) -> str:
     digest = hashlib.sha256(remote_id.encode("utf-8")).hexdigest()[:16]
-    return f"hashnode-cover-{digest}.png"
+    return f"{platform}-cover-{digest}.png"
 
 
-def _safe_error_code(exc: Exception) -> str:
+def _safe_error_code(exc: Exception, platform: str = "hashnode") -> str:
     if isinstance(exc, RevisionConflict):
         return "revision_conflict"
-    return "hashnode_request_failed" if exc.__class__.__module__.startswith(
+    return f"{platform}_request_failed" if exc.__class__.__module__.startswith(
         ("requests", "httpx", "blogs.hashnode")
     ) else "article_sync_failed"
 
@@ -111,7 +126,8 @@ def _sync_cover(
     *,
     user_id: str,
     article_id: str,
-    remote: HashnodeRemoteArticle,
+    platform: str,
+    remote: HashnodeRemoteArticle | RemoteSyncArticle,
     identity: dict | None,
     store: HashnodeSyncStore,
     image_fetcher: Callable[[str], IngestedImage],
@@ -139,7 +155,7 @@ def _sync_cover(
     data = image.thumbnail_bytes or image.image_bytes
     if not data:
         return (identity or {}).get("cover_asset_id"), "failed", "decode_failed"
-    filename = _cover_filename(remote.article_id)
+    filename = _cover_filename(platform, remote.article_id)
     mime_type = "image/png" if image.thumbnail_bytes else image.content_type
     store.store_asset(user_id, article_id, filename, data, mime_type)
     asset = store.get_article_asset_by_filename(user_id, article_id, filename)
@@ -151,7 +167,8 @@ def _sync_cover(
 def _sync_article(
     *,
     user_id: str,
-    remote: HashnodeRemoteArticle,
+    platform: str,
+    remote: HashnodeRemoteArticle | RemoteSyncArticle,
     started_at: str,
     store: HashnodeSyncStore,
     image_fetcher: Callable[[str], IngestedImage],
@@ -162,7 +179,7 @@ def _sync_article(
 
     article, created = store.get_or_create_remote_article(
         user_id,
-        "hashnode",
+        platform,
         remote.article_id,
         title=remote.title,
         body=remote.body_markdown,
@@ -176,7 +193,7 @@ def _sync_article(
         action = "imported"
         revision_created = True
     else:
-        identity = store.get_remote_article_identity(user_id, "hashnode", remote.article_id)
+        identity = store.get_remote_article_identity(user_id, platform, remote.article_id)
         current = store.get_current_article_revision(user_id, article_id)
         content_changed = (
             identity is not None
@@ -198,7 +215,7 @@ def _sync_article(
                 title=remote.title,
                 content=remote.body_markdown,
                 source="remote-sync",
-                description="Synchronized from Hashnode",
+                description=f"Synchronized from {platform.title()}",
                 expected_revision_id=current["id"] if current else None,
             )
             revision_created = True
@@ -209,7 +226,7 @@ def _sync_article(
     metadata_changed = store.sync_remote_article_metadata(
         user_id,
         article_id,
-        platform="hashnode",
+        platform=platform,
         status="published" if remote.published else "draft",
         url=remote.url,
         remote_id=remote.article_id,
@@ -222,6 +239,7 @@ def _sync_article(
     cover_asset_id, image_status, image_error = _sync_cover(
         user_id=user_id,
         article_id=article_id,
+        platform=platform,
         remote=remote,
         identity=identity,
         store=store,
@@ -240,7 +258,7 @@ def _sync_article(
     store.upsert_remote_article_identity(
         user_id,
         article_id,
-        "hashnode",
+        platform,
         remote.article_id,
         remote_content_fingerprint=fingerprint,
         subtitle=remote.subtitle,
@@ -266,14 +284,15 @@ def _sync_article(
 
 def _sync_remote_articles(
     user_id: str,
-    remote_articles: list[HashnodeRemoteArticle],
+    remote_articles: list[HashnodeRemoteArticle | RemoteSyncArticle],
     source_errors: list[dict],
     *,
+    platform: str = "hashnode",
     store: HashnodeSyncStore = default_store,
     image_fetcher: Callable[[str], IngestedImage] = fetch_and_validate_image,
     failed_articles: list[dict] | None = None,
 ) -> dict[str, Any]:
-    """Synchronize normalized Hashnode records from any retrieval adapter."""
+    """Synchronize normalized records from any retrieval adapter."""
     started_at = _now().isoformat()
     article_results: list[dict] = list(failed_articles or [])
     counters = {
@@ -291,6 +310,7 @@ def _sync_remote_articles(
         try:
             result = _sync_article(
                 user_id=user_id,
+                platform=platform,
                 remote=remote,
                 started_at=started_at,
                 store=store,
@@ -304,7 +324,7 @@ def _sync_remote_articles(
                 "action": "failed",
                 "revisionCreated": False,
                 "imageStatus": "not_attempted",
-                "error": _safe_error_code(exc),
+                "error": _safe_error_code(exc, platform),
             }
         article_results.append(result)
         action_counter = {
@@ -369,7 +389,25 @@ def sync_hashnode_browser_records(
     image_fetcher: Callable[[str], IngestedImage] = fetch_and_validate_image,
 ) -> dict[str, Any]:
     """Synchronize records returned by the authenticated browser runner."""
-    remote_articles: list[HashnodeRemoteArticle] = []
+    return sync_browser_records(
+        user_id,
+        retrieval,
+        platform="hashnode",
+        store=store,
+        image_fetcher=image_fetcher,
+    )
+
+
+def sync_browser_records(
+    user_id: str,
+    retrieval: dict,
+    *,
+    platform: str,
+    store: HashnodeSyncStore = default_store,
+    image_fetcher: Callable[[str], IngestedImage] = fetch_and_validate_image,
+) -> dict[str, Any]:
+    """Synchronize normalized records returned by a browser extension."""
+    remote_articles: list[RemoteSyncArticle] = []
     source_errors: list[dict] = []
     failed_articles: list[dict] = []
     diagnostics = retrieval.get("diagnostics") or {}
@@ -400,7 +438,10 @@ def sync_hashnode_browser_records(
         try:
             metadata = record.get("metadata") or {}
             status = str(record.get("status") or "draft").lower()
-            remote_articles.append(HashnodeRemoteArticle(
+            record_platform = str(record.get("platform") or platform).lower()
+            if record_platform != platform:
+                raise ValueError("browser article platform mismatch")
+            remote_articles.append(RemoteSyncArticle(
                 article_id=str(record["remote_id"]),
                 title=str(record["title"]),
                 url=record.get("url") or metadata.get("url"),
@@ -424,6 +465,7 @@ def sync_hashnode_browser_records(
         user_id,
         remote_articles,
         source_errors,
+        platform=platform,
         store=store,
         image_fetcher=image_fetcher,
         failed_articles=failed_articles,

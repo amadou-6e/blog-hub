@@ -146,3 +146,7 @@ class HashnodeSyncResponse(_CamelModel):
     images_failed: int
     source_errors: list[HashnodeSyncSourceError]
     articles: list[HashnodeSyncArticleResult]
+
+
+class MediumSyncResponse(HashnodeSyncResponse):
+    pass
