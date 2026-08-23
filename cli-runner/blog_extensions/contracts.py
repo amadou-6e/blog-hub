@@ -54,6 +54,7 @@ class OperationRequest:
 
 
 class RemoteArticle(TypedDict):
+    platform: str
     remote_id: str
     title: str
     body: str

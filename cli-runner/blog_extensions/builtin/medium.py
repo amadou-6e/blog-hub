@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from medium_browser import check_medium_profile
+from medium_browser import (
+    check_medium_profile,
+    get_medium_article,
+    list_medium_articles,
+)
 
 from ..contracts import (
     BlogOperationsAdapter,
@@ -22,10 +26,14 @@ class MediumLoginAdapter(BrowserLoginAdapter):
 
 
 class MediumOperationsAdapter(BlogOperationsAdapter):
-    """Capability placeholder for the Medium implementation tracked by #43/#67."""
-
     platform = "medium"
-    capabilities = frozenset()
+    capabilities = frozenset({Capability.LIST_ARTICLES, Capability.GET_ARTICLE})
 
     def execute(self, page, operation: Capability, request: OperationRequest) -> dict:
+        if operation == Capability.LIST_ARTICLES:
+            return list_medium_articles(page=page, limit=request.limit)
+        if operation == Capability.GET_ARTICLE:
+            if not request.remote_id:
+                raise ValueError("Medium get_article requires a remote_id")
+            return get_medium_article(page=page, article_id=request.remote_id)
         raise OperationNotSupported(self.platform, operation.value)

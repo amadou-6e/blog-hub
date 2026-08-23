@@ -209,6 +209,58 @@ def hashnode_browser_articles(*, organization_id: str, profile_id: str) -> dict:
     )
 
 
+def list_medium_browser_articles(
+    *, organization_id: str, profile_id: str, limit: int = 100,
+) -> list[dict]:
+    result = browser_operation(
+        "medium",
+        "list_articles",
+        organization_id=organization_id,
+        profile_id=profile_id,
+        limit=limit,
+    )
+    if not result.get("success"):
+        raise RunnerUnavailable(result.get("error") or "Medium listing failed")
+    return [
+        {
+            "id": article["remote_id"],
+            "title": article["title"],
+            "snippet": article.get("subtitle") or "",
+            "status": article.get("status") or "draft",
+            "word_count": (article.get("metadata") or {}).get("word_count") or 0,
+            "updated_at": article.get("updated_at") or "",
+            "body": article.get("body") or "",
+            "cover_image": article.get("cover_url"),
+        }
+        for article in result.get("articles") or []
+    ]
+
+
+def get_medium_browser_article(
+    article_id: str, *, organization_id: str, profile_id: str,
+) -> dict:
+    result = browser_operation(
+        "medium",
+        "get_article",
+        organization_id=organization_id,
+        profile_id=profile_id,
+        remote_id=article_id,
+    )
+    if not result.get("success") or not result.get("article"):
+        raise RunnerUnavailable(result.get("error") or "Medium article retrieval failed")
+    article = result["article"]
+    return {
+        "id": article["remote_id"],
+        "title": article["title"],
+        "word_count": len((article.get("body") or "").split()),
+        "updated_at": article.get("updated_at") or "",
+        "status": article.get("status") or "draft",
+        "body": article.get("body") or "",
+        "canonical_url": article.get("canonical_url"),
+        "cover_image": article.get("cover_url"),
+    }
+
+
 def start_browser_login(platform: str, profile_id: str | None = None) -> dict:
     if profile_id:
         return _post(f"/browser/{platform}/login", profile_id=profile_id)
