@@ -84,7 +84,7 @@ jobs:
         run: npm run check:contracts
 
   pytest-browser-tests:
-    name: Pytest browser gate
+    name: Pytest browser smoke gate
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
