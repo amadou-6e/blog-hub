@@ -11,6 +11,8 @@ import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 import backend.store as store
+from backend.workers.handlers import HANDLERS
+from backend.workers.worker import DurableWorker
 
 
 @pytest.fixture(autouse=True)
@@ -39,3 +41,27 @@ def client(anon_client):
 def auth_client(client):
     """Alias for client — kept for backward compatibility."""
     return client
+
+
+@pytest.fixture
+def run_jobs():
+    """Drain durable jobs explicitly; API requests never execute jobs inline."""
+    def run(*, force_retries: bool = False) -> int:
+        worker = DurableWorker(
+            store._backend,
+            HANDLERS,
+            worker_id="pytest-worker",
+            queues=("default", "agents", "publishing"),
+            lease_seconds=30,
+        )
+        completed = 0
+        while worker.run_once():
+            completed += 1
+            if force_retries:
+                store._backend._con.execute(
+                    "UPDATE jobs SET available_at=created_at WHERE status='waiting' "
+                    "AND available_at IS NOT NULL"
+                )
+                store._backend._con.commit()
+        return completed
+    return run

@@ -14,7 +14,7 @@ def _connect() -> None:
     )
 
 
-def test_browser_publish_requires_approval_and_completes(client, monkeypatch):
+def test_browser_publish_requires_approval_and_completes(client, monkeypatch, run_jobs):
     _connect()
     seen = {}
 
@@ -36,6 +36,7 @@ def test_browser_publish_requires_approval_and_completes(client, monkeypatch):
 
     approved = client.post(f"/api/articles/art_001/browser-publish/{run_id}/approve")
     assert approved.status_code == 202
+    run_jobs()
     persisted = client.get(
         f"/api/articles/art_001/browser-publish/{run_id}"
     ).json()
@@ -48,7 +49,9 @@ def test_browser_publish_requires_approval_and_completes(client, monkeypatch):
     assert seen["organization_id"] == "o_test"
 
 
-def test_public_publish_mode_is_durable_and_updates_destination(client, monkeypatch):
+def test_public_publish_mode_is_durable_and_updates_destination(
+    client, monkeypatch, run_jobs,
+):
     _connect()
     seen = {}
     monkeypatch.setattr(
@@ -72,6 +75,7 @@ def test_public_publish_mode_is_durable_and_updates_destination(client, monkeypa
     assert run["mode"] == "publish"
 
     client.post(f"/api/articles/art_001/browser-publish/{run['id']}/approve")
+    run_jobs()
 
     assert seen["operation"] == "publish"
     article = client.get("/api/articles/art_001").json()
@@ -81,7 +85,7 @@ def test_public_publish_mode_is_durable_and_updates_destination(client, monkeypa
     )
 
 
-def test_browser_publish_cannot_be_approved_twice(client, monkeypatch):
+def test_browser_publish_cannot_be_approved_twice(client, monkeypatch, run_jobs):
     _connect()
     monkeypatch.setattr(
         browser_publish.runner, "browser_operation",
@@ -93,6 +97,7 @@ def test_browser_publish_cannot_be_approved_twice(client, monkeypatch):
     assert client.post(
         f"/api/articles/art_001/browser-publish/{run['id']}/approve"
     ).status_code == 202
+    run_jobs()
     duplicate = client.post(
         f"/api/articles/art_001/browser-publish/{run['id']}/approve"
     )
@@ -106,7 +111,9 @@ def test_browser_publish_requires_connected_browser_profile(client):
     assert response.status_code == 409
 
 
-def test_manual_handoff_is_retained_on_failed_browser_login(client, monkeypatch):
+def test_manual_handoff_is_retained_on_failed_browser_login(
+    client, monkeypatch, run_jobs,
+):
     _connect()
     monkeypatch.setattr(
         browser_publish.runner, "browser_operation",
@@ -123,6 +130,7 @@ def test_manual_handoff_is_retained_on_failed_browser_login(client, monkeypatch)
         "/api/articles/art_001/browser-publish/hashnode",
     ).json()
     client.post(f"/api/articles/art_001/browser-publish/{run['id']}/approve")
+    run_jobs()
     persisted = client.get(
         f"/api/articles/art_001/browser-publish/{run['id']}"
     ).json()
@@ -130,7 +138,9 @@ def test_manual_handoff_is_retained_on_failed_browser_login(client, monkeypatch)
     assert persisted["result"]["manual_handoff"]["reason"] == "hashnode_login_required"
 
 
-def test_browser_publish_redacts_adapter_error_before_persistence(client, monkeypatch):
+def test_browser_publish_redacts_adapter_error_before_persistence(
+    client, monkeypatch, run_jobs,
+):
     _connect()
     monkeypatch.setattr(
         browser_publish.runner,
@@ -143,6 +153,7 @@ def test_browser_publish_redacts_adapter_error_before_persistence(client, monkey
     run = client.post("/api/articles/art_001/browser-publish/hashnode").json()
 
     client.post(f"/api/articles/art_001/browser-publish/{run['id']}/approve")
+    run_jobs()
 
     persisted = client.get(
         f"/api/articles/art_001/browser-publish/{run['id']}"
@@ -153,7 +164,7 @@ def test_browser_publish_redacts_adapter_error_before_persistence(client, monkey
 
 
 def test_browser_publish_redacts_transport_exception_before_persistence(
-    client, monkeypatch
+    client, monkeypatch, run_jobs,
 ):
     _connect()
 
@@ -164,6 +175,7 @@ def test_browser_publish_redacts_transport_exception_before_persistence(
     run = client.post("/api/articles/art_001/browser-publish/hashnode").json()
 
     client.post(f"/api/articles/art_001/browser-publish/{run['id']}/approve")
+    run_jobs()
 
     persisted = client.get(
         f"/api/articles/art_001/browser-publish/{run['id']}"
@@ -172,7 +184,9 @@ def test_browser_publish_redacts_transport_exception_before_persistence(
     assert "[REDACTED]" in persisted["error"]
 
 
-def test_approved_run_uploads_the_revision_captured_at_request(client, monkeypatch):
+def test_approved_run_uploads_the_revision_captured_at_request(
+    client, monkeypatch, run_jobs,
+):
     _connect()
     article = client.get("/api/articles/art_001").json()
     seen = {}
@@ -190,6 +204,7 @@ def test_approved_run_uploads_the_revision_captured_at_request(client, monkeypat
         "base_revision_id": article["revision_id"],
     })
     client.post(f"/api/articles/art_001/browser-publish/{run['id']}/approve")
+    run_jobs()
     assert seen["article"]["body"] == article["content"]
 
 

@@ -164,6 +164,17 @@ def stop_runner(handle: RunnerHandle | None) -> None:
                 handle.process.wait(timeout=5)
 
 
+def stop_process(process: subprocess.Popen | None) -> None:
+    if process is None or process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+
+
 def ensure_runner(runner_url: str, mode: str) -> tuple[RunnerHandle | None, dict | None]:
     if mode == "off":
         return None, None
@@ -201,6 +212,7 @@ def main(argv: list[str] | None = None) -> int:
     args, uvicorn_args = parse_args(list(argv if argv is not None else sys.argv[1:]))
     runner_url = os.environ.get("CLI_RUNNER_URL", DEFAULT_RUNNER_URL).rstrip("/")
     handle: RunnerHandle | None = None
+    worker: subprocess.Popen | None = None
     try:
         if args.runner in {"auto", "compose", "docker"}:
             if uvicorn_args:
@@ -239,6 +251,11 @@ def main(argv: list[str] | None = None) -> int:
 
         backend_env = dict(os.environ)
         backend_env["CLI_RUNNER_URL"] = runner_url
+        worker = subprocess.Popen(
+            [sys.executable, str(ROOT / "scripts" / "bloghub_worker.py")],
+            cwd=ROOT,
+            env=backend_env,
+        )
         command = [
             sys.executable,
             "-m",
@@ -270,6 +287,7 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         return 130
     finally:
+        stop_process(worker)
         stop_runner(handle)
 
 

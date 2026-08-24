@@ -1,7 +1,7 @@
 """Lifecycle and recovery API for durable agent sessions."""
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 
 import backend.store as store
@@ -111,7 +111,6 @@ def add_message(request: Request, session_id: str, body: AddMessageRequest):
 @router.post("/{session_id}/turns", status_code=202)
 def run_chat_turn(
     request: Request, session_id: str, body: ChatTurnRequest,
-    background_tasks: BackgroundTasks,
 ):
     user_id = request.state.user_id
     session = store.get_agent_session(user_id, session_id)
@@ -147,13 +146,22 @@ def run_chat_turn(
     store.add_agent_event(user_id, session_id, "turn_started", {
         "message_id": message["id"], "article_revision_id": agent_revision["id"],
     })
-    background_tasks.add_task(
-        agent_chat.run_turn, user_id=user_id, session_id=session_id,
-        article_revision_id=agent_revision["id"],
+    job = store.create_job(
+        user_id,
+        "chat_turn",
+        session["article_id"],
+        payload={
+            "session_id": session_id,
+            "article_revision_id": agent_revision["id"],
+        },
+        queue="agents",
+        max_attempts=3,
+        timeout_seconds=300,
     )
     return {
+        "jobId": job["job_id"],
         "sessionId": session_id,
-        "status": "running",
+        "status": "queued",
         "message": message,
         "articleRevisionId": agent_revision["id"],
         "articleChanged": applied_patch is not None,

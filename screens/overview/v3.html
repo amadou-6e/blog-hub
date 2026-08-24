@@ -893,8 +893,10 @@ async function runArticleAction(article, overrideKind = null) {
 async function pollJob(jobId) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const job = await fetchJson(`/api/jobs/${jobId}`);
-    if (job.status === 'done') return job;
-    if (job.status === 'error') throw new Error(job.error || 'Job failed');
+    if (job.status === 'completed' || job.status === 'done') return job;
+    if (['failed','canceled','expired','error'].includes(job.status)) {
+      throw new Error(job.error || `Job ${job.status}`);
+    }
     await new Promise(resolve => window.setTimeout(resolve, 500));
   }
   throw new Error('Timed out waiting for job completion');

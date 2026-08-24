@@ -81,7 +81,7 @@ class TestPostGenerate:
         body = client.post("/api/agent/generate", json=_valid_body()).json()
         assert "jobId" in body
         assert "articleId" in body
-        assert body["status"] == "running"
+        assert body["status"] == "queued"
 
     def test_article_created_in_store(self, client: TestClient, monkeypatch):
         _seed_provider(client)
@@ -89,44 +89,53 @@ class TestPostGenerate:
         article_id = client.post("/api/agent/generate", json=_valid_body()).json()["articleId"]
         assert store.get_article(_UID, article_id) is not None
 
-    def test_background_task_writes_body(self, client: TestClient, monkeypatch):
+    def test_worker_writes_body(self, client: TestClient, monkeypatch, run_jobs):
         _seed_provider(client)
         _mock_runner_success(monkeypatch, markdown="# My Article\n\nFull article body content.")
         r = client.post("/api/agent/generate", json=_valid_body())
+        run_jobs()
         article_id = r.json()["articleId"]
         article = store.get_article(_UID, article_id)
         assert "Full article body content" in article["body"]
 
-    def test_background_task_extracts_title(self, client: TestClient, monkeypatch):
+    def test_worker_extracts_title(self, client: TestClient, monkeypatch, run_jobs):
         _seed_provider(client)
         _mock_runner_success(monkeypatch, markdown="# Extracted Title\n\nBody content.")
         r = client.post("/api/agent/generate", json=_valid_body())
+        run_jobs()
         article_id = r.json()["articleId"]
         article = store.get_article(_UID, article_id)
         assert article["title"] == "Extracted Title"
 
-    def test_background_task_sets_job_done(self, client: TestClient, monkeypatch):
+    def test_worker_sets_job_completed(self, client: TestClient, monkeypatch, run_jobs):
         _seed_provider(client)
         _mock_runner_success(monkeypatch)
         r = client.post("/api/agent/generate", json=_valid_body())
+        run_jobs()
         job = store.get_job(_UID, r.json()["jobId"])
-        assert job["status"] == "done"
+        assert job["status"] == "completed"
 
-    def test_runner_unavailable_sets_job_error(self, client: TestClient, monkeypatch):
+    def test_runner_unavailable_sets_job_failed(
+        self, client: TestClient, monkeypatch, run_jobs,
+    ):
         _seed_provider(client)
         _mock_runner_unavailable(monkeypatch)
         r = client.post("/api/agent/generate", json=_valid_body())
+        run_jobs(force_retries=True)
         job = store.get_job(_UID, r.json()["jobId"])
-        assert job["status"] == "error"
+        assert job["status"] == "failed"
         assert job["error"] is not None
         assert len(job["error"]) > 0
 
-    def test_runner_nonzero_exit_sets_job_error(self, client: TestClient, monkeypatch):
+    def test_runner_nonzero_exit_sets_job_failed(
+        self, client: TestClient, monkeypatch, run_jobs,
+    ):
         _seed_provider(client)
         _mock_runner_fail(monkeypatch, stderr="generation aborted")
         r = client.post("/api/agent/generate", json=_valid_body())
+        run_jobs(force_retries=True)
         job = store.get_job(_UID, r.json()["jobId"])
-        assert job["status"] == "error"
+        assert job["status"] == "failed"
         assert "generation aborted" in job["error"]
 
     def test_provider_not_configured_returns_400(self, client: TestClient, monkeypatch):
@@ -169,7 +178,9 @@ class TestPostGenerate:
         r = client.post("/api/agent/generate", json=_valid_body(brief="too short"))
         assert r.status_code == 422
 
-    def test_codex_provider_uses_openai_runner(self, client: TestClient, monkeypatch):
+    def test_codex_provider_uses_openai_runner(
+        self, client: TestClient, monkeypatch, run_jobs,
+    ):
         store.save_connection(_UID, "openai", token="tok", status="connected")
         captured = {}
 
@@ -179,17 +190,23 @@ class TestPostGenerate:
 
         monkeypatch.setattr(cli_runner, "run_task", fake_run)
         client.post("/api/agent/generate", json=_valid_body(provider="codex"))
+        run_jobs()
         assert captured.get("provider") == "openai"
 
-    def test_destinations_stored_as_pending(self, client: TestClient, monkeypatch):
+    def test_destinations_stored_as_pending(
+        self, client: TestClient, monkeypatch, run_jobs,
+    ):
         _seed_provider(client)
         _mock_runner_success(monkeypatch)
         r = client.post("/api/agent/generate", json=_valid_body(destinations=["medium"]))
+        run_jobs()
         article_id = r.json()["articleId"]
         article = store.get_article(_UID, article_id)
         assert article["destinations"]["medium"]["status"] == "pending"
 
-    def test_context_text_appended_to_prompt(self, client: TestClient, monkeypatch):
+    def test_context_text_appended_to_prompt(
+        self, client: TestClient, monkeypatch, run_jobs,
+    ):
         _seed_provider(client)
         captured = {}
 
@@ -199,6 +216,7 @@ class TestPostGenerate:
 
         monkeypatch.setattr(cli_runner, "run_task", fake_run)
         client.post("/api/agent/generate", json=_valid_body(contextText="extra context here"))
+        run_jobs()
         assert "extra context here" in captured.get("article_md", "")
 
     def test_job_exists_in_store_after_202(self, client: TestClient, monkeypatch):

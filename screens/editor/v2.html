@@ -534,7 +534,7 @@ async function _pollJob(jobId) {
     const r = await fetch(`/api/jobs/${jobId}`);
     if (!r.ok) break;
     const job = await r.json();
-    if (job.status === 'done' || job.status === 'error') break;
+    if (['completed','failed','canceled','expired','done','error'].includes(job.status)) break;
   }
 }
 
