@@ -108,6 +108,39 @@ class HashnodeClient:
             raw=data,
         )
 
+    def update_draft(
+        self, draft_id: str, draft: HashnodeDraftInput,
+    ) -> HashnodeDraftResult:
+        """Update an existing draft so retries remain idempotent."""
+        mutation = """
+        mutation UpdateDraft($input: UpdateDraftInput!) {
+          updateDraft(input: $input) {
+            draft { id title canonicalUrl coverImage { url } }
+          }
+        }
+        """
+        input_payload = self._draft_payload(draft)
+        input_payload["id"] = draft_id
+        response = self._session.post(
+            "https://gql.hashnode.com",
+            headers=self.headers,
+            json={"query": mutation, "variables": {"input": input_payload}},
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("errors"):
+            raise HashnodeError(str(data["errors"]))
+        draft_data = data["data"]["updateDraft"]["draft"]
+        cover_image = draft_data.get("coverImage") or {}
+        return HashnodeDraftResult(
+            draft_id=str(draft_data["id"]),
+            title=draft_data.get("title"),
+            canonical_url=draft_data.get("canonicalUrl"),
+            cover_image_url=cover_image.get("url"),
+            raw=data,
+        )
+
     def list_drafts(self, *, first: int = 20) -> list[HashnodeRemoteArticle]:
         query = """
         query MeDrafts($first: Int!, $after: String) {

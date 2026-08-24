@@ -39,6 +39,7 @@ def test_fresh_database_has_current_schema_and_seed_user(tmp_path):
             "browser_publish_runs",
             "browser_connections",
             "remote_article_identities",
+            "remote_reconciliation_observations",
         } <= tables
         assert store._con.execute(
             "SELECT COUNT(*) FROM users WHERE id=?", (SEED_USER_ID,)

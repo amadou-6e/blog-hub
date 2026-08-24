@@ -246,6 +246,15 @@
       </div>
 
       <div class="acc-section">
+        <div class="acc-hdr" onclick="toggleSection('reconciliation')">
+          <svg class="acc-chev closed" id="achev-reconciliation" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+          <span>Remote changes</span>
+          <span id="reconciliation-badge" style="font-size:10px;color:#5a6080;font-family:'JetBrains Mono',monospace;margin-left:auto;">0</span>
+        </div>
+        <div class="acc-body" id="abody-reconciliation" style="display:none;"></div>
+      </div>
+
+      <div class="acc-section">
         <div class="acc-hdr" onclick="toggleSection('chat')">
           <svg class="acc-chev closed" id="achev-chat" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
           <span>Chat</span>
@@ -327,12 +336,13 @@ let CURRENT_REVISION_NUMBER = 0;
 let REVISIONS = [];
 let HISTORY_DIFF = null;
 let PENDING_CONFLICT = null;
+let RECONCILIATION = [];
 
 
 
 
 // ── State ─────────────────────────────────────────────────────────────────────
-const accOpen = { comments:true, patches:false, history:false, destinations:false, chat:false, rules:false };
+const accOpen = { comments:true, patches:false, history:false, destinations:false, reconciliation:false, chat:false, rules:false };
 let leftOpen = window.innerWidth > 700;
 let previewOpen = true;
 let patchStates = {};
@@ -531,7 +541,7 @@ async function _pollJob(jobId) {
 // ── Left panel accordion ─────────────────────────────────────────────────────
 function toggleSection(id) {
   accOpen[id] = !accOpen[id];
-  if (id === 'chat' && accOpen[id]) collapseOtherSections(id);
+  if (['chat','reconciliation'].includes(id) && accOpen[id]) collapseOtherSections(id);
   const body = document.getElementById('abody-' + id);
   const chev = document.getElementById('achev-' + id);
   body.style.display = accOpen[id] ? '' : 'none';
@@ -541,7 +551,7 @@ function toggleSection(id) {
 
 function openSection(id) {
   if (!leftOpen) toggleLeft();
-  if (id === 'chat') collapseOtherSections(id);
+  if (['chat','reconciliation'].includes(id)) collapseOtherSections(id);
   if (!accOpen[id]) {
     accOpen[id] = true;
     document.getElementById('abody-' + id).style.display = '';
@@ -569,6 +579,7 @@ function renderSection(id) {
   else if (id === 'patches')      { el.innerHTML = buildPatches(); updatePatchBadge(); }
   else if (id === 'history')      el.innerHTML = buildHistory();
   else if (id === 'destinations') el.innerHTML = buildDestinations();
+  else if (id === 'reconciliation') el.innerHTML = buildReconciliation();
   else if (id === 'chat')         { el.innerHTML = buildChat(); const m=document.getElementById('chat-msgs'); if(m) m.scrollTop=9999; }
   else if (id === 'rules')        el.innerHTML = buildRules();
 }
@@ -793,6 +804,80 @@ function buildDestinations() {
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>Run inspection
       </button>
     </div>`;
+}
+
+function reconciliationLabel(state) {
+  return {
+    in_sync:'In sync', local_ahead:'Local changes', remote_ahead:'Remote changes',
+    conflict:'Conflict', remote_deleted:'Deleted remotely', inaccessible:'Unavailable'
+  }[state] || state;
+}
+
+function buildReconciliation() {
+  if (!RECONCILIATION.length) {
+    return '<div style="font-size:11px;color:#5a6080;padding:12px 0;">No linked remote versions.</div>';
+  }
+  return RECONCILIATION.map(item => {
+    const conflict = item.syncState === 'conflict';
+    const color = conflict ? '#f87171' : item.syncState === 'in_sync' ? '#4ade80' : '#fbbf24';
+    return `<div style="padding:10px 0;border-bottom:1px solid #252a38;">
+      <div style="display:flex;align-items:center;gap:7px;">
+        <span style="font-size:12px;font-weight:600;color:#e8eaf2;text-transform:capitalize;">${esc(item.platform)}</span>
+        <span style="font-size:10px;color:${color};">${esc(reconciliationLabel(item.syncState))}</span>
+        <button onclick="refreshReconciliation('${item.platform}')" class="icon-btn" title="Refresh remote version" aria-label="Refresh ${esc(item.platform)}" style="margin-left:auto;width:25px;height:25px;">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.5 9a9 9 0 0 1 14.8-3.4L23 10M1 14l4.7 4.4A9 9 0 0 0 20.5 15"/></svg>
+        </button>
+      </div>
+      ${item.error ? `<div style="font-size:10px;color:#f87171;margin-top:5px;line-height:1.4;">${esc(item.error)}</div>` : ''}
+      ${conflict ? `<div style="margin-top:9px;">
+        <div style="font-size:9px;color:#737b98;text-transform:uppercase;margin-bottom:4px;">Local</div>
+        <pre style="height:90px;overflow:auto;margin:0 0 8px;padding:7px;background:#0d1019;border:1px solid #343a50;border-radius:4px;color:#c9cfe0;font:9px/1.4 'JetBrains Mono',monospace;white-space:pre-wrap;">${esc(document.getElementById('raw-editor').value)}</pre>
+        <div style="font-size:9px;color:#737b98;text-transform:uppercase;margin-bottom:4px;">Remote</div>
+        <pre style="height:90px;overflow:auto;margin:0;padding:7px;background:#0d1019;border:1px solid #4d3f2a;border-radius:4px;color:#c9cfe0;font:9px/1.4 'JetBrains Mono',monospace;white-space:pre-wrap;">${esc(item.remoteContent || '')}</pre>
+        <div style="display:flex;gap:6px;margin-top:8px;">
+          <button onclick="resolveReconciliation('${item.platform}','use_remote')" style="font-size:10px;padding:4px 8px;border-radius:4px;background:#6366f1;border:none;color:#fff;cursor:pointer;">Use remote</button>
+          <button onclick="resolveReconciliation('${item.platform}','keep_local')" style="font-size:10px;padding:4px 8px;border-radius:4px;background:transparent;border:1px solid #343a50;color:#c9cfe0;cursor:pointer;">Keep local</button>
+        </div>
+      </div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function loadReconciliation() {
+  try {
+    const response = await fetch(`/api/articles/${ARTICLE_ID}/reconciliation`);
+    if (!response.ok) return;
+    RECONCILIATION = (await response.json()).comparisons;
+    const conflicts = RECONCILIATION.filter(item => item.syncState === 'conflict').length;
+    const badge = document.getElementById('reconciliation-badge');
+    badge.textContent = conflicts || RECONCILIATION.length;
+    badge.style.color = conflicts ? '#f87171' : '#5a6080';
+    if (accOpen.reconciliation || conflicts) {
+      if (conflicts) openSection('reconciliation');
+      else renderSection('reconciliation');
+    }
+  } catch (_e) {}
+}
+
+async function refreshReconciliation(platform) {
+  if (!(await saveDraft())) return;
+  const response = await fetch(`/api/articles/${ARTICLE_ID}/reconciliation/${platform}/refresh`, { method:'POST' });
+  if (!response.ok) return;
+  await loadReconciliation();
+}
+
+async function resolveReconciliation(platform, action) {
+  const response = await fetch(`/api/articles/${ARTICLE_ID}/reconciliation/${platform}/resolve`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ action, base_revision_id:CURRENT_REVISION_ID }),
+  });
+  const data = await response.json();
+  if (response.status === 409 && data.detail?.code === 'revision_conflict') {
+    showConflict(data.detail.current); return;
+  }
+  if (!response.ok) return;
+  if (action === 'use_remote') await reloadArticleHead();
+  await loadReconciliation();
 }
 
 function buildChat() {
@@ -1197,6 +1282,7 @@ async function loadArticle() {
     await loadComments();
     await loadPatches();
     await loadRevisions();
+    await loadReconciliation();
     await loadChat();
     await loadConnectedProviders();
     await loadAgentSession();

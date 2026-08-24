@@ -105,6 +105,31 @@ def test_create_draft_sends_cover_image_and_slugged_tags():
     }
 
 
+def test_update_draft_includes_existing_id():
+    session = _FakeSession({
+        "data": {"updateDraft": {"draft": {
+            "id": "draft-1",
+            "title": "Updated",
+            "canonicalUrl": None,
+            "coverImage": None,
+        }}},
+    })
+    client = HashnodeClient("token", session=session)
+
+    result = client.update_draft(
+        "draft-1",
+        HashnodeDraftInput(
+            title="Updated",
+            publication_id="pub-1",
+            content_markdown="New body",
+        ),
+    )
+
+    assert result.draft_id == "draft-1"
+    assert session.calls[0]["json"]["variables"]["input"]["id"] == "draft-1"
+    assert "updateDraft" in session.calls[0]["json"]["query"]
+
+
 def test_list_drafts_fetches_every_cursor_page():
     session = _QueuedSession([
         {"data": {"me": {"drafts": _page([_article("d1")], has_next=True, end_cursor="draft-1")}}},

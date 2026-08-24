@@ -10,7 +10,7 @@ const PYTHON_COMMAND = process.env.BLOGHUB_PLAYWRIGHT_PYTHON_COMMAND || `"${PYTH
 
 module.exports = defineConfig({
   testDir: './tests',
-  testMatch: ['settings.spec.js', 'overview-v3.spec.js'],
+  testMatch: ['settings.spec.js', 'overview-v3.spec.js', 'editor.spec.js'],
   outputDir: './tests/results/artifacts',
   timeout: 15_000,
   retries: 0,

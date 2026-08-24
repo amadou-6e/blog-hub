@@ -44,6 +44,11 @@ class HashnodeSyncStore(Protocol):
         **kwargs,
     ) -> dict: ...
 
+    def record_reconciliation_observation(
+        self, user_id: str, article_id: str, platform: str, remote_id: str,
+        **kwargs,
+    ) -> dict: ...
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -188,13 +193,60 @@ def _sync_article(
     )
     article_id = article["id"]
 
+    identity = None if created else store.get_remote_article_identity(
+        user_id, platform, remote.article_id,
+    )
+    baseline_fingerprint = (identity or {}).get("remote_content_fingerprint") if not created else None
+    local_fingerprint = fingerprint
+    current = store.get_current_article_revision(user_id, article_id)
+    if current is not None:
+        local_fingerprint = _fingerprint(RemoteSyncArticle(
+            article_id=remote.article_id,
+            title=current["title"],
+            body_markdown=current["content"],
+            published=remote.published,
+        ))
+
+    if (
+        not created
+        and baseline_fingerprint
+        and local_fingerprint != baseline_fingerprint
+        and fingerprint != baseline_fingerprint
+        and local_fingerprint != fingerprint
+    ):
+        store.record_reconciliation_observation(
+            user_id,
+            article_id,
+            platform,
+            remote.article_id,
+            local_revision_id=current["id"] if current else None,
+            baseline_fingerprint=baseline_fingerprint,
+            local_fingerprint=local_fingerprint,
+            remote_fingerprint=fingerprint,
+            availability="available",
+            sync_state="conflict",
+            remote_title=remote.title,
+            remote_content=remote.body_markdown,
+            canonical_url=remote.canonical_url,
+            remote_url=remote.url,
+            remote_status="published" if remote.published else "draft",
+            remote_updated_at=remote_updated_at,
+            metadata={"subtitle": remote.subtitle, "coverUrl": remote.cover_image_url},
+        )
+        return {
+            "remoteId": remote.article_id,
+            "articleId": article_id,
+            "status": "conflict",
+            "action": "conflict",
+            "revisionCreated": False,
+            "imageStatus": "not_attempted",
+            "error": "remote_content_conflict",
+        }
+
     if created:
-        identity = None
         action = "imported"
         revision_created = True
     else:
-        identity = store.get_remote_article_identity(user_id, platform, remote.article_id)
-        current = store.get_current_article_revision(user_id, article_id)
         content_changed = (
             identity is not None
             and identity.get("remote_content_fingerprint") != fingerprint
@@ -271,6 +323,32 @@ def _sync_article(
         last_sync_started_at=started_at,
         last_synced_at=completed_at,
     )
+    latest_revision = store.get_current_article_revision(user_id, article_id)
+    reconciled_fingerprint = _fingerprint(RemoteSyncArticle(
+        article_id=remote.article_id,
+        title=latest_revision["title"],
+        body_markdown=latest_revision["content"],
+        published=remote.published,
+    )) if latest_revision else fingerprint
+    store.record_reconciliation_observation(
+        user_id,
+        article_id,
+        platform,
+        remote.article_id,
+        local_revision_id=latest_revision["id"] if latest_revision else None,
+        baseline_fingerprint=baseline_fingerprint,
+        local_fingerprint=reconciled_fingerprint,
+        remote_fingerprint=fingerprint,
+        availability="available",
+        sync_state="in_sync" if reconciled_fingerprint == fingerprint else "local_ahead",
+        remote_title=remote.title,
+        remote_content=remote.body_markdown,
+        canonical_url=remote.canonical_url,
+        remote_url=remote.url,
+        remote_status="published" if remote.published else "draft",
+        remote_updated_at=remote_updated_at,
+        metadata={"subtitle": remote.subtitle, "coverUrl": remote.cover_image_url},
+    )
     return {
         "remoteId": remote.article_id,
         "articleId": article_id,
@@ -303,6 +381,7 @@ def _sync_remote_articles(
         "failed": 0,
         "imagesDownloaded": 0,
         "imagesFailed": 0,
+        "conflicts": 0,
     }
 
     counters["failed"] = len(article_results)
@@ -337,6 +416,8 @@ def _sync_remote_articles(
             counters[action_counter] += 1
         if result["status"] == "failed":
             counters["failed"] += 1
+        elif result["status"] == "conflict":
+            counters["conflicts"] += 1
         if result["imageStatus"] == "downloaded":
             counters["imagesDownloaded"] += 1
         elif result["imageStatus"] == "failed":

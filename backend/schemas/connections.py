@@ -144,6 +144,7 @@ class HashnodeSyncResponse(_CamelModel):
     failed: int
     images_downloaded: int
     images_failed: int
+    conflicts: int = 0
     source_errors: list[HashnodeSyncSourceError]
     articles: list[HashnodeSyncArticleResult]
 

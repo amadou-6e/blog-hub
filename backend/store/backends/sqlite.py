@@ -35,6 +35,7 @@ from backend.store.connection_auth import ConnectionAuthStoreMixin
 from backend.store.browser_publish import BrowserPublishStoreMixin
 from backend.store.browser_connections import BrowserConnectionStoreMixin
 from backend.store.remote_articles import RemoteArticleStoreMixin
+from backend.store.reconciliation import ReconciliationStoreMixin
 from backend.store.schema import (
     SEED_USER_EMAIL as DEFAULT_SEED_USER_EMAIL,
     SEED_USER_HASH as DEFAULT_SEED_USER_HASH,
@@ -222,6 +223,7 @@ def _seed_articles() -> list[dict]:
 
 
 class SQLiteStore(
+    ReconciliationStoreMixin,
     RemoteArticleStoreMixin,
     BrowserConnectionStoreMixin,
     BrowserPublishStoreMixin,

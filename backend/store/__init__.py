@@ -132,6 +132,26 @@ def upsert_remote_article_identity(user_id: str, *a, **kw):
     return _backend.upsert_remote_article_identity(user_id, *a, **kw)
 
 
+def record_reconciliation_observation(user_id: str, *a, **kw):
+    return _backend.record_reconciliation_observation(user_id, *a, **kw)
+
+
+def get_reconciliation_observation(user_id: str, *a, **kw):
+    return _backend.get_reconciliation_observation(user_id, *a, **kw)
+
+
+def get_latest_reconciliation_observation(user_id: str, *a, **kw):
+    return _backend.get_latest_reconciliation_observation(user_id, *a, **kw)
+
+
+def list_latest_reconciliation_observations(user_id: str, *a, **kw):
+    return _backend.list_latest_reconciliation_observations(user_id, *a, **kw)
+
+
+def has_unresolved_reconciliation(user_id: str, *a, **kw):
+    return _backend.has_unresolved_reconciliation(user_id, *a, **kw)
+
+
 # ── Connections ───────────────────────────────────────────────────────────────
 
 

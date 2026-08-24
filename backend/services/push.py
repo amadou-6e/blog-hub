@@ -74,7 +74,12 @@ def _push_devto(article: dict, source_markdown: str, get_connection_token: Token
         published=False,
     )
     client = DevToClient(token)
-    result = client.publish_article(prepared.article)
+    existing_id = article.get("destinations", {}).get("devto", {}).get("draft_id")
+    result = (
+        client.update_article(int(existing_id), prepared.article)
+        if existing_id
+        else client.publish_article(prepared.article)
+    )
     return PushPlatformResult(
         platform="devto",
         success=True,
@@ -103,7 +108,12 @@ def _push_hashnode(article: dict, source_markdown: str, get_connection_token: To
         cover_image_url=_cover_image_url(article, "hashnode"),
         tags=("integration", "bloghub"),
     )
-    result = client.create_draft(prepared.draft)
+    existing_id = article.get("destinations", {}).get("hashnode", {}).get("draft_id")
+    result = (
+        client.update_draft(existing_id, prepared.draft)
+        if existing_id
+        else client.create_draft(prepared.draft)
+    )
     publication_url = _read_hashnode_publication_url(client, result.draft_id)
     preview_url = None
     if publication_url:
@@ -131,13 +141,15 @@ def _push_medium_placeholder(article: dict) -> PushPlatformResult:
 
 
 def _simulated_result(platform: str, article: dict) -> PushPlatformResult:
-    existing_url = article.get("destinations", {}).get(platform, {}).get("url")
+    destination = article.get("destinations", {}).get(platform, {})
+    existing_url = destination.get("url")
     return PushPlatformResult(
         platform=platform,
         success=True,
         status="draft",
         label="Draft",
         url=existing_url,
+        draft_id=destination.get("draft_id"),
     )
 
 
