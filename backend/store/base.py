@@ -187,6 +187,32 @@ class ArticleStore(Protocol):
     ) -> dict:
         ...
 
+    def record_reconciliation_observation(
+        self, user_id: str, article_id: str, platform: str, remote_id: str,
+        **kwargs: Any,
+    ) -> dict:
+        ...
+
+    def get_reconciliation_observation(
+        self, user_id: str, article_id: str, observation_id: str,
+    ) -> dict | None:
+        ...
+
+    def get_latest_reconciliation_observation(
+        self, user_id: str, article_id: str, platform: str,
+    ) -> dict | None:
+        ...
+
+    def list_latest_reconciliation_observations(
+        self, user_id: str, article_id: str,
+    ) -> list[dict]:
+        ...
+
+    def has_unresolved_reconciliation(
+        self, user_id: str, article_id: str, platforms: list[str] | None = None,
+    ) -> bool:
+        ...
+
     # ── Connections ──────────────────────────────────────────────────────────
 
     def list_connections(self, user_id: str) -> list[dict]:

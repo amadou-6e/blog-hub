@@ -28,6 +28,7 @@ import backend.store as store
 import backend.services.cli_runner as runner
 import backend.services.browser_publish as browser_publish
 from backend.services.push import push_article_to_platforms
+from backend.services.hashnode_sync import RemoteSyncArticle, _fingerprint
 from backend.store.article_revisions import RevisionConflict
 
 router = APIRouter(prefix="/api/articles", tags=["articles"])
@@ -508,6 +509,14 @@ def push_article(request: Request, article_id: str, body: dict = {}):
         raise HTTPException(status_code=404, detail="Article not found")
 
     platforms = body.get("platforms", list(article["destinations"].keys()))
+    if store.has_unresolved_reconciliation(user_id, article_id, platforms):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "remote_content_conflict",
+                "message": "Resolve remote article conflicts before pushing.",
+            },
+        )
     store.set_destinations_pending(user_id, article_id, platforms)
     job = store.create_job(user_id, "push", article_id)
 
@@ -528,6 +537,45 @@ def push_article(request: Request, article_id: str, body: dict = {}):
             label=result.label,
             draft_id=result.draft_id,
         )
+        if result.success and result.draft_id and platform in {"hashnode", "devto"}:
+            revision = store.get_current_article_revision(user_id, article_id)
+            if revision is not None:
+                fingerprint = _fingerprint(RemoteSyncArticle(
+                    article_id=result.draft_id,
+                    title=revision["title"],
+                    body_markdown=revision["content"],
+                    published=result.status == "published",
+                ))
+                existing = store.get_remote_article_identity(
+                    user_id, platform, result.draft_id,
+                )
+                store.upsert_remote_article_identity(
+                    user_id,
+                    article_id,
+                    platform,
+                    result.draft_id,
+                    remote_content_fingerprint=fingerprint,
+                    subtitle=(existing or {}).get("subtitle"),
+                    cover_asset_id=(existing or {}).get("cover_asset_id"),
+                    last_sync_status="succeeded",
+                    last_sync_result={"action": "pushed", "remoteStatus": result.status},
+                )
+                store.record_reconciliation_observation(
+                    user_id,
+                    article_id,
+                    platform,
+                    result.draft_id,
+                    local_revision_id=revision["id"],
+                    baseline_fingerprint=fingerprint,
+                    local_fingerprint=fingerprint,
+                    remote_fingerprint=fingerprint,
+                    availability="available",
+                    sync_state="in_sync",
+                    remote_title=revision["title"],
+                    remote_content=revision["content"],
+                    remote_url=result.url,
+                    remote_status=result.status,
+                )
         job_result[platform] = {
             "status": result.status,
             "label": result.label,

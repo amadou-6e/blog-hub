@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import sqlite3
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -23,6 +24,17 @@ class BackupError(RuntimeError):
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _rename_verified_bundle(source: Path, target: Path) -> None:
+    for attempt in range(5):
+        try:
+            source.rename(target)
+            return
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(0.05 * (attempt + 1))
 
 
 def _sha256(path: Path) -> str:
@@ -91,6 +103,7 @@ def _database_summary(database_path: Path, blobs_path: Path) -> dict:
             "articles",
             "article_assets",
             "remote_article_identities",
+            "remote_reconciliation_observations",
             "article_revisions",
             "connections",
             "jobs",
@@ -189,7 +202,7 @@ def create_backup(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
         verify_backup(temporary)
-        temporary.rename(final)
+        _rename_verified_bundle(temporary, final)
         prune_backups(root, retain=retain)
         return final
     except Exception:

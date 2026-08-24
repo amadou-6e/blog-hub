@@ -10,7 +10,7 @@ SEED_USER_HASH = "$2b$12$BJsbJlf3SZUMUISLA8oASeFn.Q3U.Ar6TqoIFtu0F9OlYyev.DZLC"
 
 # Bump for every released schema shape. Idempotent additions migrate in place;
 # destructive changes require an explicit migration and recovery plan.
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 _SCHEMA_SQL_PATH = Path(__file__).resolve().parent / "sql" / "schema.sql"
 

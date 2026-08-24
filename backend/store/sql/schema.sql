@@ -146,6 +146,34 @@ CREATE TABLE IF NOT EXISTS remote_article_identities (
         REFERENCES articles(id, user_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS remote_reconciliation_observations (
+    id                    TEXT PRIMARY KEY,
+    user_id               TEXT NOT NULL,
+    article_id            TEXT NOT NULL,
+    platform              TEXT NOT NULL,
+    remote_id             TEXT NOT NULL,
+    local_revision_id     TEXT REFERENCES article_revisions(id) ON DELETE SET NULL,
+    baseline_fingerprint  TEXT,
+    local_fingerprint     TEXT NOT NULL,
+    remote_fingerprint    TEXT,
+    availability          TEXT NOT NULL,
+    sync_state            TEXT NOT NULL,
+    remote_title          TEXT,
+    remote_content        TEXT,
+    canonical_url         TEXT,
+    remote_url            TEXT,
+    remote_status         TEXT,
+    remote_updated_at     TEXT,
+    metadata_json         TEXT,
+    error                 TEXT,
+    observed_at           TEXT NOT NULL,
+    FOREIGN KEY (user_id, platform, remote_id)
+        REFERENCES remote_article_identities(user_id, platform, remote_id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (article_id, user_id)
+        REFERENCES articles(id, user_id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS article_comments (
     id          TEXT PRIMARY KEY,
     article_id  TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
@@ -321,6 +349,11 @@ CREATE INDEX IF NOT EXISTS idx_article_revisions_article
 
 CREATE INDEX IF NOT EXISTS idx_remote_articles_local_article
     ON remote_article_identities(user_id, article_id);
+
+CREATE INDEX IF NOT EXISTS idx_reconciliation_article_platform
+    ON remote_reconciliation_observations(
+        user_id, article_id, platform, observed_at DESC
+    );
 
 CREATE INDEX IF NOT EXISTS idx_article_comments_article
     ON article_comments(article_id);

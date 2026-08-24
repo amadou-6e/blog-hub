@@ -223,7 +223,7 @@ def test_v7_database_migrates_without_changing_native_articles(tmp_path):
 
     migrated = SQLiteStore(str(database), str(blobs))
     try:
-        assert migrated.schema_version == SCHEMA_VERSION == 8
+        assert migrated.schema_version == SCHEMA_VERSION == 9
         assert migrated.get_article(migrated.SEED_USER_ID, "art_001")["title"] == (
             "Preserved native article"
         )
