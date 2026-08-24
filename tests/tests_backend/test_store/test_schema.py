@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+
 from backend.store.backends.sqlite import SQLiteStore
 from backend.store.schema import SCHEMA_VERSION, SEED_USER_ID
 
@@ -24,6 +26,9 @@ def test_fresh_database_has_current_schema_and_seed_user(tmp_path):
             "connections",
             "connection_auth_flows",
             "jobs",
+            "job_attempts",
+            "job_effects",
+            "sync_schedules",
             "article_assets",
             "article_comments",
             "article_patches",
@@ -51,6 +56,17 @@ def test_fresh_database_has_current_schema_and_seed_user(tmp_path):
             )
         }
         assert "mode" in publish_columns
+        job_columns = {
+            row[1] for row in store._con.execute("PRAGMA table_info(jobs)")
+        }
+        assert {
+            "payload_json",
+            "queue",
+            "idempotency_key",
+            "attempt_count",
+            "lease_expires_at",
+            "checkpoint_json",
+        } <= job_columns
         remote_identity_columns = {
             row[1]
             for row in store._con.execute(
@@ -94,3 +110,40 @@ def test_reopening_an_existing_database_is_idempotent(tmp_path):
         ).fetchone()[0] == 1
     finally:
         reopened.close()
+
+
+def test_legacy_running_job_is_migrated_to_durable_queue(tmp_path):
+    database = tmp_path / "legacy.db"
+    connection = sqlite3.connect(database)
+    connection.executescript(
+        """CREATE TABLE users (
+               id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL,
+               password_hash TEXT NOT NULL, created_at TEXT NOT NULL,
+               is_active INTEGER NOT NULL DEFAULT 1
+           );
+           CREATE TABLE jobs (
+               job_id TEXT PRIMARY KEY, kind TEXT NOT NULL, article_id TEXT,
+               status TEXT NOT NULL, result TEXT, error TEXT,
+               created_at TEXT NOT NULL, completed_at TEXT, user_id TEXT
+           );
+           INSERT INTO users VALUES (
+               'user_seed', 'seed@example.com', 'hash',
+               '2026-08-24T08:00:00+00:00', 1
+           );
+           INSERT INTO jobs VALUES (
+               'job_legacy', 'inspect', NULL, 'running', NULL, NULL,
+               '2026-08-24T08:00:00+00:00', NULL, 'user_seed'
+           );
+           PRAGMA user_version = 9;
+        """
+    )
+    connection.close()
+
+    store = SQLiteStore(str(database), str(tmp_path / "blobs"))
+    try:
+        job = store.get_job(store.SEED_USER_ID, "job_legacy")
+        assert job["status"] == "queued"
+        assert job["available_at"] == "2026-08-24T08:00:00+00:00"
+        assert store.schema_version == SCHEMA_VERSION
+    finally:
+        store.close()

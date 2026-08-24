@@ -233,6 +233,42 @@ def complete_job(user_id: str, *a, **kw):
     return _backend.complete_job(user_id, *a, **kw)
 
 
+def find_job_by_idempotency_key(user_id: str, *a, **kw):
+    return _backend.find_job_by_idempotency_key(user_id, *a, **kw)
+
+
+def list_jobs(user_id: str, *a, **kw):
+    return _backend.list_jobs(user_id, *a, **kw)
+
+
+def request_job_cancellation(user_id: str, *a, **kw):
+    return _backend.request_job_cancellation(user_id, *a, **kw)
+
+
+def retry_job(user_id: str, *a, **kw):
+    return _backend.retry_job(user_id, *a, **kw)
+
+
+def recover_orphaned_jobs(*a, **kw):
+    return _backend.recover_orphaned_jobs(*a, **kw)
+
+
+def queue_metrics(*a, **kw):
+    return _backend.queue_metrics(*a, **kw)
+
+
+def upsert_sync_schedule(user_id: str, *a, **kw):
+    return _backend.upsert_sync_schedule(user_id, *a, **kw)
+
+
+def list_sync_schedules(user_id: str, *a, **kw):
+    return _backend.list_sync_schedules(user_id, *a, **kw)
+
+
+def delete_sync_schedule(user_id: str, *a, **kw):
+    return _backend.delete_sync_schedule(user_id, *a, **kw)
+
+
 # ── Browser publishing ──────────────────────────────────────────────────────
 
 

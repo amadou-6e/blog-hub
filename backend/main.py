@@ -35,7 +35,7 @@ app.add_middleware(
     allow_origins=_allowed_origins,
     allow_origin_regex=_origin_regex,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_headers=["Content-Type", "Authorization", "Idempotency-Key"],
 )
 app.add_middleware(AuthMiddleware)
 
@@ -44,8 +44,8 @@ app.add_middleware(AuthMiddleware)
 def startup_cleanup():
     store.delete_expired_sessions()
     store.expire_connection_auth_flows()
+    store.recover_orphaned_jobs()
     store.recover_agent_sessions()
-    store.recover_browser_publish_runs()
     store.cleanup_agent_sessions(
         retention_days=int(os.environ.get("BLOGHUB_AGENT_SESSION_RETENTION_DAYS", "90"))
     )

@@ -8,12 +8,11 @@ Endpoints:
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 import backend.store as store
-import backend.services.agent_service as agent_service
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
@@ -122,7 +121,6 @@ def get_platforms(request: Request) -> PlatformsResponse:
 def generate_article(
     request: Request,
     body: GenerateRequest,
-    background_tasks: BackgroundTasks,
 ) -> JSONResponse:
     """
     Start an async article generation job.
@@ -138,6 +136,20 @@ def generate_article(
         )
 
     user_id: str = request.state.user_id
+    idempotency_key = request.headers.get("Idempotency-Key")
+    existing = store.find_job_by_idempotency_key(
+        user_id, "generate", idempotency_key
+    )
+    if existing:
+        return JSONResponse(
+            status_code=202,
+            content={
+                "jobId": existing["job_id"],
+                "articleId": existing["article_id"],
+                "status": existing["status"],
+                "sessionId": existing["payload"].get("session_id"),
+            },
+        )
 
     # Check that the selected provider has a configured connection
     runner_provider_id = _PROVIDER_RUNNER[body.provider]
@@ -152,33 +164,36 @@ def generate_article(
 
     # Create the article record (title filled in by background task)
     article = store.create_article(user_id, title="Draft")
-    job = store.create_job(user_id, "generate", article["id"])
     session = store.create_agent_session(
         user_id,
         provider=runner_provider_id,
         article_id=article["id"],
         title=body.brief[:240],
         metadata={
-            "job_id": job["job_id"],
             "skill": body.skill,
             "word_count": body.word_count,
             "destinations": body.destinations,
         },
     )
     store.add_agent_message(user_id, session["id"], "user", body.brief)
-
-    background_tasks.add_task(
-        agent_service.run_generation,
-        user_id=user_id,
-        job_id=job["job_id"],
-        article_id=article["id"],
-        brief=body.brief,
-        skill=body.skill,
-        provider=body.provider,
-        word_count=body.word_count,
-        context_text=body.context_text,
-        destinations=body.destinations,
-        session_id=session["id"],
+    job = store.create_job(
+        user_id,
+        "generate",
+        article["id"],
+        payload={
+            "article_id": article["id"],
+            "brief": body.brief,
+            "skill": body.skill,
+            "provider": body.provider,
+            "word_count": body.word_count,
+            "context_text": body.context_text,
+            "destinations": body.destinations,
+            "session_id": session["id"],
+        },
+        queue="agents",
+        idempotency_key=idempotency_key,
+        max_attempts=3,
+        timeout_seconds=300,
     )
 
     return JSONResponse(
@@ -186,7 +201,7 @@ def generate_article(
         content={
             "jobId": job["job_id"],
             "articleId": article["id"],
-            "status": "running",
+            "status": "queued",
             "sessionId": session["id"],
         },
     )

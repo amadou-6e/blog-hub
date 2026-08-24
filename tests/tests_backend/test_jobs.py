@@ -28,3 +28,35 @@ class TestJobs:
     def test_inspect_job_type(self, client: TestClient):
         job_id = client.post("/api/articles/art_001/inspect").json()["jobId"]
         assert client.get(f"/api/jobs/{job_id}").json()["type"] == "inspect"
+
+
+class TestSyncSchedules:
+
+    def test_create_list_and_delete_schedule(self, client: TestClient):
+        created = client.put(
+            "/api/jobs/sync-schedules",
+            json={"platform": "medium", "intervalSeconds": 900},
+        )
+        assert created.status_code == 200
+        assert created.json()["platform"] == "medium"
+        assert created.json()["interval_seconds"] == 900
+
+        schedules = client.get("/api/jobs/sync-schedules").json()["schedules"]
+        assert [item["platform"] for item in schedules] == ["medium"]
+
+        assert client.delete("/api/jobs/sync-schedules/medium").status_code == 204
+        assert client.get("/api/jobs/sync-schedules").json()["schedules"] == []
+
+    def test_schedule_rejects_unsupported_platform(self, client: TestClient):
+        response = client.put(
+            "/api/jobs/sync-schedules",
+            json={"platform": "devto", "intervalSeconds": 900},
+        )
+        assert response.status_code == 422
+
+    def test_schedule_enforces_minimum_interval(self, client: TestClient):
+        response = client.put(
+            "/api/jobs/sync-schedules",
+            json={"platform": "hashnode", "intervalSeconds": 60},
+        )
+        assert response.status_code == 422

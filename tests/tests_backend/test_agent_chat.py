@@ -21,14 +21,17 @@ def _revision_id(client: TestClient) -> str:
     return client.get("/api/articles/art_001").json()["revision_id"]
 
 
-def _turn(client: TestClient, session_id: str, content: str):
-    return client.post(
+def _turn(client: TestClient, session_id: str, content: str, run_jobs=None):
+    response = client.post(
         f"/api/agent-sessions/{session_id}/turns",
         json={"content": content, "articleRevisionId": _revision_id(client)},
     )
+    if response.status_code == 202 and run_jobs is not None:
+        run_jobs()
+    return response
 
 
-def test_chat_turn_persists_message_native_tool_and_reply(client, monkeypatch):
+def test_chat_turn_persists_message_native_tool_and_reply(client, monkeypatch, run_jobs):
     session_id = _session(client)
     monkeypatch.setattr(agent_chat.runner, "stream_chat", lambda **_kwargs: iter([
         {"type": "assistant_delta", "text": "Reading"},
@@ -40,7 +43,7 @@ def test_chat_turn_persists_message_native_tool_and_reply(client, monkeypatch):
         {"type": "done", "exitCode": 0},
     ]))
 
-    response = _turn(client, session_id, "Review the introduction")
+    response = _turn(client, session_id, "Review the introduction", run_jobs)
     assert response.status_code == 202
     persisted = client.get(f"/api/agent-sessions/{session_id}").json()
     assert [message["role"] for message in persisted["messages"]] == ["user", "assistant"]
@@ -62,7 +65,9 @@ def test_chat_turn_requires_connected_selected_provider(client):
     assert "not connected" in turn.json()["detail"]
 
 
-def test_provider_permission_request_becomes_resolvable_approval(client, monkeypatch):
+def test_provider_permission_request_becomes_resolvable_approval(
+    client, monkeypatch, run_jobs,
+):
     session_id = _session(client)
     monkeypatch.setattr(agent_chat.runner, "stream_chat", lambda **_kwargs: iter([
         {"type": "approval_required", "request": {
@@ -70,7 +75,7 @@ def test_provider_permission_request_becomes_resolvable_approval(client, monkeyp
         }},
         {"type": "done", "exitCode": 0},
     ]))
-    _turn(client, session_id, "Rewrite the title")
+    _turn(client, session_id, "Rewrite the title", run_jobs)
     pending = client.get(f"/api/agent-sessions/{session_id}").json()
     assert pending["status"] == "waiting_for_approval"
     approval = pending["approvals"][0]
@@ -83,7 +88,7 @@ def test_provider_permission_request_becomes_resolvable_approval(client, monkeyp
     assert resolved.json()["status"] == "approved"
 
 
-def test_agent_edit_is_queued_until_next_turn(client, monkeypatch):
+def test_agent_edit_is_queued_until_next_turn(client, monkeypatch, run_jobs):
     session_id = _session(client)
     original = client.get("/api/articles/art_001").json()["content"]
     revised = original + "\n\nA queued conclusion."
@@ -101,21 +106,21 @@ def test_agent_edit_is_queued_until_next_turn(client, monkeypatch):
         return iter([{"type": "assistant_message", "text": text}])
 
     monkeypatch.setattr(agent_chat.runner, "stream_chat", stream_chat)
-    first = _turn(client, session_id, "Revise the conclusion")
+    first = _turn(client, session_id, "Revise the conclusion", run_jobs)
     assert first.status_code == 202
     assert client.get("/api/articles/art_001").json()["content"] == original
     patches = client.get("/api/articles/art_001/patches").json()["patches"]
     assert patches[0]["state"] == "pending"
     assert patches[0]["agentSessionId"] == session_id
 
-    second = _turn(client, session_id, "Review that revision")
+    second = _turn(client, session_id, "Review that revision", run_jobs)
     assert second.status_code == 202
     assert second.json()["articleChanged"] is True
     assert client.get("/api/articles/art_001").json()["content"] == revised
     assert calls[1]["article_md"] == revised
 
 
-def test_closing_session_applies_queued_agent_edit(client, monkeypatch):
+def test_closing_session_applies_queued_agent_edit(client, monkeypatch, run_jobs):
     session_id = _session(client)
     original = client.get("/api/articles/art_001").json()["content"]
     revised = original + "\n\nFinal line."
@@ -123,7 +128,7 @@ def test_closing_session_applies_queued_agent_edit(client, monkeypatch):
         "type": "assistant_message",
         "text": f"BLOGHUB_ARTICLE_START\n{revised}\nBLOGHUB_ARTICLE_END\nDone.",
     }]))
-    _turn(client, session_id, "Add a final line")
+    _turn(client, session_id, "Add a final line", run_jobs)
 
     closed = client.post(
         f"/api/agent-sessions/{session_id}/close",
@@ -135,7 +140,9 @@ def test_closing_session_applies_queued_agent_edit(client, monkeypatch):
     assert client.get("/api/articles/art_001").json()["content"] == revised
 
 
-def test_queued_agent_edit_conflicts_with_newer_editor_revision(client, monkeypatch):
+def test_queued_agent_edit_conflicts_with_newer_editor_revision(
+    client, monkeypatch, run_jobs,
+):
     session_id = _session(client)
     article = client.get("/api/articles/art_001").json()
     revised = article["content"] + "\n\nAgent line."
@@ -143,7 +150,7 @@ def test_queued_agent_edit_conflicts_with_newer_editor_revision(client, monkeypa
         "type": "assistant_message",
         "text": f"BLOGHUB_ARTICLE_START\n{revised}\nBLOGHUB_ARTICLE_END",
     }]))
-    _turn(client, session_id, "Add an agent line")
+    _turn(client, session_id, "Add an agent line", run_jobs)
     saved = client.patch("/api/articles/art_001", json={
         "content": article["content"] + "\n\nEditor line.",
         "base_revision_id": article["revision_id"],
@@ -158,7 +165,7 @@ def test_queued_agent_edit_conflicts_with_newer_editor_revision(client, monkeypa
     assert conflict.json()["detail"]["code"] == "revision_conflict"
 
 
-def test_worker_uses_exact_revision_snapshot(client, monkeypatch):
+def test_worker_uses_exact_revision_snapshot(client, monkeypatch, run_jobs):
     session_id = _session(client)
     article = client.get("/api/articles/art_001").json()
     seen = {}
@@ -167,7 +174,7 @@ def test_worker_uses_exact_revision_snapshot(client, monkeypatch):
         "stream_chat",
         lambda **kwargs: seen.update(kwargs) or iter([{"type": "assistant_message", "text": "Read."}]),
     )
-    _turn(client, session_id, "Read it")
+    _turn(client, session_id, "Read it", run_jobs)
     assert seen["article_md"] == article["content"]
 
 
