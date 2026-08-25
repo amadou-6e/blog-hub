@@ -1,0 +1,74 @@
+name: Remote integration smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Connected platform to inspect without writing remote data
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - hashnode
+          - devto
+
+concurrency:
+  group: remote-smoke-${{ inputs.platform }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  list-remote-drafts:
+    name: Read-only ${{ inputs.platform }} smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      BLOGHUB_DB_PATH: ":memory:"
+      BLOGHUB_BLOBS_DIR: /tmp/bloghub-blobs
+      BLOGHUB_CREDENTIAL_KEY_FILE: /tmp/bloghub-credential-keys.json
+      BLOGHUB_DISABLE_AUTH: "true"
+      DEVTO_API_KEY: ${{ secrets.DEVTO_API_KEY }}
+      HASHNODE_PAT: ${{ secrets.HASHNODE_PAT }}
+      HASHNODE_PUBLICATION_ID: ""
+      MEDIUM_CLIENT_ID: ""
+      MEDIUM_CLIENT_SECRET: ""
+      MEDIUM_SESSION_FILE: ""
+      MEDIUM_TOKEN: ""
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            backend/requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r backend/requirements.txt
+
+      - name: Check selected credentials
+        env:
+          PLATFORM: ${{ inputs.platform }}
+        run: |
+          if [[ "$PLATFORM" == "all" || "$PLATFORM" == "hashnode" ]]; then
+            test -n "$HASHNODE_PAT" || { echo "HASHNODE_PAT is not configured" >&2; exit 1; }
+          fi
+          if [[ "$PLATFORM" == "all" || "$PLATFORM" == "devto" ]]; then
+            test -n "$DEVTO_API_KEY" || { echo "DEVTO_API_KEY is not configured" >&2; exit 1; }
+          fi
+
+      - name: List remote drafts
+        env:
+          PLATFORM: ${{ inputs.platform }}
+        run: bash scripts/run-remote-smoke-tests.sh "$PLATFORM"
