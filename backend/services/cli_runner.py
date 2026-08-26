@@ -11,7 +11,7 @@ Callers convert that to an appropriate HTTP response (503).
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Iterator, Optional
 
 import httpx
 
@@ -89,12 +89,362 @@ def login_status(provider: str) -> dict:
     return _get(f"/auth/{provider}/status")
 
 
+def submit_login_callback(provider: str, callback: str) -> dict:
+    """Forward a loopback callback without logging or persisting its payload."""
+    return _post(f"/auth/{provider}/submit-code", code=callback)
+
+
+def cancel_login(provider: str) -> dict:
+    """Cancel an in-progress login without deleting an existing credential."""
+    return _post(f"/auth/{provider}/cancel")
+
+
 def logout(provider: str) -> dict:
     """Clear CLI credentials for a provider. Returns { status: "disconnected" }."""
     return _post(f"/auth/{provider}/logout")
 
 
 _TASK_TIMEOUT = httpx.Timeout(connect=3.0, read=200.0, write=10.0, pool=5.0)
+
+def api_key_from_connection_token(token: str | None) -> str | None:
+    """Return a real API key, leaving persisted CLI sessions to the runner."""
+    if not token or token == "cli_session" or token.startswith("web_session:"):
+        return None
+    return token
+
+
+def stream_chat(
+    *, provider: str, session_id: str, article_md: str,
+    messages: list[dict[str, str]], model: str | None = None,
+    api_key: str | None = None,
+) -> Iterator[dict]:
+    payload = {
+        "provider": provider, "session_id": session_id,
+        "article_md": article_md, "messages": messages,
+        "model": model, "api_key": api_key,
+    }
+    try:
+        with _client() as client:
+            with client.stream(
+                "POST", "/chat/stream", json=payload,
+                timeout=httpx.Timeout(connect=3, read=300, write=10, pool=5),
+            ) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if line:
+                        yield __import__("json").loads(line)
+    except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
+        raise RunnerUnavailable(f"Chat runner unavailable: {exc}") from exc
+
+
+def cancel_chat(session_id: str) -> None:
+    _post(f"/chat/{session_id}/cancel")
+
+
+def hashnode_browser_upload(
+    *, organization_id: str, profile_id: str, title: str, article_md: str,
+    publish: bool = False,
+) -> dict:
+    """Compatibility wrapper around the generic browser extension operation."""
+    return browser_operation(
+        "hashnode",
+        "publish" if publish else "create_draft",
+        organization_id=organization_id,
+        profile_id=profile_id,
+        article={"title": title, "body": article_md},
+        approved=publish,
+    )
+
+
+def browser_extensions() -> list[dict]:
+    return _get("/browser/extensions").get("extensions", [])
+
+
+def browser_extension(platform: str) -> dict:
+    return _get(f"/browser/{platform}/capabilities")
+
+
+def browser_operation(
+    platform: str,
+    operation: str,
+    *,
+    organization_id: str,
+    profile_id: str,
+    article: dict | None = None,
+    remote_id: str | None = None,
+    cursor: str | None = None,
+    limit: int = 50,
+    approved: bool = False,
+) -> dict:
+    """Execute a normalized operation through an installed browser extension."""
+    payload = {
+        "organization_id": organization_id,
+        "profile_id": profile_id,
+        "article": article,
+        "remote_id": remote_id,
+        "cursor": cursor,
+        "limit": limit,
+        "approved": approved,
+    }
+    try:
+        with _client() as client:
+            response = client.post(
+                f"/browser/{platform}/operations/{operation}", json=payload,
+                timeout=httpx.Timeout(connect=3, read=300, write=30, pool=5),
+            )
+            response.raise_for_status()
+            return response.json()
+    except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
+        raise RunnerUnavailable(f"Browser runner unavailable: {exc}") from exc
+
+
+def hashnode_browser_articles(*, organization_id: str, profile_id: str) -> dict:
+    """Compatibility wrapper for Hashnode's extension list operation."""
+    return browser_operation(
+        "hashnode",
+        "list_articles",
+        organization_id=organization_id,
+        profile_id=profile_id,
+        limit=100,
+    )
+
+
+def medium_browser_articles(*, organization_id: str, profile_id: str) -> dict:
+    """Retrieve Medium listings and hydrate each record with article detail."""
+    listing = browser_operation(
+        "medium",
+        "list_articles",
+        organization_id=organization_id,
+        profile_id=profile_id,
+        limit=100,
+    )
+    if not listing.get("success"):
+        return listing
+
+    articles: list[dict] = []
+    errors = list((listing.get("diagnostics") or {}).get("errors") or [])
+    for summary in listing.get("articles") or []:
+        remote_id = str(summary.get("remote_id") or "")
+        if not remote_id:
+            errors.append({"source": "listing", "error": "invalid_article_record"})
+            continue
+        try:
+            detail = browser_operation(
+                "medium",
+                "get_article",
+                organization_id=organization_id,
+                profile_id=profile_id,
+                remote_id=remote_id,
+            )
+        except RunnerUnavailable:
+            errors.append({
+                "source": "article_detail",
+                "remote_id": remote_id,
+                "error": "article_retrieval_failed",
+            })
+            continue
+        if not detail.get("success") or not detail.get("article"):
+            errors.append({
+                "source": "article_detail",
+                "remote_id": remote_id,
+                "error": detail.get("error") or "article_retrieval_failed",
+            })
+            continue
+        detail_article = detail["article"]
+        summary_metadata = summary.get("metadata") or {}
+        detail_metadata = detail_article.get("metadata") or {}
+        hydrated = {
+            **summary,
+            **detail_article,
+            "subtitle": detail_article.get("subtitle") or summary.get("subtitle"),
+            "cover_url": detail_article.get("cover_url") or summary.get("cover_url"),
+            "updated_at": detail_article.get("updated_at") or summary.get("updated_at"),
+            "metadata": {
+                **summary_metadata,
+                **{
+                    key: value for key, value in detail_metadata.items()
+                    if value is not None
+                },
+            },
+        }
+        articles.append(hydrated)
+
+    return {
+        "success": bool(articles) or not errors,
+        "articles": articles,
+        "next_cursor": listing.get("next_cursor"),
+        "diagnostics": {"errors": errors},
+        **({"error": "medium_retrieval_failed"} if errors and not articles else {}),
+    }
+
+
+def list_medium_browser_articles(
+    *, organization_id: str, profile_id: str, limit: int = 100,
+) -> list[dict]:
+    result = browser_operation(
+        "medium",
+        "list_articles",
+        organization_id=organization_id,
+        profile_id=profile_id,
+        limit=limit,
+    )
+    if not result.get("success"):
+        raise RunnerUnavailable(result.get("error") or "Medium listing failed")
+    return [
+        {
+            "id": article["remote_id"],
+            "title": article["title"],
+            "snippet": article.get("subtitle") or "",
+            "status": article.get("status") or "draft",
+            "word_count": (article.get("metadata") or {}).get("word_count") or 0,
+            "updated_at": article.get("updated_at") or "",
+            "body": article.get("body") or "",
+            "cover_image": article.get("cover_url"),
+        }
+        for article in result.get("articles") or []
+    ]
+
+
+def get_medium_browser_article(
+    article_id: str, *, organization_id: str, profile_id: str,
+) -> dict:
+    result = browser_operation(
+        "medium",
+        "get_article",
+        organization_id=organization_id,
+        profile_id=profile_id,
+        remote_id=article_id,
+    )
+    if not result.get("success") or not result.get("article"):
+        raise RunnerUnavailable(result.get("error") or "Medium article retrieval failed")
+    article = result["article"]
+    return {
+        "id": article["remote_id"],
+        "title": article["title"],
+        "word_count": len((article.get("body") or "").split()),
+        "updated_at": article.get("updated_at") or "",
+        "status": article.get("status") or "draft",
+        "body": article.get("body") or "",
+        "canonical_url": article.get("canonical_url"),
+        "cover_image": article.get("cover_url"),
+    }
+
+
+def start_browser_login(platform: str, profile_id: str | None = None) -> dict:
+    if profile_id:
+        return _post(f"/browser/{platform}/login", profile_id=profile_id)
+    return _post(f"/browser/{platform}/login")
+
+
+def start_hashnode_browser_login(profile_id: str | None = None) -> dict:
+    return start_browser_login("hashnode", profile_id)
+
+
+def start_medium_browser_login(profile_id: str | None = None) -> dict:
+    return start_browser_login("medium", profile_id)
+
+
+def get_browser_login(platform: str, session_id: str) -> dict:
+    return _get(f"/browser/{platform}/login/{session_id}")
+
+
+def get_hashnode_browser_login(session_id: str) -> dict:
+    return get_browser_login("hashnode", session_id)
+
+
+def get_medium_browser_login(session_id: str) -> dict:
+    return get_browser_login("medium", session_id)
+
+
+def cancel_browser_login(platform: str, session_id: str) -> None:
+    try:
+        with _client() as client:
+            response = client.delete(f"/browser/{platform}/login/{session_id}")
+            response.raise_for_status()
+    except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
+        raise RunnerUnavailable(f"Browser login runner unavailable: {exc}") from exc
+
+
+def cancel_hashnode_browser_login(session_id: str) -> None:
+    cancel_browser_login("hashnode", session_id)
+
+
+def cancel_medium_browser_login(session_id: str) -> None:
+    cancel_browser_login("medium", session_id)
+
+
+def complete_browser_login(
+    platform: str,
+    session_id: str,
+    profile_name: str,
+    *,
+    profile_id: str | None = None,
+    organization_id: str | None = None,
+) -> dict:
+    try:
+        with _client() as client:
+            response = client.post(
+                f"/browser/{platform}/login/{session_id}/complete",
+                json={
+                    "profile_name": profile_name,
+                    "profile_id": profile_id,
+                    "organization_id": organization_id,
+                },
+                timeout=httpx.Timeout(connect=3, read=180, write=10, pool=5),
+            )
+            response.raise_for_status()
+            return response.json()
+    except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
+        raise RunnerUnavailable(f"Browser login runner unavailable: {exc}") from exc
+
+
+def complete_hashnode_browser_login(
+    session_id: str,
+    profile_name: str,
+    *,
+    profile_id: str | None = None,
+    organization_id: str | None = None,
+) -> dict:
+    return complete_browser_login(
+        "hashnode",
+        session_id,
+        profile_name,
+        profile_id=profile_id,
+        organization_id=organization_id,
+    )
+
+
+def complete_medium_browser_login(
+    session_id: str,
+    profile_name: str,
+    *,
+    profile_id: str | None = None,
+    organization_id: str | None = None,
+) -> dict:
+    return complete_browser_login(
+        "medium",
+        session_id,
+        profile_name,
+        profile_id=profile_id,
+        organization_id=organization_id,
+    )
+
+
+def delete_browser_profile(platform: str, profile_id: str) -> None:
+    try:
+        with _client() as client:
+            response = client.delete(f"/browser/{platform}/profiles/{profile_id}")
+            response.raise_for_status()
+    except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
+        raise RunnerUnavailable(f"Browser login runner unavailable: {exc}") from exc
+
+
+def delete_hashnode_browser_profile(profile_id: str) -> None:
+    delete_browser_profile("hashnode", profile_id)
+
+
+def delete_medium_browser_profile(profile_id: str) -> None:
+    delete_browser_profile("medium", profile_id)
 
 
 def run_task(

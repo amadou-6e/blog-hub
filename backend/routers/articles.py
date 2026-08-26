@@ -1,9 +1,13 @@
 import io
+import hashlib
+import re
 import zipfile
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
-from typing import Optional
+from fastapi.responses import Response
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -22,7 +26,10 @@ from backend.schemas.overview import (
 )
 import backend.store as store
 import backend.services.cli_runner as runner
+import backend.services.browser_publish as browser_publish
 from backend.services.push import push_article_to_platforms
+from backend.services.hashnode_sync import RemoteSyncArticle, _fingerprint
+from backend.store.article_revisions import RevisionConflict
 
 router = APIRouter(prefix="/api/articles", tags=["articles"])
 
@@ -122,10 +129,73 @@ class ArticleDetailResponse(BaseModel):
     content: str
     word_count: int
     updated_at: str
+    revision_id: str
+    revision_number: int
     gate: str
     source: str
     source_platform: Optional[str] = None
+    preview_image_url: Optional[str] = None
     destinations: dict[str, ArticleDestinationDetail]
+
+
+_MIME_TYPE = re.compile(r"^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$")
+
+
+def _asset_media_type(value: str | None) -> str:
+    if value and _MIME_TYPE.fullmatch(value.strip()):
+        return value.strip().lower()
+    return "application/octet-stream"
+
+
+def _asset_content_disposition(filename: str, media_type: str) -> str:
+    leaf = filename.replace("\\", "/").rsplit("/", 1)[-1]
+    leaf = "".join(character for character in leaf if 32 <= ord(character) < 127)
+    leaf = leaf[:255] or "asset"
+    ascii_name = re.sub(r'[^A-Za-z0-9._ -]', "_", leaf).strip(". ") or "asset"
+    disposition = "inline" if media_type in {
+        "image/avif",
+        "image/gif",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+    } else "attachment"
+    return (
+        f'{disposition}; filename="{ascii_name}"; '
+        f"filename*=UTF-8''{quote(leaf, safe='')}"
+    )
+
+
+def _etag_matches(request: Request, etag: str) -> bool:
+    candidates = {
+        candidate.strip() for candidate in request.headers.get("if-none-match", "").split(",")
+    }
+    return "*" in candidates or etag in candidates or f"W/{etag}" in candidates
+
+
+@router.get("/{article_id}/assets/{asset_id}", response_class=Response)
+def get_article_asset(request: Request, article_id: str, asset_id: int):
+    asset = store.read_article_asset(request.state.user_id, article_id, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    etag = f'"{hashlib.sha256(asset["data"]).hexdigest()}"'
+    media_type = _asset_media_type(asset["mime_type"])
+    headers = {
+        "ETag": etag,
+        "Cache-Control": "private, max-age=3600, must-revalidate",
+        "Vary": "Cookie",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": _asset_content_disposition(
+            asset["filename"], media_type,
+        ),
+    }
+    if _etag_matches(request, etag):
+        return Response(status_code=304, headers=headers)
+    return Response(
+        content=asset["data"],
+        media_type=media_type,
+        headers=headers,
+    )
 
 
 @router.get("/{article_id}", response_model=ArticleDetailResponse)
@@ -134,15 +204,21 @@ def get_article(request: Request, article_id: str):
     article = store.get_article(user_id, article_id)
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
+    revision = store.get_current_article_revision(user_id, article_id)
+    if revision is None:
+        raise HTTPException(status_code=500, detail="Article revision is missing")
     return ArticleDetailResponse(
         id=article["id"],
         title=article["title"],
         content=article["body"],
         word_count=article["word_count"],
         updated_at=str(article["updated_at"]),
+        revision_id=revision["id"],
+        revision_number=revision["revision_number"],
         gate=article["gate"],
         source=article["source"],
         source_platform=article.get("source_platform"),
+        preview_image_url=article.get("preview_image_url"),
         destinations={
             k:
                 ArticleDestinationDetail(
@@ -158,11 +234,25 @@ def get_article(request: Request, article_id: str):
 class ArticlePatchRequest(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
+    base_revision_id: str
 
 
 class ArticlePatchResponse(BaseModel):
     updated_at: str
     word_count: int
+    revision_id: str
+    revision_number: int
+
+
+def _raise_revision_conflict(exc: RevisionConflict) -> None:
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "revision_conflict",
+            "message": str(exc),
+            "current": exc.current,
+        },
+    ) from exc
 
 
 @router.patch("/{article_id}", response_model=ArticlePatchResponse)
@@ -171,15 +261,133 @@ def patch_article(request: Request, article_id: str, body: ArticlePatchRequest):
     article = store.get_article(user_id, article_id)
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
-    if body.title is not None:
-        store.update_article_title(user_id, article_id, body.title)
-    if body.content is not None:
-        store.update_article_body(user_id, article_id, body.content, event="Auto-saved")
+    try:
+        revision = store.save_article_revision(
+            user_id,
+            article_id,
+            title=body.title,
+            content=body.content,
+            expected_revision_id=body.base_revision_id,
+            source="user",
+            description="Auto-saved",
+        )
+    except RevisionConflict as exc:
+        _raise_revision_conflict(exc)
     updated = store.get_article(user_id, article_id)
     return ArticlePatchResponse(
         updated_at=str(updated["updated_at"]),
         word_count=updated["word_count"],
+        revision_id=revision["id"],
+        revision_number=revision["revision_number"],
     )
+
+
+class RevisionSummary(BaseModel):
+    id: str
+    revision_number: int
+    title: str
+    source: str
+    description: Optional[str] = None
+    created_by: Optional[str] = None
+    created_at: str
+    base_revision_id: Optional[str] = None
+    restored_from_id: Optional[str] = None
+
+
+class RevisionDetail(RevisionSummary):
+    content: str
+
+
+class RevisionListResponse(BaseModel):
+    revisions: list[RevisionSummary]
+
+
+class RevisionDiffResponse(BaseModel):
+    revision: RevisionDetail
+    current: RevisionDetail
+    diff: str
+
+
+class CheckpointRequest(BaseModel):
+    base_revision_id: str
+    description: Optional[str] = None
+
+
+class RestoreRevisionRequest(BaseModel):
+    base_revision_id: str
+
+
+@router.get("/{article_id}/revisions", response_model=RevisionListResponse)
+def list_revisions(request: Request, article_id: str):
+    user_id: str = request.state.user_id
+    if store.get_article(user_id, article_id) is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    return RevisionListResponse(revisions=store.list_article_revisions(user_id, article_id))
+
+
+@router.get("/{article_id}/revisions/{revision_id}", response_model=RevisionDetail)
+def get_revision(request: Request, article_id: str, revision_id: str):
+    revision = store.get_article_revision(request.state.user_id, article_id, revision_id)
+    if revision is None:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    return revision
+
+
+@router.get(
+    "/{article_id}/revisions/{revision_id}/diff", response_model=RevisionDiffResponse
+)
+def compare_revision(request: Request, article_id: str, revision_id: str):
+    comparison = store.compare_article_revision(
+        request.state.user_id, article_id, revision_id
+    )
+    if comparison is None:
+        raise HTTPException(status_code=404, detail="Revision not found")
+    return comparison
+
+
+@router.post(
+    "/{article_id}/checkpoints", response_model=RevisionDetail, status_code=201
+)
+def create_checkpoint(request: Request, article_id: str, body: CheckpointRequest):
+    user_id: str = request.state.user_id
+    article = store.get_article(user_id, article_id)
+    if article is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    try:
+        return store.save_article_revision(
+            user_id,
+            article_id,
+            title=article["title"],
+            content=article["body"],
+            expected_revision_id=body.base_revision_id,
+            source="user",
+            description=body.description or "Manual checkpoint",
+            force_revision=True,
+        )
+    except RevisionConflict as exc:
+        _raise_revision_conflict(exc)
+
+
+@router.post(
+    "/{article_id}/revisions/{revision_id}/restore", response_model=RevisionDetail
+)
+def restore_revision(
+    request: Request,
+    article_id: str,
+    revision_id: str,
+    body: RestoreRevisionRequest,
+):
+    try:
+        return store.restore_article_revision(
+            request.state.user_id,
+            article_id,
+            revision_id,
+            body.base_revision_id,
+        )
+    except RevisionConflict as exc:
+        _raise_revision_conflict(exc)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Revision not found") from exc
 
 
 # ── Generate ──────────────────────────────────────────────────────────────────
@@ -249,7 +457,8 @@ def generate_article(request: Request, body: GenerateArticleRequest):
 
     # Both providers go through the CLI runner — Anthropic via claude -p,
     # OpenAI via codex exec (uses the OAuth session or API key).
-    api_key = store.get_connection_token(user_id, body.provider) if body.provider == "openai" else None
+    token = store.get_connection_token(user_id, body.provider) if body.provider == "openai" else None
+    api_key = runner.api_key_from_connection_token(token)
     try:
         result = runner.run_task(
             provider=body.provider,
@@ -300,36 +509,89 @@ def push_article(request: Request, article_id: str, body: dict = {}):
         raise HTTPException(status_code=404, detail="Article not found")
 
     platforms = body.get("platforms", list(article["destinations"].keys()))
-    store.set_destinations_pending(user_id, article_id, platforms)
-    job = store.create_job(user_id, "push", article_id)
-
-    results = push_article_to_platforms(
-        article,
-        platforms,
-        get_connection_token=lambda conn_id: store.get_connection_token(user_id, conn_id),
-    )
-    job_result: dict[str, dict] = {}
-    for platform, result in results.items():
-        store.apply_push_result(
-            user_id,
-            article_id,
-            platform,
-            success=result.success,
-            url=result.url,
-            error=result.error,
-            label=result.label,
-            draft_id=result.draft_id,
+    if store.has_unresolved_reconciliation(user_id, article_id, platforms):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "remote_content_conflict",
+                "message": "Resolve remote article conflicts before pushing.",
+            },
         )
-        job_result[platform] = {
-            "status": result.status,
-            "label": result.label,
-            "url": result.url,
-            "error": result.error,
-            "draft_id": result.draft_id,
-        }
-    store.complete_job(user_id, job["job_id"], result=job_result)
+    idempotency_key = request.headers.get("Idempotency-Key")
+    existing = store.find_job_by_idempotency_key(user_id, "push", idempotency_key)
+    if existing:
+        return AsyncAccepted(jobId=existing["job_id"], status=existing["status"])
+    store.set_destinations_pending(user_id, article_id, platforms)
+    job = store.create_job(
+        user_id,
+        "push",
+        article_id,
+        payload={"article_id": article_id, "platforms": platforms},
+        queue="publishing",
+        idempotency_key=idempotency_key,
+        max_attempts=4,
+        timeout_seconds=300,
+    )
+    return AsyncAccepted(jobId=job["job_id"], status=JobStatus.queued)
 
-    return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
+
+class BrowserPublishRequest(BaseModel):
+    mode: Literal["draft", "publish"] = "draft"
+
+
+@router.post("/{article_id}/browser-publish/{platform}", status_code=201)
+def request_browser_publish(
+    request: Request,
+    article_id: str,
+    platform: str,
+    body: BrowserPublishRequest = BrowserPublishRequest(),
+):
+    if store.get_article(request.state.user_id, article_id) is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    browser_connection = store.get_browser_connection(
+        request.state.user_id, platform
+    )
+    if not browser_connection or browser_connection["status"] != "connected":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Connect {platform.title()} with browser login before browser publishing",
+        )
+    return store.create_browser_publish_run(
+        request.state.user_id, article_id,
+        platform=platform, mode=body.mode,
+    )
+
+
+@router.get("/{article_id}/browser-publish/{run_id}")
+def get_browser_publish(request: Request, article_id: str, run_id: str):
+    run = store.get_browser_publish_run(request.state.user_id, run_id)
+    if run is None or run["article_id"] != article_id:
+        raise HTTPException(status_code=404, detail="Browser publish run not found")
+    return run
+
+
+@router.post("/{article_id}/browser-publish/{run_id}/approve", status_code=202)
+def approve_browser_publish(
+    request: Request, article_id: str, run_id: str,
+):
+    run = store.get_browser_publish_run(request.state.user_id, run_id)
+    if run is None or run["article_id"] != article_id:
+        raise HTTPException(status_code=404, detail="Browser publish run not found")
+    try:
+        approved = store.approve_browser_publish_run(request.state.user_id, run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    job = store.create_job(
+        request.state.user_id,
+        "browser_publish",
+        article_id,
+        payload={"run_id": run_id},
+        queue="publishing",
+        idempotency_key=f"browser-publish:{run_id}",
+        max_attempts=3,
+        timeout_seconds=900,
+    )
+    return {**approved, "jobId": job["job_id"]}
 
 
 # ── Import ────────────────────────────────────────────────────────────────────
@@ -619,14 +881,15 @@ def inspect_article(request: Request, article_id: str):
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
 
-    job = store.create_job(user_id, "inspect", article_id)
-
-    # Simulate: word count >= 500 → pass, else warn
-    gate = "pass" if article["word_count"] >= 500 else "warn"
-    store.apply_inspect_result(user_id, article_id, gate)
-    store.complete_job(user_id, job["job_id"], result={"gate": gate})
-
-    return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
+    job = store.create_job(
+        user_id,
+        "inspect",
+        article_id,
+        payload={"article_id": article_id},
+        max_attempts=2,
+        timeout_seconds=60,
+    )
+    return AsyncAccepted(jobId=job["job_id"], status=JobStatus.queued)
 
 
 # ── Regenerate ────────────────────────────────────────────────────────────────
@@ -644,84 +907,23 @@ def regenerate_patches(request: Request, article_id: str):
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
 
-    comments = store.list_comments(user_id, article_id)
-    unresolved = [c for c in comments if not c["resolved"]]
-
-    job = store.create_job(user_id, "regenerate", article_id)
-
-    if not unresolved:
-        store.complete_job(user_id, job["job_id"], result={"patches_created": 0})
-        return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
-
-    # Build a prompt asking the AI to produce diff suggestions for each comment.
-    comment_lines = "\n".join(f"- [{c['id']}] {c['author']}: {c['text']}" for c in unresolved)
-    article_body = article.get("body", "")
-    prompt = ("You are an editor reviewing a technical blog article. "
-              "For each comment below, produce a concise patch suggestion.\n\n"
-              "Format each patch as:\n"
-              "PATCH_START\n"
-              "LABEL: <short label>\n"
-              "COMMENT_ID: <comment id>\n"
-              "REMOVED: <the existing text to replace — one or two sentences max>\n"
-              "ADDED: <the replacement text>\n"
-              "PATCH_END\n\n"
-              f"Article (excerpt, first 2000 chars):\n{article_body[:2000]}\n\n"
-              f"Comments to address:\n{comment_lines}\n\n"
-              "Output only PATCH_START…PATCH_END blocks, nothing else.")
-
-    # Determine which provider to use (prefer anthropic, fall back to openai).
-    provider = None
-    for p in ("anthropic", "openai"):
-        if store.get_connection_token(user_id, p):
-            provider = p
-            break
-
-    if provider is None:
-        store.complete_job(user_id, job["job_id"], error="No AI provider connected")
-        return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
-
-    api_key = store.get_connection_token(user_id, provider) if provider == "openai" else None
-    try:
-        result = runner.run_task(provider=provider,
-                                 task="generate",
-                                 article_md=prompt,
-                                 api_key=api_key)
-    except runner.RunnerUnavailable as exc:
-        store.complete_job(user_id, job["job_id"], error=str(exc))
-        return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
-
-    if result.get("exit_code", 1) != 0:
-        err = (result.get("stderr") or result.get("stdout") or "unknown error")[:500]
-        store.complete_job(user_id, job["job_id"], error=f"Regeneration failed: {err}")
-        return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
-
-    # Parse PATCH_START…PATCH_END blocks from the output.
-    import re as _re
-    raw_output = result.get("stdout", "")
-    patch_blocks = _re.findall(r"PATCH_START\s*(.*?)\s*PATCH_END", raw_output, _re.DOTALL)
-
-    store.delete_patches(user_id, article_id)
-    patches_created = 0
-    for block in patch_blocks:
-        fields: dict[str, str] = {}
-        for field in ("LABEL", "COMMENT_ID", "REMOVED", "ADDED"):
-            m = _re.search(rf"{field}:\s*(.+?)(?=\n(?:LABEL|COMMENT_ID|REMOVED|ADDED|$))", block,
-                           _re.DOTALL)
-            if m:
-                fields[field] = m.group(1).strip()
-        if "REMOVED" in fields and "ADDED" in fields:
-            store.add_patch(
-                user_id,
-                article_id=article_id,
-                label=fields.get("LABEL", "Suggested edit"),
-                removed=fields["REMOVED"],
-                added=fields["ADDED"],
-                comment_id=fields.get("COMMENT_ID") or None,
-            )
-            patches_created += 1
-
-    store.complete_job(user_id, job["job_id"], result={"patches_created": patches_created})
-    return AsyncAccepted(jobId=job["job_id"], status=JobStatus.done)
+    idempotency_key = request.headers.get("Idempotency-Key")
+    existing = store.find_job_by_idempotency_key(
+        user_id, "regenerate", idempotency_key
+    )
+    if existing:
+        return AsyncAccepted(jobId=existing["job_id"], status=existing["status"])
+    job = store.create_job(
+        user_id,
+        "regenerate",
+        article_id,
+        payload={"article_id": article_id},
+        queue="agents",
+        idempotency_key=idempotency_key,
+        max_attempts=3,
+        timeout_seconds=300,
+    )
+    return AsyncAccepted(jobId=job["job_id"], status=JobStatus.queued)
 
 
 # ── Chat ──────────────────────────────────────────────────────────────────────

@@ -53,6 +53,20 @@ def _mock_response(json_data: Any, status_code: int = 200) -> MagicMock:
     return resp
 
 
+def _connect_medium_browser():
+    store.start_browser_connection(
+        "user_seed",
+        "medium",
+        session_id="pbs_medium_test",
+        organization_id="o_medium_test",
+        app_url="http://localhost/browser",
+        profile_id="bp_medium_test",
+    )
+    store.update_browser_connection(
+        "user_seed", "medium", "connected", profile_id="bp_medium_test",
+    )
+
+
 def _hashnode_gql_response(drafts: list[dict], posts: list[dict]) -> dict:
     """Build a fake Hashnode GraphQL response shaped like _fetch_hashnode_drafts expects."""
     return {
@@ -303,6 +317,38 @@ class TestListDraftsUnit:
         assert body["total"] == len(_MOCK_DRAFTS["medium"])
         assert len(body["drafts"]) > 0
 
+    def test_list_medium_uses_connected_browser_profile(
+        self, client: TestClient, monkeypatch,
+    ):
+        from backend.routers import connections
+
+        _connect_medium_browser()
+        seen = {}
+        monkeypatch.setattr(
+            connections.runner,
+            "list_medium_browser_articles",
+            lambda **kwargs: seen.update(kwargs) or [{
+                "id": "medium123abc",
+                "title": "Remote Medium story",
+                "snippet": "Retrieved through the browser extension",
+                "status": "draft",
+                "word_count": 42,
+                "updated_at": "2026-08-20T10:00:00Z",
+                "body": "",
+                "cover_image": None,
+            }],
+        )
+
+        response = client.get("/api/connections/medium/drafts")
+
+        assert response.status_code == 200
+        assert response.json()["drafts"][0]["id"] == "medium123abc"
+        assert seen == {
+            "organization_id": "o_medium_test",
+            "profile_id": "bp_medium_test",
+            "limit": 100,
+        }
+
 
 class TestGetDraftUnit:
 
@@ -415,12 +461,48 @@ class TestGetDraftUnit:
         assert body["id"] == first_id
         assert len(body["body"]) > 0
 
+    def test_get_medium_article_uses_connected_browser_profile(
+        self, client: TestClient, monkeypatch,
+    ):
+        from backend.routers import connections
+
+        _connect_medium_browser()
+        seen = {}
+
+        def retrieve(article_id, **kwargs):
+            seen.update(article_id=article_id, **kwargs)
+            return {
+                "id": article_id,
+                "title": "Remote Medium story",
+                "word_count": 5,
+                "updated_at": "2026-08-20T10:00:00Z",
+                "status": "published",
+                "body": "# Remote Medium story\n\nFull body.",
+                "canonical_url": "https://medium.com/@author/story-medium123abc",
+                "cover_image": None,
+            }
+
+        monkeypatch.setattr(
+            connections.runner, "get_medium_browser_article", retrieve,
+        )
+
+        response = client.get("/api/connections/medium/drafts/medium123abc")
+
+        assert response.status_code == 200
+        assert response.json()["body"].endswith("Full body.")
+        assert seen == {
+            "article_id": "medium123abc",
+            "organization_id": "o_medium_test",
+            "profile_id": "bp_medium_test",
+        }
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Live-fetch tests — no push/publish; skip only when credentials are absent
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.integration
 class TestDraftsIntegration:
 
     @pytest.fixture(autouse=True)

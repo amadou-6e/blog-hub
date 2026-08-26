@@ -108,11 +108,44 @@ class HashnodeClient:
             raw=data,
         )
 
+    def update_draft(
+        self, draft_id: str, draft: HashnodeDraftInput,
+    ) -> HashnodeDraftResult:
+        """Update an existing draft so retries remain idempotent."""
+        mutation = """
+        mutation UpdateDraft($input: UpdateDraftInput!) {
+          updateDraft(input: $input) {
+            draft { id title canonicalUrl coverImage { url } }
+          }
+        }
+        """
+        input_payload = self._draft_payload(draft)
+        input_payload["id"] = draft_id
+        response = self._session.post(
+            "https://gql.hashnode.com",
+            headers=self.headers,
+            json={"query": mutation, "variables": {"input": input_payload}},
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("errors"):
+            raise HashnodeError(str(data["errors"]))
+        draft_data = data["data"]["updateDraft"]["draft"]
+        cover_image = draft_data.get("coverImage") or {}
+        return HashnodeDraftResult(
+            draft_id=str(draft_data["id"]),
+            title=draft_data.get("title"),
+            canonical_url=draft_data.get("canonicalUrl"),
+            cover_image_url=cover_image.get("url"),
+            raw=data,
+        )
+
     def list_drafts(self, *, first: int = 20) -> list[HashnodeRemoteArticle]:
         query = """
-        query MeDrafts($first: Int!) {
+        query MeDrafts($first: Int!, $after: String) {
           me {
-            drafts(first: $first) {
+            drafts(first: $first, after: $after) {
               edges {
                 node {
                   id
@@ -131,15 +164,26 @@ class HashnodeClient:
                   }
                 }
               }
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
             }
           }
         }
         """
-        payload = self._graphql(query, {"first": first})
-        return [
-            self._remote_article_payload(edge["node"], published=False)
-            for edge in payload["data"]["me"]["drafts"]["edges"]
-        ]
+        articles: list[HashnodeRemoteArticle] = []
+        cursor: str | None = None
+        while True:
+            payload = self._graphql(query, {"first": first, "after": cursor})
+            connection = (((payload.get("data") or {}).get("me") or {}).get("drafts") or {})
+            articles.extend(
+                self._remote_article_payload(edge["node"], published=False)
+                for edge in connection.get("edges") or []
+            )
+            cursor = _next_page_cursor(connection, cursor)
+            if cursor is None:
+                return articles
 
     def list_published_articles(
         self,
@@ -153,9 +197,9 @@ class HashnodeClient:
             if not host:
                 continue
             query = """
-            query PublicationPosts($host: String!, $first: Int!) {
+            query PublicationPosts($host: String!, $first: Int!, $after: String) {
               publication(host: $host) {
-                posts(first: $first) {
+                posts(first: $first, after: $after) {
                   edges {
                     node {
                       id
@@ -172,26 +216,38 @@ class HashnodeClient:
                       }
                     }
                   }
+                  pageInfo {
+                    hasNextPage
+                    endCursor
+                  }
                 }
               }
             }
             """
-            payload = self._graphql(query, {"host": host, "first": post_first})
-            edges = (((payload.get("data") or {}).get("publication") or {}).get("posts") or {}).get(
-                "edges",
-                [],
-            )
-            articles.extend(
-                self._remote_article_payload(edge["node"], published=True)
-                for edge in edges
-            )
+            cursor: str | None = None
+            while True:
+                payload = self._graphql(
+                    query,
+                    {"host": host, "first": post_first, "after": cursor},
+                )
+                publication_payload = (payload.get("data") or {}).get("publication")
+                if not publication_payload:
+                    break
+                connection = publication_payload.get("posts") or {}
+                articles.extend(
+                    self._remote_article_payload(edge["node"], published=True)
+                    for edge in connection.get("edges") or []
+                )
+                cursor = _next_page_cursor(connection, cursor)
+                if cursor is None:
+                    break
         return articles
 
     def list_publications(self, *, first: int = 10) -> list[dict[str, str]]:
         query = """
-        query MePublications($first: Int!) {
+        query MePublications($first: Int!, $after: String) {
           me {
-            publications(first: $first) {
+            publications(first: $first, after: $after) {
               edges {
                 node {
                   id
@@ -199,12 +255,25 @@ class HashnodeClient:
                   url
                 }
               }
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
             }
           }
         }
         """
-        payload = self._graphql(query, {"first": first})
-        return [edge["node"] for edge in payload["data"]["me"]["publications"]["edges"]]
+        publications: list[dict[str, str]] = []
+        cursor: str | None = None
+        while True:
+            payload = self._graphql(query, {"first": first, "after": cursor})
+            connection = (
+                ((payload.get("data") or {}).get("me") or {}).get("publications") or {}
+            )
+            publications.extend(edge["node"] for edge in connection.get("edges") or [])
+            cursor = _next_page_cursor(connection, cursor)
+            if cursor is None:
+                return publications
 
     def _graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         response = self._session.post(
@@ -294,6 +363,18 @@ def _optional_string(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _next_page_cursor(connection: dict[str, Any], current: str | None) -> str | None:
+    page_info = connection.get("pageInfo") or {}
+    if not page_info.get("hasNextPage"):
+        return None
+    cursor = _optional_string(page_info.get("endCursor"))
+    if cursor is None:
+        raise HashnodeError("Hashnode pagination did not return an end cursor")
+    if cursor == current:
+        raise HashnodeError("Hashnode pagination returned the same cursor twice")
+    return cursor
 
 
 def _parse_datetime(raw_value: object) -> datetime | None:

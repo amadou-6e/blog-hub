@@ -1,11 +1,14 @@
 """Auth middleware — enforces session cookie on all /api/* routes."""
 from __future__ import annotations
 
+import os
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 import backend.store as store
+from backend.store.schema import SEED_USER_ID
 
 _COOKIE = "bloghub_session"
 
@@ -15,6 +18,15 @@ _PUBLIC_PATHS = {
     "/api/auth/login",
     "/api/dev/reset",
 }
+
+
+def _auth_disabled() -> bool:
+    return os.environ.get("BLOGHUB_DISABLE_AUTH", "").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _is_public(path: str) -> bool:
@@ -27,6 +39,10 @@ def _is_public(path: str) -> bool:
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        if _auth_disabled():
+            request.state.user_id = SEED_USER_ID
+            return await call_next(request)
+
         if _is_public(request.url.path):
             return await call_next(request)
 

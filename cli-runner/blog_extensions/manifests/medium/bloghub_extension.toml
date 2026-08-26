@@ -1,0 +1,11 @@
+[extension]
+protocol_version = 1
+id = "bloghub.medium"
+platform = "medium"
+display_name = "Medium"
+version = "1.1.0"
+capabilities = ["list_articles", "get_article", "create_draft", "update_article", "publish"]
+
+[entrypoints]
+login = "blog_extensions.builtin.medium:MediumLoginAdapter"
+operations = "blog_extensions.builtin.medium:MediumOperationsAdapter"

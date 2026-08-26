@@ -1,22 +1,35 @@
 // @ts-check
 const { defineConfig, devices } = require('@playwright/test');
 const path = require('path');
+const fs = require('fs');
 
-const PYTHON = path.join(__dirname, '.venv', 'Scripts', 'python.exe');
+const windowsPython = path.join(__dirname, '.venv', 'Scripts', 'python.exe');
+const PYTHON = process.env.PYTHON ||
+  (process.platform === 'win32' && fs.existsSync(windowsPython) ? windowsPython : 'python');
+const PYTHON_COMMAND = process.env.BLOGHUB_PLAYWRIGHT_PYTHON_COMMAND || `"${PYTHON}"`;
 
 module.exports = defineConfig({
   testDir: './tests',
-  outputDir: './tests/results',
+  testMatch: ['settings.spec.js', 'overview-v3.spec.js', 'editor.spec.js'],
+  outputDir: './tests/results/artifacts',
   timeout: 15_000,
   retries: 0,
-  reporter: [['list'], ['json', { outputFile: 'tests/results/report.json' }]],
+  workers: process.env.CI ? 1 : undefined,
+  reporter: process.env.CI
+    ? [['list'], ['html', { outputFolder: 'tests/results/html', open: 'never' }], ['json', { outputFile: 'tests/results/report.json' }]]
+    : [['list'], ['json', { outputFile: 'tests/results/report.json' }]],
 
   webServer: {
-    command: `"${PYTHON}" -m uvicorn backend.main:app --port 8000 --no-access-log`,
+    command: `${PYTHON_COMMAND} -m uvicorn backend.main:app --port 8000 --no-access-log`,
     cwd: __dirname,
     url: 'http://localhost:8000/health',
     reuseExistingServer: true,
-    env: { ...process.env, PYTHONPATH: __dirname },
+    env: {
+      ...process.env,
+      BLOGHUB_DB_PATH: process.env.BLOGHUB_DB_PATH || ':memory:',
+      BLOGHUB_DISABLE_AUTH: process.env.BLOGHUB_DISABLE_AUTH || 'true',
+      PYTHONPATH: __dirname,
+    },
     timeout: 30_000,
   },
 
@@ -26,7 +39,6 @@ module.exports = defineConfig({
   },
 
   projects: [
-    { name: 'edge', use: { ...devices['Desktop Edge'], channel: 'msedge' } },
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
   ],
 });
-

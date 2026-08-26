@@ -7,16 +7,44 @@ BLOGHUB_DB_PATH env var overrides the default path; use ':memory:' for tests.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 import shutil
 import sqlite3
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from backend.store.crypto import decrypt_token, encrypt_token
+from backend.store.backups import (
+    BackupError,
+    create_backup as create_verified_backup,
+    create_backup_if_due as create_verified_backup_if_due,
+)
+from backend.store.crypto import (
+    CredentialDecryptionError,
+    decrypt_token,
+    encrypt_token,
+    needs_reencryption,
+)
+from backend.store.locking import WorkspaceLock
+from backend.store.agent_sessions import AgentSessionStoreMixin
+from backend.store.job_queue import DurableJobStoreMixin
+from backend.store.article_revisions import ArticleRevisionStoreMixin
+from backend.store.connection_auth import ConnectionAuthStoreMixin
+from backend.store.browser_publish import BrowserPublishStoreMixin
+from backend.store.browser_connections import BrowserConnectionStoreMixin
+from backend.store.remote_articles import RemoteArticleStoreMixin
+from backend.store.reconciliation import ReconciliationStoreMixin
+from backend.store.schema import (
+    SEED_USER_EMAIL as DEFAULT_SEED_USER_EMAIL,
+    SEED_USER_HASH as DEFAULT_SEED_USER_HASH,
+    SEED_USER_ID as DEFAULT_SEED_USER_ID,
+    apply_schema,
+)
+
+logger = logging.getLogger(__name__)
 
 # ─── Static metadata ──────────────────────────────────────────────────────────
 
@@ -67,122 +95,6 @@ _PLATFORM_META: list[dict] = [
         "username": "acisse"
     },
 ]
-
-# ─── Schema ───────────────────────────────────────────────────────────────────
-
-_DDL = """
-CREATE TABLE IF NOT EXISTS users (
-    id            TEXT PRIMARY KEY,
-    email         TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    created_at    TEXT NOT NULL,
-    is_active     INTEGER NOT NULL DEFAULT 1
-);
-
-CREATE TABLE IF NOT EXISTS sessions (
-    token       TEXT PRIMARY KEY,
-    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    expires_at  TEXT NOT NULL,
-    created_at  TEXT NOT NULL,
-    remember_me INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS articles (
-    id              TEXT PRIMARY KEY,
-    title           TEXT NOT NULL,
-    body            TEXT NOT NULL DEFAULT '',
-    body_path       TEXT,
-    word_count      INTEGER NOT NULL DEFAULT 0,
-    gate            TEXT NOT NULL DEFAULT 'pending',
-    source          TEXT NOT NULL DEFAULT 'native',
-    source_platform TEXT,
-    canonical_url   TEXT,
-    created_at      TEXT NOT NULL,
-    updated_at      TEXT NOT NULL,
-    user_id         TEXT REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS article_destinations (
-    article_id  TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-    platform    TEXT NOT NULL,
-    status      TEXT NOT NULL DEFAULT 'none',
-    label       TEXT,
-    url         TEXT,
-    draft_id    TEXT,
-    error       TEXT,
-    PRIMARY KEY (article_id, platform)
-);
-
-CREATE TABLE IF NOT EXISTS article_timeline (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    article_id  TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-    timestamp   TEXT NOT NULL,
-    event       TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS connections (
-    platform      TEXT NOT NULL,
-    token         TEXT NOT NULL,
-    status        TEXT NOT NULL DEFAULT 'connected',
-    username      TEXT,
-    connected_at  TEXT NOT NULL,
-    error_message TEXT,
-    user_id       TEXT REFERENCES users(id) ON DELETE CASCADE,
-    PRIMARY KEY (platform, user_id)
-);
-
-CREATE TABLE IF NOT EXISTS jobs (
-    job_id       TEXT PRIMARY KEY,
-    kind         TEXT NOT NULL,
-    article_id   TEXT,
-    status       TEXT NOT NULL DEFAULT 'pending',
-    result       TEXT,
-    error        TEXT,
-    created_at   TEXT NOT NULL,
-    completed_at TEXT,
-    user_id      TEXT REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS article_assets (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    article_id  TEXT    NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-    filename    TEXT    NOT NULL,
-    asset_path  TEXT    NOT NULL,
-    mime_type   TEXT,
-    created_at  TEXT    NOT NULL,
-    UNIQUE(article_id, filename)
-);
-
-CREATE TABLE IF NOT EXISTS article_comments (
-    id          TEXT PRIMARY KEY,
-    article_id  TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-    author      TEXT NOT NULL,
-    text        TEXT NOT NULL,
-    anchor      TEXT,
-    resolved    INTEGER NOT NULL DEFAULT 0,
-    has_patch   INTEGER NOT NULL DEFAULT 0,
-    created_at  TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS article_patches (
-    id          TEXT PRIMARY KEY,
-    article_id  TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-    comment_id  TEXT REFERENCES article_comments(id) ON DELETE SET NULL,
-    label       TEXT NOT NULL,
-    removed     TEXT NOT NULL,
-    added       TEXT NOT NULL,
-    state       TEXT NOT NULL DEFAULT 'pending',
-    created_at  TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS article_chat_log (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    article_id  TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-    role        TEXT NOT NULL,
-    text        TEXT NOT NULL,
-    created_at  TEXT NOT NULL
-);
-"""
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -311,56 +223,47 @@ def _seed_articles() -> list[dict]:
 # ─── SQLiteStore ──────────────────────────────────────────────────────────────
 
 
-class SQLiteStore:
+class SQLiteStore(
+    DurableJobStoreMixin,
+    ReconciliationStoreMixin,
+    RemoteArticleStoreMixin,
+    BrowserConnectionStoreMixin,
+    BrowserPublishStoreMixin,
+    ConnectionAuthStoreMixin,
+    AgentSessionStoreMixin,
+    ArticleRevisionStoreMixin,
+):
 
     def __init__(self, db_path: str, blobs_dir: str = "data/blobs") -> None:
         self._db_path = db_path
         self._blobs_dir = Path(blobs_dir).resolve()
         self._blobs_dir.mkdir(parents=True, exist_ok=True)
+        self._workspace_lock = WorkspaceLock(
+            self._blobs_dir.parent
+            / f".{self._blobs_dir.name}.bloghub-workspace.lock"
+        )
+        if db_path != ":memory:":
+            Path(db_path).resolve().parent.mkdir(parents=True, exist_ok=True)
         self._con = sqlite3.connect(db_path, check_same_thread=False)
         self._con.row_factory = sqlite3.Row
         self._con.execute("PRAGMA journal_mode=WAL")
         self._con.execute("PRAGMA foreign_keys=ON")
-        self._con.executescript(_DDL)
-        # Migrate existing DBs that pre-date the error column
-        try:
-            self._con.execute("ALTER TABLE jobs ADD COLUMN error TEXT")
-            self._con.commit()
-        except Exception:
-            pass  # column already exists
-        try:
-            self._con.execute("ALTER TABLE articles ADD COLUMN body_path TEXT")
-            self._con.commit()
-        except Exception:
-            pass  # column already exists
-        try:
-            self._con.execute("ALTER TABLE article_comments ADD COLUMN anchor TEXT")
-            self._con.commit()
-        except Exception:
-            pass  # column already exists
-        # Migrate DBs that pre-date multi-user auth (user_id columns).
-        for stmt in (
-            "ALTER TABLE articles ADD COLUMN user_id TEXT",
-            "ALTER TABLE connections ADD COLUMN user_id TEXT",
-            "ALTER TABLE jobs ADD COLUMN user_id TEXT",
-        ):
-            try:
-                self._con.execute(stmt)
-                self._con.commit()
-            except Exception:
-                pass  # column already exists
-        self._con.commit()
-        self._seed_if_empty()
+        with self._workspace_lock.acquire():
+            apply_schema(self._con)
+            self.reencrypt_connection_credentials()
+            self.reencrypt_browser_connection_credentials()
+            self._seed_if_empty()
+            self._ensure_initial_article_revisions()
+            self._ensure_patch_revision_links()
         # Ephemeral — no need to persist across restarts
         self._oauth_pending: dict[str, dict] = {}
 
     # ── Seed ─────────────────────────────────────────────────────────────────
 
     # Known seed credentials — used by tests to log in without re-registering.
-    SEED_USER_ID = "user_seed"
-    SEED_USER_EMAIL = "seed@example.com"
-    # bcrypt hash of "seed1234"
-    SEED_USER_HASH = "$2b$12$BJsbJlf3SZUMUISLA8oASeFn.Q3U.Ar6TqoIFtu0F9OlYyev.DZLC"
+    SEED_USER_ID = DEFAULT_SEED_USER_ID
+    SEED_USER_EMAIL = DEFAULT_SEED_USER_EMAIL
+    SEED_USER_HASH = DEFAULT_SEED_USER_HASH
 
     def _seed_if_empty(self) -> None:
         # Always ensure the seed user exists (safe with INSERT OR IGNORE).
@@ -424,6 +327,21 @@ class SQLiteStore:
                 return full.read_text(encoding="utf-8")
         return row["body"]
 
+    def _local_preview_image_url(self, article_id: str) -> str | None:
+        row = self._con.execute(
+            """SELECT rai.cover_asset_id
+               FROM remote_article_identities rai
+               JOIN article_assets aa
+                 ON aa.id=rai.cover_asset_id AND aa.article_id=rai.article_id
+               WHERE rai.article_id=? AND rai.cover_asset_id IS NOT NULL
+               ORDER BY rai.updated_at DESC, rai.platform, rai.remote_id
+               LIMIT 1""",
+            (article_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return f"/api/articles/{article_id}/assets/{row['cover_asset_id']}"
+
     # ── Article assembly ─────────────────────────────────────────────────────
 
     def _load_article(self, row: sqlite3.Row) -> dict:
@@ -468,6 +386,8 @@ class SQLiteStore:
                 row["source_platform"],
             "canonical_url":
                 row["canonical_url"],
+            "preview_image_url":
+                self._local_preview_image_url(aid),
             "created_at":
                 _dt(row["created_at"]),
             "updated_at":
@@ -568,70 +488,295 @@ class SQLiteStore:
         source_platform: str | None = None,
         canonical_url: str | None = None,
     ) -> dict:
-        article_id = f"art_{uuid.uuid4().hex[:8]}"
-        now_s = _ts(_now())
-        body = _seed_body(title)
-        body_path = self._write_body(article_id, body)
-        self._con.execute(
-            """INSERT INTO articles
-               (id, title, body, body_path, word_count, gate, source, source_platform,
-                canonical_url, created_at, updated_at, user_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (article_id, title, "", body_path, len(title.split()) + 11, "pending", source,
-             source_platform, canonical_url, now_s, now_s, user_id),
-        )
-        for p in _PLATFORMS:
+        with self._workspace_lock.acquire():
+            article_id = f"art_{uuid.uuid4().hex[:8]}"
+            now_s = _ts(_now())
+            body = _seed_body(title)
+            body_path = self._write_body(article_id, body)
             self._con.execute(
-                "INSERT INTO article_destinations (article_id, platform, status, label) VALUES (?,?,?,?)",
-                (article_id, p, "none", "—"),
+                """INSERT INTO articles
+                   (id, title, body, body_path, word_count, gate, source, source_platform,
+                    canonical_url, created_at, updated_at, user_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (article_id, title, "", body_path, len(title.split()) + 11, "pending",
+                 source, source_platform, canonical_url, now_s, now_s, user_id),
             )
-        self._con.execute(
-            "INSERT INTO article_timeline (article_id, timestamp, event) VALUES (?,?,?)",
-            (article_id, now_s, "Article created"),
-        )
-        self._con.commit()
-        return self.get_article(user_id, article_id)  # type: ignore[return-value]
+            for p in _PLATFORMS:
+                self._con.execute(
+                    "INSERT INTO article_destinations "
+                    "(article_id, platform, status, label) VALUES (?,?,?,?)",
+                    (article_id, p, "none", "—"),
+                )
+            self._con.execute(
+                "INSERT INTO article_timeline "
+                "(article_id, timestamp, event) VALUES (?,?,?)",
+                (article_id, now_s, "Article created"),
+            )
+            self._insert_article_revision(
+                article_id,
+                1,
+                title,
+                body,
+                source="user",
+                description="Article created",
+                created_by=user_id,
+                created_at=now_s,
+            )
+            self._con.commit()
+            return self.get_article(user_id, article_id)  # type: ignore[return-value]
+
+    def create_imported_article(
+        self,
+        user_id: str,
+        title: str,
+        body: str,
+        source_platform: str,
+        canonical_url: str | None = None,
+        remote_updated_at: str | None = None,
+    ) -> dict:
+        with self._workspace_lock.acquire():
+            article_id = f"art_{uuid.uuid4().hex[:8]}"
+            timestamp = remote_updated_at or _ts(_now())
+            body_path = self._write_body(article_id, body)
+            self._con.execute(
+                """INSERT INTO articles
+                   (id, title, body, body_path, word_count, gate, source, source_platform,
+                    canonical_url, created_at, updated_at, user_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    article_id,
+                    title,
+                    "",
+                    body_path,
+                    len(body.split()),
+                    "pending",
+                    "remote",
+                    source_platform,
+                    canonical_url,
+                    timestamp,
+                    timestamp,
+                    user_id,
+                ),
+            )
+            for platform in _PLATFORMS:
+                self._con.execute(
+                    "INSERT INTO article_destinations "
+                    "(article_id, platform, status, label) VALUES (?,?,?,?)",
+                    (article_id, platform, "none", "—"),
+                )
+            self._add_timeline(article_id, f"Imported from {source_platform.title()}")
+            self._insert_article_revision(
+                article_id,
+                1,
+                title,
+                body,
+                source="remote-sync",
+                description=f"Imported from {source_platform.title()}",
+                created_by=user_id,
+                created_at=timestamp,
+            )
+            self._con.commit()
+            return self.get_article(user_id, article_id)  # type: ignore[return-value]
+
+    def get_or_create_remote_article(
+        self,
+        user_id: str,
+        platform: str,
+        remote_id: str,
+        *,
+        title: str,
+        body: str,
+        canonical_url: str | None = None,
+        remote_updated_at: str | None = None,
+    ) -> tuple[dict, bool]:
+        """Fetch the local article mapped to (platform, remote_id), creating both
+        the article and its identity mapping if no mapping exists yet.
+
+        The identity lookup, article creation, and identity insert all happen
+        inside a single workspace-lock acquisition so that two concurrent sync
+        calls for the same remote article cannot each create a separate local
+        article (see PR #69 review: the previous two-step
+        get_remote_article_identity + create_imported_article sequence left a
+        check-then-act race window between separate lock acquisitions).
+        """
+        platform = platform.strip().lower()
+        remote_id = remote_id.strip()
+        with self._workspace_lock.acquire():
+            existing = self._con.execute(
+                """SELECT article_id FROM remote_article_identities
+                   WHERE user_id=? AND platform=? AND remote_id=?""",
+                (user_id, platform, remote_id),
+            ).fetchone()
+            if existing is not None:
+                article = self.get_article(user_id, existing["article_id"])
+                if article is not None:
+                    return article, False
+
+            article_id = f"art_{uuid.uuid4().hex[:8]}"
+            timestamp = remote_updated_at or _ts(_now())
+            body_path = self._write_body(article_id, body)
+            self._con.execute(
+                """INSERT INTO articles
+                   (id, title, body, body_path, word_count, gate, source, source_platform,
+                    canonical_url, created_at, updated_at, user_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    article_id,
+                    title,
+                    "",
+                    body_path,
+                    len(body.split()),
+                    "pending",
+                    "remote",
+                    platform,
+                    canonical_url,
+                    timestamp,
+                    timestamp,
+                    user_id,
+                ),
+            )
+            for dest_platform in _PLATFORMS:
+                self._con.execute(
+                    "INSERT INTO article_destinations "
+                    "(article_id, platform, status, label) VALUES (?,?,?,?)",
+                    (article_id, dest_platform, "none", "—"),
+                )
+            self._add_timeline(article_id, f"Imported from {platform.title()}")
+            self._insert_article_revision(
+                article_id,
+                1,
+                title,
+                body,
+                source="remote-sync",
+                description=f"Imported from {platform.title()}",
+                created_by=user_id,
+                created_at=timestamp,
+            )
+            now = _ts(_now())
+            self._con.execute(
+                """INSERT INTO remote_article_identities
+                   (user_id, platform, remote_id, article_id, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?)""",
+                (user_id, platform, remote_id, article_id, now, now),
+            )
+            self._con.commit()
+            return self.get_article(user_id, article_id), True  # type: ignore[return-value]
+
+    def sync_remote_article_metadata(
+        self,
+        user_id: str,
+        article_id: str,
+        *,
+        platform: str,
+        status: str,
+        url: str | None,
+        remote_id: str,
+        canonical_url: str | None,
+        remote_updated_at: str | None,
+    ) -> bool:
+        label = "Published" if status == "published" else "Draft"
+        draft_id = remote_id if status == "draft" else None
+        with self._workspace_lock.acquire():
+            article = self._con.execute(
+                "SELECT * FROM articles WHERE id=? AND user_id=?",
+                (article_id, user_id),
+            ).fetchone()
+            if article is None:
+                raise KeyError(article_id)
+            destination = self._con.execute(
+                """SELECT status, label, url, draft_id FROM article_destinations
+                   WHERE article_id=? AND platform=?""",
+                (article_id, platform),
+            ).fetchone()
+            article_changed = (
+                article["canonical_url"] != canonical_url
+                or article["source"] != "remote"
+                or article["source_platform"] != platform
+            )
+            destination_changed = destination is None or any((
+                destination["status"] != status,
+                destination["label"] != label,
+                destination["url"] != url,
+                destination["draft_id"] != draft_id,
+            ))
+            timestamp = remote_updated_at or article["updated_at"]
+            with self._con:
+                self._con.execute(
+                    """UPDATE articles
+                       SET canonical_url=?, source='remote', source_platform=?, updated_at=?
+                       WHERE id=? AND user_id=?""",
+                    (canonical_url, platform, timestamp, article_id, user_id),
+                )
+                self._con.execute(
+                    """INSERT INTO article_destinations
+                       (article_id, platform, status, label, url, draft_id, error)
+                       VALUES (?,?,?,?,?,?,NULL)
+                       ON CONFLICT(article_id, platform) DO UPDATE SET
+                         status=excluded.status,
+                         label=excluded.label,
+                         url=excluded.url,
+                         draft_id=excluded.draft_id,
+                         error=NULL""",
+                    (article_id, platform, status, label, url, draft_id),
+                )
+                if destination_changed:
+                    self._add_timeline(
+                        article_id,
+                        f"{platform.title()} remote status synchronized ({label})",
+                    )
+            return article_changed or destination_changed
 
     def update_article_body(self,
                             user_id: str,
                             article_id: str,
                             body: str,
                             event: str = "Article generated by AI") -> None:
-        word_count = len(body.split())
-        body_path = self._write_body(article_id, body)
-        self._con.execute(
-            "UPDATE articles SET body='', body_path=?, word_count=?, updated_at=? WHERE id=? AND user_id=?",
-            (body_path, word_count, _ts(_now()), article_id, user_id),
+        lowered = event.lower()
+        source = "agent" if "ai" in lowered else "import" if (
+            "import" in lowered or "upload" in lowered
+        ) else "user"
+        self.save_article_revision(
+            user_id,
+            article_id,
+            content=body,
+            source=source,
+            description=event,
         )
-        self._add_timeline(article_id, event)
-        self._con.commit()
 
     def update_article_title(self, user_id: str, article_id: str, title: str) -> None:
-        self._con.execute(
-            "UPDATE articles SET title=?, updated_at=? WHERE id=? AND user_id=?",
-            (title, _ts(_now()), article_id, user_id),
+        self.save_article_revision(
+            user_id,
+            article_id,
+            title=title,
+            source="user",
+            description="Article title updated",
         )
-        self._con.commit()
 
     def delete_articles(self, user_id: str, ids: list[str], force: bool = False) -> list[str]:
-        blocked = []
-        for aid in ids:
-            row = self._con.execute("SELECT id FROM articles WHERE id=? AND user_id=?", (aid, user_id)).fetchone()
-            if row is None:
-                continue
-            is_published = self._con.execute(
-                "SELECT 1 FROM article_destinations WHERE article_id=? AND status='published'",
-                (aid,),
-            ).fetchone() is not None
-            if is_published and not force:
-                blocked.append(aid)
-            else:
-                self._con.execute("DELETE FROM articles WHERE id=? AND user_id=?", (aid, user_id))
-                blob_dir = self._blobs_dir / "articles" / aid
-                if blob_dir.exists():
-                    shutil.rmtree(blob_dir)
-        self._con.commit()
-        return blocked
+        with self._workspace_lock.acquire():
+            blocked = []
+            for aid in ids:
+                row = self._con.execute(
+                    "SELECT id FROM articles WHERE id=? AND user_id=?", (aid, user_id)
+                ).fetchone()
+                if row is None:
+                    continue
+                is_published = self._con.execute(
+                    "SELECT 1 FROM article_destinations "
+                    "WHERE article_id=? AND status='published'",
+                    (aid,),
+                ).fetchone() is not None
+                if is_published and not force:
+                    blocked.append(aid)
+                else:
+                    self._con.execute(
+                        "DELETE FROM articles WHERE id=? AND user_id=?", (aid, user_id)
+                    )
+                    blob_dir = self._blobs_dir / "articles" / aid
+                    if blob_dir.exists():
+                        shutil.rmtree(blob_dir)
+            self._con.commit()
+            return blocked
 
     def find_article_by_canonical_url(self, user_id: str, canonical_url: str) -> dict | None:
         url = canonical_url.strip().lower()
@@ -688,9 +833,10 @@ class SQLiteStore:
         error: str | None = None,
         label: str | None = None,
         draft_id: str | None = None,
+        status: str | None = None,
     ) -> None:
         if success:
-            new_status = "draft"
+            new_status = status or "draft"
             new_label = label or "Draft"
             self._con.execute(
                 """UPDATE article_destinations
@@ -698,7 +844,8 @@ class SQLiteStore:
                    WHERE article_id=? AND platform=?""",
                 (new_status, new_label, url, draft_id, article_id, platform),
             )
-            self._add_timeline(article_id, f"Draft pushed to {platform.title()}")
+            event = "Published to" if new_status == "published" else "Draft pushed to"
+            self._add_timeline(article_id, f"{event} {platform.title()}")
         else:
             self._con.execute(
                 """UPDATE article_destinations
@@ -778,7 +925,6 @@ class SQLiteStore:
             "label": meta["label"],
             "type": meta["type"],
             "auth_method": meta["auth"],
-            "token": token,
             "status": status,
             "username": username,
             "connected_at": now_s,
@@ -802,7 +948,35 @@ class SQLiteStore:
                                 (conn_id, user_id)).fetchone()
         if not row or not row["token"]:
             return None
-        return decrypt_token(row["token"]) or None
+        try:
+            return decrypt_token(row["token"]) or None
+        except CredentialDecryptionError:
+            logger.warning(
+                "undecryptable credential for connection %r (user %r); treating as disconnected",
+                conn_id, user_id,
+            )
+            return None
+
+    def reencrypt_connection_credentials(self) -> int:
+        """Move plaintext, legacy, and retired-key credentials to the active key."""
+        rows = self._con.execute(
+            "SELECT platform, user_id, token FROM connections WHERE token <> ''"
+        ).fetchall()
+        replacements = []
+        for row in rows:
+            if needs_reencryption(row["token"]):
+                replacements.append((
+                    encrypt_token(decrypt_token(row["token"])),
+                    row["platform"],
+                    row["user_id"],
+                ))
+        if replacements:
+            with self._con:
+                self._con.executemany(
+                    "UPDATE connections SET token=? WHERE platform=? AND user_id IS ?",
+                    replacements,
+                )
+        return len(replacements)
 
     def count_connected(self, user_id: str) -> int:
         return sum(1 for c in self.list_connections(user_id) if c["status"] == "connected")
@@ -911,51 +1085,47 @@ class SQLiteStore:
             })
         return result
 
-    # ── Jobs ─────────────────────────────────────────────────────────────────
-
-    def create_job(self, user_id: str, job_type: str, article_id: str) -> dict:
-        job_id = f"job_{uuid.uuid4().hex[:8]}"
-        now_s = _ts(_now())
-        self._con.execute(
-            "INSERT INTO jobs (job_id, kind, article_id, status, created_at, user_id) VALUES (?,?,?,?,?,?)",
-            (job_id, job_type, article_id, "running", now_s, user_id),
-        )
-        self._con.commit()
-        return {
-            "job_id": job_id,
-            "type": job_type,
-            "status": "running",
-            "article_id": article_id,
-            "result": None,
-            "error": None
-        }
-
-    def get_job(self, user_id: str, job_id: str) -> dict | None:
-        row = self._con.execute("SELECT * FROM jobs WHERE job_id=? AND user_id=?", (job_id, user_id)).fetchone()
-        if row is None:
-            return None
-        return {
-            "job_id": row["job_id"],
-            "type": row["kind"],
-            "status": row["status"],
-            "article_id": row["article_id"],
-            "result": json.loads(row["result"]) if row["result"] else None,
-            "error": row["error"],
-        }
-
-    def complete_job(self,
-                     user_id: str,
-                     job_id: str,
-                     result: dict | None = None,
-                     error: str | None = None) -> None:
-        status = "error" if error else "done"
-        self._con.execute(
-            "UPDATE jobs SET status=?, result=?, error=?, completed_at=? WHERE job_id=? AND user_id=?",
-            (status, json.dumps(result) if result else None, error, _ts(_now()), job_id, user_id),
-        )
-        self._con.commit()
-
     # ── Lifecycle ────────────────────────────────────────────────────────────
+
+    @property
+    def schema_version(self) -> int:
+        return self._con.execute("PRAGMA user_version").fetchone()[0]
+
+    def create_backup(
+        self,
+        backup_dir: str | None = None,
+        *,
+        retain: int = 14,
+    ) -> Path:
+        if self._db_path == ":memory:":
+            raise BackupError("File backups are not available for an in-memory database")
+        destination = backup_dir or str(Path(self._db_path).resolve().parent / "backups")
+        with self._workspace_lock.acquire():
+            return create_verified_backup(
+                self._con, self._blobs_dir, destination, retain=retain
+            )
+
+    def create_backup_if_due(
+        self,
+        interval: timedelta,
+        backup_dir: str | None = None,
+        *,
+        retain: int = 14,
+    ) -> Path | None:
+        if self._db_path == ":memory:":
+            raise BackupError("File backups are not available for an in-memory database")
+        destination = backup_dir or str(Path(self._db_path).resolve().parent / "backups")
+        with self._workspace_lock.acquire():
+            return create_verified_backup_if_due(
+                self._con,
+                self._blobs_dir,
+                destination,
+                interval=interval,
+                retain=retain,
+            )
+
+    def close(self) -> None:
+        self._con.close()
 
     def store_asset(
         self,
@@ -966,47 +1136,109 @@ class SQLiteStore:
         mime_type: str | None = None,
     ) -> str:
         """Write binary asset to disk and record in article_assets. Returns asset_path."""
-        row = self._con.execute("SELECT id FROM articles WHERE id=? AND user_id=?",
-                                (article_id, user_id)).fetchone()
-        if row is None:
-            raise KeyError(f"Article {article_id} not found for user")
-        assets_dir = self._blobs_dir / "articles" / article_id / "assets"
-        assets_dir.mkdir(parents=True, exist_ok=True)
-        dest = assets_dir / filename
-        dest.write_bytes(data)
-        rel = str(dest.relative_to(self._blobs_dir))
-        now_s = _ts(_now())
-        self._con.execute(
-            """INSERT INTO article_assets (article_id, filename, asset_path, mime_type, created_at)
-               VALUES (?,?,?,?,?)
-               ON CONFLICT(article_id, filename) DO UPDATE SET
-               asset_path=excluded.asset_path, mime_type=excluded.mime_type""",
-            (article_id, filename, rel, mime_type, now_s),
-        )
-        self._con.commit()
-        return rel
+        with self._workspace_lock.acquire():
+            row = self._con.execute(
+                "SELECT id FROM articles WHERE id=? AND user_id=?",
+                (article_id, user_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"Article {article_id} not found for user")
+            assets_dir = self._blobs_dir / "articles" / article_id / "assets"
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            dest = assets_dir / filename
+            dest.write_bytes(data)
+            rel = str(dest.relative_to(self._blobs_dir))
+            now_s = _ts(_now())
+            self._con.execute(
+                """INSERT INTO article_assets
+                   (article_id, filename, asset_path, mime_type, created_at)
+                   VALUES (?,?,?,?,?)
+                   ON CONFLICT(article_id, filename) DO UPDATE SET
+                   asset_path=excluded.asset_path, mime_type=excluded.mime_type""",
+                (article_id, filename, rel, mime_type, now_s),
+            )
+            self._con.commit()
+            return rel
+
+    def read_article_asset(
+        self, user_id: str, article_id: str, asset_id: int,
+    ) -> dict | None:
+        """Read a registered asset without exposing its filesystem location."""
+        with self._workspace_lock.acquire():
+            row = self._con.execute(
+                """SELECT aa.id, aa.filename, aa.asset_path, aa.mime_type
+                   FROM article_assets aa
+                   JOIN articles a ON a.id=aa.article_id
+                   WHERE aa.id=? AND aa.article_id=? AND a.user_id=?""",
+                (asset_id, article_id, user_id),
+            ).fetchone()
+            if row is None:
+                return None
+
+            assets_root = (
+                self._blobs_dir / "articles" / article_id / "assets"
+            ).resolve()
+            candidate = (self._blobs_dir / row["asset_path"]).resolve()
+            try:
+                candidate.relative_to(assets_root)
+            except ValueError:
+                return None
+            try:
+                if not candidate.is_file():
+                    return None
+                data = candidate.read_bytes()
+            except OSError:
+                return None
+            return {
+                "id": row["id"],
+                "filename": row["filename"],
+                "mime_type": row["mime_type"],
+                "data": data,
+            }
+
+    def get_article_asset_by_filename(
+        self, user_id: str, article_id: str, filename: str,
+    ) -> dict | None:
+        row = self._con.execute(
+            """SELECT aa.id, aa.filename, aa.mime_type
+               FROM article_assets aa
+               JOIN articles a ON a.id=aa.article_id
+               WHERE aa.article_id=? AND aa.filename=? AND a.user_id=?""",
+            (article_id, filename, user_id),
+        ).fetchone()
+        return dict(row) if row else None
 
     def reset(self) -> None:
         """Drop all data and re-seed. Used by the /api/dev/reset endpoint in tests."""
-        self._con.executescript("""
-            DELETE FROM article_chat_log;
-            DELETE FROM article_patches;
-            DELETE FROM article_comments;
-            DELETE FROM article_timeline;
-            DELETE FROM article_destinations;
-            DELETE FROM article_assets;
-            DELETE FROM articles;
-            DELETE FROM jobs;
-            DELETE FROM connections;
-            DELETE FROM sessions;
-            DELETE FROM users;
-        """)
-        self._con.commit()
-        articles_blobs = self._blobs_dir / "articles"
-        if articles_blobs.exists():
-            shutil.rmtree(articles_blobs)
-        self._seed_if_empty()
-        self._oauth_pending.clear()
+        with self._workspace_lock.acquire():
+            self._con.executescript("""
+                DELETE FROM article_chat_log;
+                DELETE FROM agent_sessions;
+                DELETE FROM browser_publish_runs;
+                DELETE FROM browser_connections;
+                DELETE FROM article_patch_revisions;
+                DELETE FROM article_patches;
+                DELETE FROM article_comments;
+                DELETE FROM article_timeline;
+                DELETE FROM article_revisions;
+                DELETE FROM article_destinations;
+                DELETE FROM remote_article_identities;
+                DELETE FROM article_assets;
+                DELETE FROM articles;
+                DELETE FROM jobs;
+                DELETE FROM connections;
+                DELETE FROM connection_auth_flows;
+                DELETE FROM sessions;
+                DELETE FROM users;
+            """)
+            self._con.commit()
+            articles_blobs = self._blobs_dir / "articles"
+            if articles_blobs.exists():
+                shutil.rmtree(articles_blobs)
+            self._seed_if_empty()
+            self._ensure_initial_article_revisions()
+            self._ensure_patch_revision_links()
+            self._oauth_pending.clear()
 
     # ── Comments ─────────────────────────────────────────────────────────────
 
@@ -1095,11 +1327,44 @@ class SQLiteStore:
 
     def list_patches(self, user_id: str, article_id: str) -> list[dict]:
         rows = self._con.execute(
-            "SELECT p.* FROM article_patches p JOIN articles a ON p.article_id = a.id "
+            "SELECT p.*, pr.base_revision_id, ao.session_id AS agent_session_id "
+            "FROM article_patches p "
+            "LEFT JOIN article_patch_revisions pr ON pr.patch_id=p.id "
+            "LEFT JOIN agent_session_outputs ao "
+            "ON ao.reference=p.id AND ao.kind='article_patch' "
+            "JOIN articles a ON p.article_id = a.id "
             "WHERE p.article_id=? AND a.user_id=? ORDER BY p.created_at ASC",
             (article_id, user_id),
         ).fetchall()
         return [self._patch_row_to_dict(r) for r in rows]
+
+    def get_patch(self, user_id: str, article_id: str, patch_id: str) -> dict | None:
+        row = self._con.execute(
+            "SELECT p.*, pr.base_revision_id, ao.session_id AS agent_session_id "
+            "FROM article_patches p "
+            "LEFT JOIN article_patch_revisions pr ON pr.patch_id=p.id "
+            "LEFT JOIN agent_session_outputs ao "
+            "ON ao.reference=p.id AND ao.kind='article_patch' "
+            "JOIN articles a ON p.article_id=a.id "
+            "WHERE p.id=? AND p.article_id=? AND a.user_id=?",
+            (patch_id, article_id, user_id),
+        ).fetchone()
+        return self._patch_row_to_dict(row) if row else None
+
+    def get_pending_agent_session_patch(
+        self, user_id: str, session_id: str
+    ) -> dict | None:
+        row = self._con.execute(
+            "SELECT p.*, pr.base_revision_id, ao.session_id AS agent_session_id "
+            "FROM agent_session_outputs ao "
+            "JOIN agent_sessions s ON s.id=ao.session_id "
+            "JOIN article_patches p ON p.id=ao.reference "
+            "JOIN article_patch_revisions pr ON pr.patch_id=p.id "
+            "WHERE ao.session_id=? AND s.user_id=? AND ao.kind='article_patch' "
+            "AND p.state='pending' ORDER BY ao.created_at DESC LIMIT 1",
+            (session_id, user_id),
+        ).fetchone()
+        return self._patch_row_to_dict(row) if row else None
 
     def add_patch(self,
                   user_id: str,
@@ -1107,7 +1372,8 @@ class SQLiteStore:
                   label: str,
                   removed: str,
                   added: str,
-                  comment_id: str | None = None) -> dict:
+                  comment_id: str | None = None,
+                  base_revision_id: str | None = None) -> dict:
         row = self._con.execute("SELECT id FROM articles WHERE id=? AND user_id=?",
                                 (article_id, user_id)).fetchone()
         if row is None:
@@ -1119,15 +1385,32 @@ class SQLiteStore:
             "VALUES (?,?,?,?,?,?,'pending',?)",
             (patch_id, article_id, comment_id, label, removed, added, now_s),
         )
+        revision = (
+            self.get_article_revision(user_id, article_id, base_revision_id)
+            if base_revision_id else self.get_current_article_revision(user_id, article_id)
+        )
+        if revision is None:
+            self._con.rollback()
+            raise KeyError(f"Revision not found for article {article_id}")
+        self._con.execute(
+            "INSERT INTO article_patch_revisions (patch_id, base_revision_id) VALUES (?,?)",
+            (patch_id, revision["id"]),
+        )
         if comment_id:
             self._con.execute("UPDATE article_comments SET has_patch=1 WHERE id=?", (comment_id,))
         self._con.commit()
         return self._patch_row_to_dict(
-            self._con.execute("SELECT * FROM article_patches WHERE id=?", (patch_id,)).fetchone())
+            self._con.execute(
+                "SELECT p.*, pr.base_revision_id FROM article_patches p "
+                "JOIN article_patch_revisions pr ON pr.patch_id=p.id WHERE p.id=?",
+                (patch_id,),
+            ).fetchone())
 
     def set_patch_state(self, user_id: str, article_id: str, patch_id: str, state: str) -> dict | None:
         row = self._con.execute(
-            "SELECT p.* FROM article_patches p JOIN articles a ON p.article_id = a.id "
+            "SELECT p.*, pr.base_revision_id FROM article_patches p "
+            "LEFT JOIN article_patch_revisions pr ON pr.patch_id=p.id "
+            "JOIN articles a ON p.article_id = a.id "
             "WHERE p.id=? AND p.article_id=? AND a.user_id=?",
             (patch_id, article_id, user_id),
         ).fetchone()
@@ -1136,14 +1419,23 @@ class SQLiteStore:
         self._con.execute("UPDATE article_patches SET state=? WHERE id=?", (state, patch_id))
         self._con.commit()
         return self._patch_row_to_dict(
-            self._con.execute("SELECT * FROM article_patches WHERE id=?", (patch_id,)).fetchone())
+            self._con.execute(
+                "SELECT p.*, pr.base_revision_id FROM article_patches p "
+                "LEFT JOIN article_patch_revisions pr ON pr.patch_id=p.id WHERE p.id=?",
+                (patch_id,),
+            ).fetchone())
 
     def delete_patches(self, user_id: str, article_id: str) -> None:
         owner = self._con.execute("SELECT id FROM articles WHERE id=? AND user_id=?",
                                   (article_id, user_id)).fetchone()
         if owner is None:
             return
-        self._con.execute("DELETE FROM article_patches WHERE article_id=?", (article_id,))
+        self._con.execute(
+            "DELETE FROM article_patches WHERE article_id=? AND NOT EXISTS ("
+            "SELECT 1 FROM agent_session_outputs ao "
+            "WHERE ao.kind='article_patch' AND ao.reference=article_patches.id)",
+            (article_id,),
+        )
         self._con.execute("UPDATE article_comments SET has_patch=0 WHERE article_id=?",
                           (article_id,))
         self._con.commit()
@@ -1159,6 +1451,10 @@ class SQLiteStore:
             "added": row["added"],
             "state": row["state"],
             "created_at": row["created_at"],
+            "base_revision_id": row["base_revision_id"],
+            "agent_session_id": (
+                row["agent_session_id"] if "agent_session_id" in row.keys() else None
+            ),
         }
 
     # ── Chat log ─────────────────────────────────────────────────────────────

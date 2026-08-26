@@ -4,9 +4,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.routers import agent, articles, comments, connections, dev, jobs, patches, platforms
+from backend.routers import agent, agent_sessions, articles, comments, connections, dev, jobs, patches, platforms, reconciliation
 from backend.routers import auth as auth_router
 from backend.middleware.auth import AuthMiddleware
+from backend.security import install_secret_redaction
+
+install_secret_redaction()
+
 import backend.store as store
 
 app = FastAPI(
@@ -30,8 +34,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
     allow_origin_regex=_origin_regex,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "Idempotency-Key"],
 )
 app.add_middleware(AuthMiddleware)
 
@@ -39,11 +43,19 @@ app.add_middleware(AuthMiddleware)
 @app.on_event("startup")
 def startup_cleanup():
     store.delete_expired_sessions()
+    store.expire_connection_auth_flows()
+    store.recover_orphaned_jobs()
+    store.recover_agent_sessions()
+    store.cleanup_agent_sessions(
+        retention_days=int(os.environ.get("BLOGHUB_AGENT_SESSION_RETENTION_DAYS", "90"))
+    )
 
 
 app.include_router(auth_router.router)
 app.include_router(agent.router)
+app.include_router(agent_sessions.router)
 app.include_router(articles.router)
+app.include_router(reconciliation.router)
 app.include_router(comments.router)
 app.include_router(patches.router)
 app.include_router(connections.router)

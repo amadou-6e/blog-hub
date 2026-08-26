@@ -1,0 +1,11 @@
+FROM public.ecr.aws/skyvern/skyvern@sha256:18defe240c49c79c749c57f7e9008b1a169aa34193b267002c7e5ee437e28887
+
+COPY patchright-requirements.txt /tmp/patchright-requirements.txt
+RUN pip install --no-cache-dir --no-deps --require-hashes \
+      -r /tmp/patchright-requirements.txt \
+    && rm /tmp/patchright-requirements.txt
+
+COPY patch_skyvern_for_patchright.py /tmp/patch_skyvern_for_patchright.py
+RUN python /tmp/patch_skyvern_for_patchright.py \
+    && rm /tmp/patch_skyvern_for_patchright.py \
+    && python -m compileall -q /app/skyvern

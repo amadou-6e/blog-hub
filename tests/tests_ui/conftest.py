@@ -114,6 +114,15 @@ def requests_session():
 @pytest.fixture
 def settings_page(page):
     """Navigate to the settings screen and return the page."""
+    response = page.request.post(
+        f"{BASE_URL}/api/auth/login",
+        data={
+            "email": "seed@example.com",
+            "password": "seed1234",
+            "remember_me": False,
+        },
+    )
+    assert response.ok
     page.goto(f"{BASE_URL}/screens/settings/v2.html")
     return page
 

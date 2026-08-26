@@ -1,0 +1,8 @@
+services:
+  skyvern:
+    image: bloghub-skyvern-patchright:1.62.1
+    build:
+      context: .
+      dockerfile: Dockerfile.patchright
+    environment:
+      CHROME_EXECUTABLE_PATH: /root/.cache/ms-playwright/chromium-1134/chrome-linux/chrome

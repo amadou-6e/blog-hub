@@ -1,0 +1,7 @@
+{
+  "title": "A fixture-backed extension article",
+  "subtitle": "Normalized input for adapter contract tests",
+  "body": "# A fixture-backed extension article\n\nBody text.",
+  "tags": ["bloghub", "extensions"],
+  "metadata": {"language": "en"}
+}

@@ -21,7 +21,9 @@ The backend never spawns CLI subprocesses directly.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
+import re
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -29,13 +31,24 @@ from pydantic import BaseModel
 from fastapi.responses import HTMLResponse
 
 import backend.services.cli_runner as runner
+import backend.services.connection_auth as agent_auth
 import backend.store as store
+from backend.services.hashnode_sync import (
+    sync_hashnode_articles,
+    sync_hashnode_browser_records,
+)
+from backend.services.medium_sync import sync_medium_browser_records
 from backend.schemas.connections import (
+    ActiveAgentAuthFlowsResponse,
+    AgentAuthCallbackRequest,
+    AgentAuthFlowResponse,
     ConnectionInfo,
     ConnectionListResponse,
     DraftContent,
     DraftListResponse,
     DraftSummary,
+    HashnodeSyncResponse,
+    MediumSyncResponse,
     OAuthStartResponse,
     SaveTokenRequest,
     SaveTokenResponse,
@@ -47,6 +60,12 @@ _VALID_IDS = {"medium", "hashnode", "devto", "anthropic", "openai"}
 _BLOG_IDS = {"medium", "hashnode", "devto"}
 _CLI_IDS = {"anthropic", "openai"}
 _PROVIDER_MAP = {"anthropic": "anthropic", "openai": "openai"}
+_BROWSER_EXTENSION_ID = re.compile(r"^[a-z][a-z0-9_.-]{1,79}$")
+
+
+def _require_browser_extension_id(platform: str) -> None:
+    if not _BROWSER_EXTENSION_ID.fullmatch(platform):
+        raise HTTPException(status_code=400, detail="Invalid browser extension id")
 
 # ── Mock draft data ───────────────────────────────────────────────────────────
 # Real implementation would call each platform's API with the stored token.
@@ -222,6 +241,71 @@ def list_connections(request: Request):
         connections=[ConnectionInfo(**c) for c in store.list_connections(user_id)])
 
 
+@router.get("/browser-extensions")
+def list_browser_extensions():
+    try:
+        return {"extensions": runner.browser_extensions()}
+    except runner.RunnerUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+# ── Provider-neutral AI agent authentication ─────────────────────────────────
+
+
+def _auth_call(operation):
+    try:
+        return operation()
+    except agent_auth.ConnectionAuthError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@router.post(
+    "/{conn_id}/auth-flows", response_model=AgentAuthFlowResponse, status_code=201,
+)
+def start_agent_auth_flow(request: Request, conn_id: str):
+    user_id: str = request.state.user_id
+    return _auth_call(lambda: agent_auth.start(store, user_id, conn_id))
+
+
+@router.get(
+    "/auth-flows/active", response_model=ActiveAgentAuthFlowsResponse,
+)
+def active_agent_auth_flows(request: Request):
+    user_id: str = request.state.user_id
+    return ActiveAgentAuthFlowsResponse(
+        flows=[
+            AgentAuthFlowResponse(**agent_auth.response_for(flow))
+            for flow in store.list_active_connection_auth_flows(user_id)
+        ]
+    )
+
+
+@router.get("/auth-flows/{flow_id}", response_model=AgentAuthFlowResponse)
+def get_agent_auth_flow(request: Request, flow_id: str):
+    user_id: str = request.state.user_id
+    return _auth_call(lambda: agent_auth.status(store, user_id, flow_id))
+
+
+@router.post(
+    "/auth-flows/{flow_id}/callback", response_model=AgentAuthFlowResponse,
+)
+def submit_agent_auth_callback(
+    request: Request, flow_id: str, body: AgentAuthCallbackRequest,
+):
+    user_id: str = request.state.user_id
+    return _auth_call(
+        lambda: agent_auth.submit_callback(
+            store, user_id, flow_id, body.callback_url
+        )
+    )
+
+
+@router.delete("/auth-flows/{flow_id}", response_model=AgentAuthFlowResponse)
+def cancel_agent_auth_flow(request: Request, flow_id: str):
+    user_id: str = request.state.user_id
+    return _auth_call(lambda: agent_auth.cancel(store, user_id, flow_id))
+
+
 # ── Save token ────────────────────────────────────────────────────────────────
 
 
@@ -262,6 +346,7 @@ def disconnect(request: Request, conn_id: str):
     user_id: str = request.state.user_id
     if conn_id not in _VALID_IDS:
         raise HTTPException(status_code=404, detail=f"Unknown connection: {conn_id}")
+    store.delete_connection_auth_flows(user_id, conn_id)
     store.delete_connection(user_id, conn_id)
     if conn_id in _CLI_IDS:
         # Best-effort: tell the runner to logout; ignore errors
@@ -422,6 +507,138 @@ def _cli_oauth_start(conn_id: str) -> OAuthStartResponse:
 
 class SubmitCodeRequest(BaseModel):
     code: str
+
+
+def _browser_connection_response(platform: str, connection: dict | None) -> dict:
+    if connection is None:
+        return {"platform": platform, "status": "disconnected"}
+    return {
+        "platform": connection["platform"],
+        "status": connection["status"],
+        "authorizationUrl": (
+            connection.get("app_url")
+            if connection["status"] == "waiting_for_login"
+            else None
+        ),
+        "verifiedAt": connection.get("verified_at"),
+        "error": connection.get("error"),
+    }
+
+
+@router.get("/hashnode/browser-connection")
+def get_hashnode_browser_connection(request: Request):
+    return get_browser_connection(request, "hashnode")
+
+
+@router.get("/{conn_id}/browser-connection")
+def get_browser_connection(request: Request, conn_id: str):
+    _require_browser_extension_id(conn_id)
+    return _browser_connection_response(
+        conn_id,
+        store.get_browser_connection(request.state.user_id, conn_id)
+    )
+
+
+@router.post("/hashnode/browser-connection", status_code=201)
+def start_hashnode_browser_connection(request: Request):
+    return start_browser_connection(request, "hashnode")
+
+
+@router.post("/{conn_id}/browser-connection", status_code=201)
+def start_browser_connection(request: Request, conn_id: str):
+    _require_browser_extension_id(conn_id)
+    previous = store.get_browser_connection(request.state.user_id, conn_id)
+    if previous and previous.get("skyvern_session_id") and previous["status"] == "waiting_for_login":
+        try:
+            runner.cancel_browser_login(conn_id, previous["skyvern_session_id"])
+        except runner.RunnerUnavailable:
+            pass
+    reusable_profile_id = previous.get("skyvern_profile_id") if previous else None
+    try:
+        session = runner.start_browser_login(conn_id, reusable_profile_id)
+    except runner.RunnerUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    connection = store.start_browser_connection(
+        request.state.user_id,
+        conn_id,
+        session_id=session["session_id"],
+        organization_id=session["organization_id"],
+        app_url=session["app_url"],
+        profile_id=reusable_profile_id,
+    )
+    return _browser_connection_response(conn_id, connection)
+
+
+@router.post("/hashnode/browser-connection/complete")
+def complete_hashnode_browser_connection(request: Request):
+    return complete_browser_connection(request, "hashnode")
+
+
+@router.post("/{conn_id}/browser-connection/complete")
+def complete_browser_connection(request: Request, conn_id: str):
+    _require_browser_extension_id(conn_id)
+    user_id = request.state.user_id
+    connection = store.get_browser_connection(user_id, conn_id)
+    if not connection or connection["status"] != "waiting_for_login":
+        raise HTTPException(status_code=409, detail=f"No {conn_id.title()} browser login is active")
+    store.update_browser_connection(user_id, conn_id, "verifying")
+    profile_name = f"bloghub-{conn_id}-" + hashlib.sha256(user_id.encode()).hexdigest()[:16]
+    try:
+        result = runner.complete_browser_login(
+            conn_id,
+            connection["skyvern_session_id"],
+            profile_name,
+            profile_id=connection.get("skyvern_profile_id"),
+            organization_id=connection.get("skyvern_organization_id"),
+        )
+    except runner.RunnerUnavailable as exc:
+        store.update_browser_connection(user_id, conn_id, "failed", error=str(exc))
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not result.get("authenticated"):
+        failed = store.update_browser_connection(
+            user_id, conn_id, "failed",
+            profile_id=result.get("profile_id"),
+            error=f"{conn_id.title()} sign-in was not completed in the browser",
+        )
+        return _browser_connection_response(conn_id, failed)
+    if result.get("organization_id") != connection["skyvern_organization_id"]:
+        if result.get("profile_id"):
+            try:
+                runner.delete_browser_profile(conn_id, result["profile_id"])
+            except runner.RunnerUnavailable:
+                pass
+        failed = store.update_browser_connection(
+            user_id, conn_id, "failed",
+            error="Browser profile ownership could not be verified",
+        )
+        return _browser_connection_response(conn_id, failed)
+    connected = store.update_browser_connection(
+        user_id, conn_id, "connected", profile_id=result["profile_id"]
+    )
+    return _browser_connection_response(conn_id, connected)
+
+
+@router.delete("/hashnode/browser-connection")
+def disconnect_hashnode_browser_connection(request: Request):
+    return disconnect_browser_connection(request, "hashnode")
+
+
+@router.delete("/{conn_id}/browser-connection")
+def disconnect_browser_connection(request: Request, conn_id: str):
+    _require_browser_extension_id(conn_id)
+    connection = store.get_browser_connection(request.state.user_id, conn_id)
+    if connection and connection.get("skyvern_session_id") and connection["status"] == "waiting_for_login":
+        try:
+            runner.cancel_browser_login(conn_id, connection["skyvern_session_id"])
+        except runner.RunnerUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if connection and connection.get("skyvern_profile_id"):
+        try:
+            runner.delete_browser_profile(conn_id, connection["skyvern_profile_id"])
+        except runner.RunnerUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+    store.delete_browser_connection(request.state.user_id, conn_id)
+    return {"platform": conn_id, "status": "disconnected"}
 
 
 @router.post("/{conn_id}/submit-code")
@@ -641,6 +858,64 @@ def _fetch_devto_article_body(token: str, article_id: str) -> str:
 # ── Draft list ───────────────────────────────────────────────────────────────
 
 
+@router.post("/hashnode/sync", response_model=HashnodeSyncResponse)
+def sync_hashnode(request: Request):
+    """Import Hashnode through browser login for non-Pro or PAT for Pro."""
+    user_id: str = request.state.user_id
+    browser_connection = store.get_browser_connection(user_id, "hashnode")
+    if browser_connection and browser_connection["status"] == "connected":
+        try:
+            retrieval = runner.hashnode_browser_articles(
+                organization_id=browser_connection["skyvern_organization_id"],
+                profile_id=browser_connection["skyvern_profile_id"],
+            )
+        except runner.RunnerUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return sync_hashnode_browser_records(user_id, retrieval)
+
+    token = store.get_connection_token(user_id, "hashnode") or os.environ.get("HASHNODE_PAT")
+    if not token:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "hashnode_connection_required",
+                "message": "Connect Hashnode with browser login or a Pro API token",
+            },
+        )
+    if token == "cli_session":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "hashnode_browser_profile_required",
+                "message": "Reconnect Hashnode browser login to restore its profile",
+            },
+        )
+    return sync_hashnode_articles(user_id, token)
+
+
+@router.post("/medium/sync", response_model=MediumSyncResponse)
+def sync_medium(request: Request):
+    """Import Medium stories through the connected browser profile."""
+    user_id: str = request.state.user_id
+    browser_connection = store.get_browser_connection(user_id, "medium")
+    if not browser_connection or browser_connection["status"] != "connected":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "medium_browser_connection_required",
+                "message": "Connect Medium with browser login before synchronizing",
+            },
+        )
+    try:
+        retrieval = runner.medium_browser_articles(
+            organization_id=browser_connection["skyvern_organization_id"],
+            profile_id=browser_connection["skyvern_profile_id"],
+        )
+    except runner.RunnerUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return sync_medium_browser_records(user_id, retrieval)
+
+
 @router.get("/{conn_id}/drafts", response_model=DraftListResponse)
 def list_drafts(
     request: Request,
@@ -661,7 +936,14 @@ def list_drafts(
         raise HTTPException(status_code=404, detail=f"Unknown platform: {conn_id}")
 
     token = store.get_connection_token(user_id, conn_id)
-    if not token:
+    browser_connection = (
+        store.get_browser_connection(user_id, "medium")
+        if conn_id == "medium" else None
+    )
+    has_medium_browser = bool(
+        browser_connection and browser_connection["status"] == "connected"
+    )
+    if not token and not has_medium_browser:
         raise HTTPException(
             status_code=404,
             detail={
@@ -676,8 +958,14 @@ def list_drafts(
         elif conn_id == "devto":
             all_drafts = _fetch_devto_drafts(token)
         else:
-            # Medium: API does not support draft listing; use mock data
-            all_drafts = _MOCK_DRAFTS.get(conn_id, [])
+            if has_medium_browser:
+                all_drafts = runner.list_medium_browser_articles(
+                    organization_id=browser_connection["skyvern_organization_id"],
+                    profile_id=browser_connection["skyvern_profile_id"],
+                    limit=100,
+                )
+            else:
+                all_drafts = _MOCK_DRAFTS.get(conn_id, [])
     except HTTPException:
         raise
     except httpx.HTTPStatusError as exc:
@@ -721,7 +1009,14 @@ def get_draft(request: Request, conn_id: str, draft_id: str):
         raise HTTPException(status_code=404, detail=f"Unknown platform: {conn_id}")
 
     token = store.get_connection_token(user_id, conn_id)
-    if not token:
+    browser_connection = (
+        store.get_browser_connection(user_id, "medium")
+        if conn_id == "medium" else None
+    )
+    has_medium_browser = bool(
+        browser_connection and browser_connection["status"] == "connected"
+    )
+    if not token and not has_medium_browser:
         raise HTTPException(
             status_code=404,
             detail={
@@ -747,7 +1042,13 @@ def get_draft(request: Request, conn_id: str, draft_id: str):
             return DraftContent(**draft)
 
         else:
-            # Medium: use mock data
+            if has_medium_browser:
+                article = runner.get_medium_browser_article(
+                    draft_id,
+                    organization_id=browser_connection["skyvern_organization_id"],
+                    profile_id=browser_connection["skyvern_profile_id"],
+                )
+                return DraftContent(**article)
             drafts = _MOCK_DRAFTS.get(conn_id, [])
             draft = next((d for d in drafts if d["id"] == draft_id), None)
             if draft is None:

@@ -33,8 +33,8 @@ export type ConnectionType = 'platform' | 'ai';
  *               OpenAI internally; user visits the URL and enters the code
  *               shown in the UI. No paste-back step needed.
  *
- * oauth_popup   Standard Authorization Code popup (Medium). Backend exchanges
- *               the code server-side; callback page sends postMessage.
+ * oauth_popup   Legacy Authorization Code popup. Backend exchanges the code
+ *               server-side; callback page sends postMessage.
  */
 export type OAuthFlow = 'cli_browser' | 'device_code' | 'oauth_popup';
 
@@ -130,7 +130,9 @@ export interface SubmitCodeRequest {
  * GET  /api/connections/{id}/oauth-start         → OAuthStartResponse
  * POST /api/connections/{id}/submit-code         → { status: "submitted" }
  * GET  /api/connections/{id}/cli-login-status    → CliLoginStatus
- * GET  /api/connections/{id}/oauth-callback      (Medium only — server-side callback)
+ * GET  /api/connections/{id}/browser-connection  → browser profile status
+ * POST /api/connections/{id}/browser-connection  → start Skyvern browser login
+ * POST /api/connections/{id}/browser-connection/complete → verify closed login tab
  *
  * CLI runner (port 8001, not called directly by the UI):
  * POST /auth/{provider}/login                    → LoginResponse (includes device_code)

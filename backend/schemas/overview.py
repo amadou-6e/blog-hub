@@ -53,12 +53,20 @@ class JobType(str, Enum):
     inspect = "inspect"
     push = "push"
     generate = "generate"
+    regenerate = "regenerate"
+    sync = "sync"
+    chat_turn = "chat_turn"
+    browser_publish = "browser_publish"
 
 
 class JobStatus(str, Enum):
+    queued = "queued"
     running = "running"
-    done = "done"
-    error = "error"
+    waiting = "waiting"
+    completed = "completed"
+    failed = "failed"
+    canceled = "canceled"
+    expired = "expired"
 
 
 # ─── Read models (backend → UI) ───────────────────────────────────────────────
@@ -149,6 +157,17 @@ class JobResponse(BaseModel):
     article_id: str = Field(alias="articleId")
     result: Optional[dict] = None
     error: Optional[str] = None
+    queue: str = "default"
+    priority: int = 0
+    attempt_count: int = Field(default=0, alias="attemptCount")
+    max_attempts: int = Field(default=3, alias="maxAttempts")
+    available_at: Optional[datetime] = Field(default=None, alias="availableAt")
+    heartbeat_at: Optional[datetime] = Field(default=None, alias="heartbeatAt")
+    lease_expires_at: Optional[datetime] = Field(default=None, alias="leaseExpiresAt")
+    created_at: Optional[datetime] = Field(default=None, alias="createdAt")
+    updated_at: Optional[datetime] = Field(default=None, alias="updatedAt")
+    completed_at: Optional[datetime] = Field(default=None, alias="completedAt")
+    checkpoint: Optional[dict] = None
 
     model_config = {"populate_by_name": True}
 
