@@ -1,14 +1,18 @@
 """Medium browser-profile checks for persistent Skyvern sessions."""
 from __future__ import annotations
 
+from html import unescape
 import json
 from pathlib import Path
 import re
 import sqlite3
 import time
 
+from markdown_it import MarkdownIt
+
 
 _CHROMIUM_EPOCH_OFFSET_SECONDS = 11_644_473_600
+_EDITOR_URL = "https://medium.com/new-story"
 _DRAFTS_URL = "https://medium.com/me/stories/drafts"
 _PUBLISHED_URL = "https://medium.com/me/stories/public"
 _ARTICLE_ID_RE = re.compile(r"[A-Za-z0-9_-]{6,64}")
@@ -21,6 +25,167 @@ class MediumBrowserError(RuntimeError):
 def _is_login_url(url: str) -> bool:
     lowered = url.lower()
     return any(part in lowered for part in ("/signin", "/m/signin", "/login"))
+
+
+def _story_id(url: str) -> str | None:
+    match = re.search(r"/p/([A-Za-z0-9_-]{6,64})/edit", url)
+    return match.group(1) if match else None
+
+
+def _article_html(article_md: str, title: str) -> str:
+    body = article_md.lstrip()
+    heading = re.match(r"^#\s+(.+?)(?:\n+|$)", body)
+    if heading and heading.group(1).strip() == title.strip():
+        body = body[heading.end():]
+    return MarkdownIt("commonmark", {"html": False, "linkify": False}).enable(
+        "table"
+    ).render(body)
+
+
+def _first_visible(page, selectors: tuple[str, ...]):
+    for selector in selectors:
+        candidate = page.locator(selector).first
+        try:
+            if candidate.is_visible(timeout=1_500):
+                return candidate
+        except Exception:
+            continue
+    return None
+
+
+def _paste_html(page, article_html: str) -> None:
+    staging = page.context.new_page()
+    try:
+        staging.set_content(f"<!doctype html><html><body>{article_html}</body></html>")
+        staging.locator("body").click()
+        staging.keyboard.press("Control+A")
+        staging.keyboard.press("Control+C")
+    finally:
+        staging.close()
+    page.bring_to_front()
+    page.keyboard.press("Control+V")
+
+
+def _replace_editor_content(page, *, title: str, article_html: str) -> None:
+    page.wait_for_selector('[contenteditable="true"]', timeout=30_000)
+    title_control = _first_visible(
+        page,
+        (
+            'h1[data-testid="storyTitle"]',
+            '[data-placeholder="Title"]',
+            '[placeholder*="Title"]',
+            'h1[contenteditable="true"]',
+            '[contenteditable="true"]',
+        ),
+    )
+    if title_control is None:
+        raise MediumBrowserError("Medium title editor was not found")
+
+    editables = page.locator('[contenteditable="true"]')
+    title_control.click()
+    page.keyboard.press("Control+A")
+    page.keyboard.insert_text(title)
+    if editables.count() > 1:
+        editables.last.click()
+        page.keyboard.press("Control+A")
+        page.keyboard.press("Backspace")
+    else:
+        page.keyboard.press("End")
+        page.keyboard.press("Enter")
+        page.keyboard.press("Enter")
+    _paste_html(page, article_html)
+
+
+def _text_tokens(value: str) -> list[str]:
+    return re.findall(r"[\w']+", unescape(re.sub(r"<[^>]+>", " ", value)).lower())
+
+
+def _verify_article(
+    *, page, remote_id: str, title: str, article_html: str,
+    expected_status: str,
+) -> dict:
+    page.wait_for_timeout(4_000)
+    article = get_medium_article(page=page, article_id=remote_id)["article"]
+    expected_tokens = _text_tokens(article_html)[:12]
+    actual_tokens = set(_text_tokens(str(article.get("body") or "")))
+    body_matches = not expected_tokens or all(
+        token in actual_tokens for token in expected_tokens
+    )
+    if article.get("title") != title or not body_matches:
+        raise MediumBrowserError("Medium article autosave could not be verified")
+    if expected_status == "published" and article.get("status") != "published":
+        raise MediumBrowserError("Medium public publish could not be verified")
+    return article
+
+
+def write_medium_article(
+    *, page, title: str, article_md: str, remote_id: str | None = None,
+    publish: bool = False,
+) -> dict:
+    """Create or update a Medium story and verify the resulting remote state."""
+    if remote_id and not _ARTICLE_ID_RE.fullmatch(remote_id):
+        raise ValueError("Invalid Medium article id")
+    target_url = (
+        f"https://medium.com/p/{remote_id}/edit" if remote_id else _EDITOR_URL
+    )
+    page.goto(target_url, wait_until="domcontentloaded", timeout=60_000)
+    if _is_login_url(page.url):
+        return {
+            "success": False,
+            "error": "Medium browser session is not authenticated",
+            "manual_handoff": {
+                "reason": "medium_login_required",
+                "url": "https://medium.com/m/signin",
+            },
+        }
+
+    html = _article_html(article_md, title)
+    _replace_editor_content(page, title=title, article_html=html)
+    deadline = time.monotonic() + 25
+    while remote_id is None and time.monotonic() < deadline:
+        remote_id = _story_id(page.url)
+        if remote_id is None:
+            page.wait_for_timeout(500)
+    if remote_id is None:
+        raise MediumBrowserError("Medium draft autosave did not return an article id")
+
+    status = "draft"
+    article = _verify_article(
+        page=page, remote_id=remote_id, title=title,
+        article_html=html, expected_status=status,
+    )
+    if publish:
+        publish_button = page.get_by_role(
+            "button", name=re.compile(r"^Publish$", re.I)
+        ).first
+        if not publish_button.is_visible(timeout=5_000):
+            publish_button = page.locator('[data-action*="publish"]').first
+        if not publish_button.is_visible(timeout=5_000):
+            raise MediumBrowserError("Medium publish action was not found")
+        publish_button.click()
+        page.wait_for_timeout(1_000)
+        confirmation = page.get_by_role(
+            "button", name=re.compile(r"^Publish", re.I)
+        ).last
+        if not confirmation.is_visible(timeout=10_000):
+            raise MediumBrowserError("Medium publish confirmation was not found")
+        confirmation.click()
+        article = _verify_article(
+            page=page, remote_id=remote_id, title=title,
+            article_html=html, expected_status="published",
+        )
+        status = "published"
+
+    return {
+        "success": True,
+        "method": "deterministic",
+        "status": status,
+        "remote_id": remote_id,
+        "draft_id": remote_id,
+        "url": article.get("canonical_url")
+        or f"https://medium.com/p/{remote_id}/edit",
+        "article": article,
+    }
 
 
 def _list_source(page, *, status: str, url: str, limit: int) -> list[dict]:

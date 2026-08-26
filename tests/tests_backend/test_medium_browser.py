@@ -219,3 +219,164 @@ def test_detail_rejects_invalid_remote_id_before_navigation():
         medium_browser.get_medium_article(page=page, article_id="../cookie")
 
     assert page.url == "about:blank"
+
+
+class _WritePage:
+    def __init__(self, *, login=False):
+        self.url = "about:blank"
+        self.login = login
+        self.waits = []
+
+    def goto(self, url, **_kwargs):
+        self.url = "https://medium.com/m/signin" if self.login else url
+
+    def wait_for_timeout(self, timeout):
+        self.waits.append(timeout)
+
+
+class _Button:
+    def __init__(self):
+        self.clicks = 0
+
+    @property
+    def first(self):
+        return self
+
+    @property
+    def last(self):
+        return self
+
+    def is_visible(self, **_kwargs):
+        return True
+
+    def click(self):
+        self.clicks += 1
+
+
+class _PublishingPage(_WritePage):
+    def __init__(self):
+        super().__init__()
+        self.publish = _Button()
+        self.confirm = _Button()
+        self.role_calls = 0
+
+    def get_by_role(self, *_args, **_kwargs):
+        self.role_calls += 1
+        return self.publish if self.role_calls == 1 else self.confirm
+
+
+def test_article_html_removes_matching_leading_title_and_renders_images():
+    rendered = medium_browser._article_html(
+        "# A Medium story\n\nBody copy.\n\n![Diagram](https://cdn.example/diagram.png)",
+        "A Medium story",
+    )
+
+    assert "<h1>" not in rendered
+    assert "<p>Body copy.</p>" in rendered
+    assert '<img src="https://cdn.example/diagram.png" alt="Diagram"' in rendered
+
+
+def test_create_draft_pastes_content_and_verifies_remote_article(monkeypatch):
+    page = _WritePage()
+    seen = {}
+
+    def replace(target, **kwargs):
+        seen.update(kwargs)
+        target.url = "https://medium.com/p/draft123abc/edit"
+
+    monkeypatch.setattr(medium_browser, "_replace_editor_content", replace)
+    monkeypatch.setattr(
+        medium_browser,
+        "_verify_article",
+        lambda **_kwargs: {
+            "title": "A Medium story",
+            "body": "Body copy.",
+            "status": "draft",
+            "canonical_url": None,
+        },
+    )
+
+    result = medium_browser.write_medium_article(
+        page=page,
+        title="A Medium story",
+        article_md="# A Medium story\n\nBody copy.",
+    )
+
+    assert result["success"] is True
+    assert result["remote_id"] == "draft123abc"
+    assert result["status"] == "draft"
+    assert "<h1>" not in seen["article_html"]
+
+
+def test_update_targets_existing_medium_story(monkeypatch):
+    page = _WritePage()
+    monkeypatch.setattr(
+        medium_browser, "_replace_editor_content", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        medium_browser,
+        "_verify_article",
+        lambda **_kwargs: {
+            "title": "Updated",
+            "body": "New body",
+            "status": "draft",
+            "canonical_url": None,
+        },
+    )
+
+    result = medium_browser.write_medium_article(
+        page=page, title="Updated", article_md="New body", remote_id="draft123abc",
+    )
+
+    assert page.url == "https://medium.com/p/draft123abc/edit"
+    assert result["draft_id"] == "draft123abc"
+
+
+def test_write_returns_manual_handoff_for_stale_login():
+    result = medium_browser.write_medium_article(
+        page=_WritePage(login=True), title="Title", article_md="Body",
+    )
+
+    assert result["success"] is False
+    assert result["manual_handoff"]["reason"] == "medium_login_required"
+
+
+def test_publish_confirms_action_and_verifies_published_state(monkeypatch):
+    page = _PublishingPage()
+    statuses = []
+    monkeypatch.setattr(
+        medium_browser, "_replace_editor_content", lambda *_args, **_kwargs: None
+    )
+
+    def verify(**kwargs):
+        statuses.append(kwargs["expected_status"])
+        return {
+            "title": "Published story",
+            "body": "Body",
+            "status": kwargs["expected_status"],
+            "canonical_url": "https://medium.com/@author/published-story-abc123def456",
+        }
+
+    monkeypatch.setattr(medium_browser, "_verify_article", verify)
+
+    result = medium_browser.write_medium_article(
+        page=page, title="Published story", article_md="Body",
+        remote_id="abc123def456", publish=True,
+    )
+
+    assert statuses == ["draft", "published"]
+    assert page.publish.clicks == 1
+    assert page.confirm.clicks == 1
+    assert result["status"] == "published"
+    assert result["url"].endswith("published-story-abc123def456")
+
+
+def test_write_rejects_invalid_existing_remote_id_before_navigation():
+    page = _WritePage()
+
+    with pytest.raises(ValueError, match="Invalid Medium article id"):
+        medium_browser.write_medium_article(
+            page=page, title="Title", article_md="Body", remote_id="../cookie",
+        )
+
+    assert page.url == "about:blank"

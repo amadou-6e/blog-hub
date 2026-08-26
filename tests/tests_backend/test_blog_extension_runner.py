@@ -28,7 +28,7 @@ def test_runner_discovers_builtin_extension_capabilities():
         "create_draft", "list_articles", "publish",
     ]
     assert by_platform["medium"]["capabilities"] == [
-        "get_article", "list_articles",
+        "create_draft", "get_article", "list_articles", "publish", "update_article",
     ]
 
 
@@ -62,7 +62,7 @@ def test_public_operation_requires_explicit_approval():
     assert "approval" in exc_info.value.detail
 
 
-def test_unsupported_operation_is_rejected_before_browser_launch():
+def test_medium_publish_requires_explicit_approval():
     request = runner_main.BrowserOperationRequest(
         organization_id="o_test", profile_id="bp_test"
     )
@@ -71,7 +71,7 @@ def test_unsupported_operation_is_rejected_before_browser_launch():
         runner_main.browser_operation("medium", "publish", request)
 
     assert exc_info.value.status_code == 409
-    assert "does not support" in exc_info.value.detail
+    assert "approval" in exc_info.value.detail
 
 
 def test_generic_operation_passes_normalized_article_to_runtime(tmp_path, monkeypatch):

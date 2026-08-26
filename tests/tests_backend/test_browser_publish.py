@@ -4,13 +4,13 @@ import backend.services.browser_publish as browser_publish
 import backend.store as store
 
 
-def _connect() -> None:
+def _connect(platform: str = "hashnode") -> None:
     store.start_browser_connection(
-        "user_seed", "hashnode", session_id="pbs_test",
+        "user_seed", platform, session_id="pbs_test",
         organization_id="o_test", app_url="http://localhost/login",
     )
     store.update_browser_connection(
-        "user_seed", "hashnode", "connected", profile_id="bp_test"
+        "user_seed", platform, "connected", profile_id="bp_test"
     )
 
 
@@ -83,6 +83,57 @@ def test_public_publish_mode_is_durable_and_updates_destination(
     assert article["destinations"]["hashnode"]["url"] == (
         "https://example.hashnode.dev/test"
     )
+
+
+def test_medium_draft_updates_existing_remote_article(
+    client, monkeypatch, run_jobs,
+):
+    _connect("medium")
+    store.upsert_remote_article_identity(
+        "user_seed", "art_001", "medium", "medium123abc",
+    )
+    seen = {}
+    monkeypatch.setattr(
+        browser_publish.runner,
+        "browser_operation",
+        lambda platform, operation, **kwargs: seen.update(
+            kwargs, platform=platform, operation=operation
+        ) or {
+            "success": True,
+            "status": "draft",
+            "remote_id": "medium123abc",
+        },
+    )
+
+    run = client.post("/api/articles/art_001/browser-publish/medium").json()
+    client.post(f"/api/articles/art_001/browser-publish/{run['id']}/approve")
+    run_jobs()
+
+    assert seen["operation"] == "update_article"
+    assert seen["remote_id"] == "medium123abc"
+    assert seen["article"]["remote_id"] == "medium123abc"
+
+
+def test_first_browser_draft_records_remote_identity(client, monkeypatch, run_jobs):
+    _connect("medium")
+    monkeypatch.setattr(
+        browser_publish.runner,
+        "browser_operation",
+        lambda *_args, **_kwargs: {
+            "success": True,
+            "status": "draft",
+            "remote_id": "created123abc",
+        },
+    )
+
+    run = client.post("/api/articles/art_001/browser-publish/medium").json()
+    client.post(f"/api/articles/art_001/browser-publish/{run['id']}/approve")
+    run_jobs()
+
+    identity = store.get_remote_article_identity(
+        "user_seed", "medium", "created123abc"
+    )
+    assert identity["article_id"] == "art_001"
 
 
 def test_browser_publish_cannot_be_approved_twice(client, monkeypatch, run_jobs):

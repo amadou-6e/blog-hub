@@ -37,6 +37,7 @@ def test_builtin_extensions_satisfy_the_versioned_contract():
     })
     assert medium.manifest.capabilities == frozenset({
         Capability.LIST_ARTICLES, Capability.GET_ARTICLE,
+        Capability.CREATE_DRAFT, Capability.UPDATE_ARTICLE, Capability.PUBLISH,
     })
     assert [item["platform"] for item in registry.descriptors()] == [
         "hashnode", "medium",
@@ -51,13 +52,13 @@ def test_fixture_loader_builds_normalized_article_input():
     assert article.metadata == {"language": "en"}
 
 
-def test_medium_rejects_undeclared_operations():
+def test_medium_update_requires_a_remote_id():
     extension = ExtensionRegistry().get("medium")
 
-    with pytest.raises(OperationNotSupported):
+    with pytest.raises(ValueError, match="requires a remote_id"):
         extension.operations.execute(
             object(),
-            Capability.PUBLISH,
+            Capability.UPDATE_ARTICLE,
             OperationRequest(article=article_from_fixture(FIXTURE)),
         )
 

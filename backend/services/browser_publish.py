@@ -28,13 +28,35 @@ def execute_run(*, user_id: str, run_id: str) -> None:
         )
         return
     try:
+        article = store.get_article(user_id, run["article_id"])
+        destination = (article or {}).get("destinations", {}).get(platform, {})
+        remote_id = destination.get("draft_id")
+        if not remote_id:
+            identities = store.list_article_remote_identities(
+                user_id, run["article_id"]
+            )
+            remote_id = next(
+                (
+                    identity["remote_id"]
+                    for identity in identities
+                    if identity["platform"] == platform
+                ),
+                None,
+            )
         operation = "publish" if run["mode"] == "publish" else "create_draft"
+        if platform == "medium" and remote_id and run["mode"] == "draft":
+            operation = "update_article"
         result = runner.browser_operation(
             platform,
             operation,
             organization_id=browser_connection["skyvern_organization_id"],
             profile_id=browser_connection["skyvern_profile_id"],
-            article={"title": revision["title"], "body": revision["content"]},
+            article={
+                "title": revision["title"],
+                "body": revision["content"],
+                "remote_id": remote_id,
+            },
+            remote_id=remote_id,
             approved=True,
         )
         if not result.get("success"):
@@ -50,9 +72,20 @@ def execute_run(*, user_id: str, run_id: str) -> None:
                 user_id, run_id, result=result, error=error
             )
             return
+        result_remote_id = result.get("draft_id") or result.get("remote_id")
+        if result_remote_id and not store.get_remote_article_identity(
+            user_id, platform, result_remote_id
+        ):
+            store.upsert_remote_article_identity(
+                user_id,
+                run["article_id"],
+                platform,
+                result_remote_id,
+            )
         store.apply_push_result(
             user_id, run["article_id"], platform, success=True,
-            url=result.get("url"), draft_id=result.get("draft_id"),
+            url=result.get("url"),
+            draft_id=result_remote_id,
             label="Published" if run["mode"] == "publish" else "Draft",
             status="published" if run["mode"] == "publish" else "draft",
         )

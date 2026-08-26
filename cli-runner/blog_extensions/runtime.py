@@ -23,6 +23,7 @@ def execute_operation(
             str(profile_dir),
             headless=True,
             viewport={"width": 1440, "height": 1000},
+            permissions=["clipboard-read", "clipboard-write"],
         )
         page = context.pages[0] if context.pages else context.new_page()
         try:
