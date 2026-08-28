@@ -1,6 +1,7 @@
 """API contracts shared by local and remote article previews."""
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 from typing import Literal
 
@@ -83,13 +84,12 @@ class PreviewArtifact(BaseModel):
     warnings: list[PreviewWarning] = Field(default_factory=list)
     failure: PreviewFailure | None = None
     artifact_url: str | None = None
-    rendered_at: str | None = None
+    rendered_at: datetime | None = None
 
     @model_validator(mode="after")
     def validate_state_payload(self) -> "PreviewArtifact":
-        if self.state == PreviewState.current and self.html is None and self.artifact_url is None:
-            raise ValueError("a current preview requires html or artifact_url")
+        if self.state in {PreviewState.current, PreviewState.stale} and self.html is None and self.artifact_url is None:
+            raise ValueError(f"a {self.state.value} preview requires html or artifact_url")
         if self.state == PreviewState.failed and self.failure is None:
             raise ValueError("a failed preview requires failure details")
         return self
-

@@ -51,3 +51,38 @@ def test_failed_artifact_carries_typed_failure():
     )
 
     assert artifact.failure.code == "renderer_failed"
+
+
+def test_failed_artifact_requires_failure_details():
+    with pytest.raises(ValidationError, match="requires failure details"):
+        PreviewArtifact(
+            state=PreviewState.failed,
+            platform=PreviewPlatform.medium,
+            viewport=PreviewViewport.desktop,
+            renderer_version="1",
+            source=PreviewSource(article_id="art_001", revision_id="rev_001"),
+        )
+
+
+def test_stale_artifact_requires_the_previous_render():
+    with pytest.raises(ValidationError, match="stale preview requires html or artifact_url"):
+        PreviewArtifact(
+            state=PreviewState.stale,
+            platform=PreviewPlatform.hashnode,
+            viewport=PreviewViewport.desktop,
+            renderer_version="1",
+            source=PreviewSource(article_id="art_001", revision_id="rev_001"),
+        )
+
+
+def test_rendered_at_requires_an_iso_timestamp():
+    with pytest.raises(ValidationError):
+        PreviewArtifact(
+            state=PreviewState.current,
+            platform=PreviewPlatform.markdown,
+            viewport=PreviewViewport.desktop,
+            renderer_version="1",
+            source=PreviewSource(article_id="art_001", revision_id="rev_001"),
+            html="<p>preview</p>",
+            rendered_at="not-a-timestamp",
+        )
