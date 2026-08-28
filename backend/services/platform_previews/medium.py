@@ -49,7 +49,7 @@ border-bottom:1px solid #d9d9d9;padding:10px 8px;text-align:left}@media(max-widt
 class MediumPreviewProvider:
     capabilities = PreviewCapabilities(
         platform=PreviewPlatform.medium,
-        renderer_version="medium-1",
+        renderer_version="medium-2",
         viewports=[PreviewViewport.desktop, PreviewViewport.mobile],
     )
 

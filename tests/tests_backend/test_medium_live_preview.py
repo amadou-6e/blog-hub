@@ -16,7 +16,7 @@ def test_medium_preview_has_editorial_shell_without_duplicate_body_title():
         asset_base_url="/assets",
     )
 
-    assert artifact.renderer_version == "medium-1"
+    assert artifact.renderer_version == "medium-2"
     assert 'data-preview-platform="medium"' in artifact.html
     assert '<h1 class="article-title">A practical guide</h1>' in artifact.html
     assert artifact.html.count("A practical guide") == 2  # document title + visible title
