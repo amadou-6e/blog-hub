@@ -156,8 +156,11 @@ def test_render_api_uses_fingerprint_for_unsaved_content(client):
 def test_unregistered_renderer_returns_typed_not_supported(client):
     response = client.post(
         "/api/articles/art_001/previews/render",
-        json={"platform": "hashnode", "title": "T", "content": "Body"},
+        json={"platform": "medium", "title": "T", "content": "Body"},
     )
 
     assert response.status_code == 501
-    assert response.json()["detail"]["code"] == "preview_not_supported"
+    assert response.json()["detail"] == {
+        "code": "preview_not_supported",
+        "platform": "medium",
+    }
