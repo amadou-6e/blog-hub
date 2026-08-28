@@ -113,6 +113,9 @@ def _derive_summary_from_markdown(markdown_text: str, *, max_length: int = 160) 
         stripped = block.strip()
         if not stripped or stripped.startswith("#") or stripped == "---" or stripped.startswith("!["):
             continue
+        lines = [line.strip() for line in stripped.splitlines() if line.strip()]
+        if len(lines) >= 2 and all(line.startswith("|") and line.endswith("|") for line in lines):
+            continue
         if stripped.startswith("*") and stripped.endswith("*") and "\n" not in stripped:
             continue
         plain = stripped

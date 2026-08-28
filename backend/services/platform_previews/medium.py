@@ -4,7 +4,9 @@ from __future__ import annotations
 import html
 import re
 
-from blogs.medium.render import render_markdown
+from blogs.hashnode.client import HashnodeClient
+from blogs.hashnode.render import _derive_summary_from_markdown
+from blogs.medium._render import PLANNING_MARKERS, render_medium_markdown
 from backend.schemas.previews import (
     PreviewArtifact,
     PreviewCapabilities,
@@ -44,11 +46,6 @@ border-bottom:1px solid #d9d9d9;padding:10px 8px;text-align:left}@media(max-widt
 .content{font-size:18px;line-height:1.68}.content h2{font-size:26px}.content blockquote{margin-left:0}.actions{margin-top:24px}}
 """
 
-
-def _without_first_title(markdown: str) -> str:
-    return re.sub(r"(?m)^#\s+[^\n]+\n?", "", markdown, count=1).lstrip()
-
-
 class MediumPreviewProvider:
     capabilities = PreviewCapabilities(
         platform=PreviewPlatform.medium,
@@ -63,24 +60,24 @@ class MediumPreviewProvider:
         source: PreviewSource,
         asset_base_url: str,
     ) -> PreviewArtifact:
-        normalized = render_markdown(request.content, image_base_url=asset_base_url)
-        body_markdown = _without_first_title(normalized.body_markdown)
+        normalized = render_medium_markdown(request.content, image_base_url=None)
+        body_markdown = HashnodeClient.strip_leading_h1(normalized.body_markdown)
         body, warnings = render_markdown_fragment(body_markdown, asset_base_url)
-        if body_markdown.strip() != request.content.strip():
+        if any(line.strip().startswith(PLANNING_MARKERS) for line in request.content.splitlines()):
             warnings.append(PreviewWarning(
-                code="medium_content_normalized",
-                message="Title or publishing notes were moved out of the Medium article body.",
-                severity="info",
+                code="medium_planning_tail_removed",
+                message=(
+                    "Medium omits the publishing marker and all content after it from the "
+                    "article body."
+                ),
+                severity="warning",
             ))
         if re.search(r"(?m)^\s*\|.+\|\s*$", body_markdown):
             warnings.append(PreviewWarning(
                 code="medium_table_approximation",
                 message="Medium may transform table layout when the article is published.",
             ))
-        description = body_markdown
-        description = re.sub(r"[#>*_`\[\]()]", "", description)
-        description = re.sub(r"\s+", " ", description).strip()
-        subtitle = (description[:157].rstrip() + "...") if len(description) > 160 else description
+        subtitle = _derive_summary_from_markdown(body_markdown)
         subtitle = subtitle or "Live preview of the article as it will appear on Medium."
         words = len(re.findall(r"\w+", body_markdown))
         read_minutes = max(1, round(words / 240))

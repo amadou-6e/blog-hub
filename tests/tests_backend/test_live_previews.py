@@ -153,7 +153,14 @@ def test_render_api_uses_fingerprint_for_unsaved_content(client):
     assert source["working_copy_fingerprint"].startswith("sha256:")
 
 
-def test_unregistered_renderer_returns_typed_not_supported(client):
+def test_unregistered_renderer_returns_typed_not_supported(client, monkeypatch):
+    from backend.routers import previews as previews_router
+
+    class MissingProviderEngine:
+        def render(self, request, **kwargs):
+            raise KeyError(request.platform.value)
+
+    monkeypatch.setattr(previews_router, "preview_engine", MissingProviderEngine())
     response = client.post(
         "/api/articles/art_001/previews/render",
         json={"platform": "medium", "title": "T", "content": "Body"},
