@@ -4,7 +4,7 @@ from __future__ import annotations
 import html
 import re
 
-from blogs.hashnode.render import render_markdown
+from blogs.hashnode.render import PLANNING_MARKERS, render_markdown
 from backend.schemas.previews import (
     PreviewArtifact,
     PreviewCapabilities,
@@ -62,11 +62,14 @@ class HashnodePreviewProvider:
     ) -> PreviewArtifact:
         normalized = render_markdown(request.content)
         body, warnings = render_markdown_fragment(normalized.body_markdown, asset_base_url)
-        if normalized.body_markdown.strip() != request.content.strip():
+        if any(line.strip().startswith(PLANNING_MARKERS) for line in request.content.splitlines()):
             warnings.append(PreviewWarning(
-                code="hashnode_content_normalized",
-                message="Title or publishing notes were moved out of the Hashnode article body.",
-                severity="info",
+                code="hashnode_planning_tail_removed",
+                message=(
+                    "Hashnode omits the publishing marker and all content after it from the "
+                    "article body."
+                ),
+                severity="warning",
             ))
         words = len(re.findall(r"\w+", normalized.body_markdown))
         read_minutes = max(1, round(words / 220))
@@ -94,4 +97,3 @@ class HashnodePreviewProvider:
             ),
             warnings=warnings,
         )
-

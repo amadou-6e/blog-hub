@@ -21,7 +21,24 @@ def test_hashnode_preview_has_platform_shell_and_normalized_content():
     assert '<h1 class="article-title">A practical guide</h1>' in artifact.html
     assert artifact.html.count("A practical guide") == 2  # document title + visible title
     assert "A useful introduction." in artifact.html
-    assert any(w.code == "hashnode_content_normalized" for w in artifact.warnings)
+    assert not artifact.warnings
+
+
+def test_hashnode_preview_warns_when_the_planning_tail_is_removed():
+    artifact = HashnodePreviewProvider().render(
+        PreviewRenderRequest(
+            platform=PreviewPlatform.hashnode,
+            title="Notes",
+            content="# Notes\r\n\r\nBody.\r\n\r\n**Tags:** Python\r\n\r\n## Hidden section",
+        ),
+        source=SOURCE,
+        asset_base_url="/assets",
+    )
+
+    warning = next(w for w in artifact.warnings if w.code == "hashnode_planning_tail_removed")
+    assert warning.severity == "warning"
+    assert "all content after it" in warning.message
+    assert "Hidden section" not in artifact.html
 
 
 def test_hashnode_preview_uses_authenticated_asset_urls():
