@@ -495,7 +495,7 @@ function useLatestConflict() {
   PENDING_CONFLICT = null;
   closeConflict();
   setSave('saved');
-  renderPreview();
+  schedulePreview();
   loadRevisions();
 }
 function keepLocalConflict() {
@@ -518,7 +518,7 @@ function mergeConflictManually() {
   closeConflict();
   persistLocalDraft();
   setSave('unsaved');
-  renderPreview();
+  schedulePreview();
 }
 
 function insertCommentCmd() {
@@ -674,6 +674,19 @@ function renderPreviewWarnings(warnings) {
   ).join('');
 }
 
+function previewErrorMessage(detail, status) {
+  if (detail?.code === 'preview_not_supported') {
+    return 'This preview target is not supported by the current renderer.';
+  }
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail.map(item => item?.msg).filter(Boolean);
+    if (messages.length) return messages.join('; ');
+  }
+  if (typeof detail?.message === 'string') return detail.message;
+  return `Preview failed (${status})`;
+}
+
 function schedulePreview() {
   clearTimeout(PREVIEW_TIMER);
   PREVIEW_REQUEST += 1;
@@ -716,10 +729,7 @@ async function renderPreview(force=false) {
     const artifact = await response.json();
     if (requestId !== PREVIEW_REQUEST) return;
     if (!response.ok) {
-      const message = artifact.detail?.code === 'preview_not_supported'
-        ? 'This preview target is not supported by the current renderer.'
-        : (artifact.detail?.message || artifact.detail || `Preview failed (${response.status})`);
-      throw new Error(typeof message === 'string' ? message : 'Preview failed');
+      throw new Error(previewErrorMessage(artifact.detail, response.status));
     }
     if (artifact.state !== 'current' || !artifact.html) throw new Error(artifact.failure?.message || 'Preview is not available');
     document.getElementById('preview-frame').srcdoc = artifact.html;
@@ -863,7 +873,7 @@ async function restoreRevision(revisionId) {
   localStorage.removeItem(localDraftKey());
   HISTORY_DIFF = null;
   setSave('saved');
-  renderPreview();
+  schedulePreview();
   await loadRevisions();
 }
 
@@ -1361,13 +1371,15 @@ async function loadArticle() {
     setSave('saved');
     await renderPreview();
     recoverLocalDraft(a);
-    await loadComments();
-    await loadPatches();
-    await loadRevisions();
-    await loadReconciliation();
-    await loadChat();
-    await loadConnectedProviders();
-    await loadAgentSession();
+    await Promise.allSettled([
+      loadComments(),
+      loadPatches(),
+      loadRevisions(),
+      loadReconciliation(),
+      loadChat(),
+      loadConnectedProviders(),
+      loadAgentSession(),
+    ]);
     if (new URLSearchParams(location.search).get('panel') === 'chat') {
       openSection('chat');
       document.getElementById('chat-input')?.focus();
@@ -1389,7 +1401,7 @@ async function reloadArticleHead() {
   document.getElementById('word-count').textContent = a.word_count.toLocaleString() + ' words';
   localStorage.removeItem(localDraftKey());
   setSave('saved');
-  renderPreview();
+  schedulePreview();
   await loadRevisions();
   return true;
 }
@@ -1403,7 +1415,7 @@ function recoverLocalDraft(server) {
   if (local.base_revision_id === server.revision_id) {
     document.getElementById('article-title').textContent = local.title;
     document.getElementById('raw-editor').value = local.content;
-    renderPreview();
+    schedulePreview();
     setSave(navigator.onLine ? 'unsaved' : 'offline');
     if (navigator.onLine) saveTimer = setTimeout(saveDraft, 250);
     return;
@@ -1418,6 +1430,7 @@ function recoverLocalDraft(server) {
 
 window.addEventListener('online', () => {
   if (readLocalDraft() && !PENDING_CONFLICT) saveDraft();
+  schedulePreview();
 });
 
 async function loadComments() {

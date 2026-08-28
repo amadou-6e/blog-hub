@@ -135,6 +135,11 @@ def test_offline_edit_is_saved_locally_and_syncs_on_reconnect(page):
         "document.getElementById('save-indicator').innerText.includes('saved')",
         timeout=10000,
     )
+    page.wait_for_function(
+        "document.getElementById('preview-frame').srcdoc.includes('offline-recovery-marker')",
+        timeout=10000,
+    )
+    assert "paused" not in page.locator("#preview-status").inner_text().lower()
     page.reload()
     page.wait_for_function(
         "document.getElementById('raw-editor').value.includes('offline-recovery-marker')",
@@ -346,6 +351,16 @@ def test_mobile_preview_uses_fixed_mobile_canvas(page):
 
     assert "mobile" in (page.locator("#preview-frame-shell").get_attribute("class") or "")
     assert page.get_by_role("button", name="Mobile preview").evaluate("el => el.classList.contains('active')")
+
+
+def test_preview_validation_errors_show_the_api_reason(page):
+    goto_editor(page)
+
+    message = page.evaluate(
+        "previewErrorMessage([{msg:'Content must contain at most 2000000 characters'}], 422)"
+    )
+
+    assert message == "Content must contain at most 2000000 characters"
 
 
 # ── 7. Top nav actions ────────────────────────────────────────────────────────
