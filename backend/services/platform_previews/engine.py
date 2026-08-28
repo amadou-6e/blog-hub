@@ -162,6 +162,3 @@ class PreviewEngine:
             while len(self._cache) > self._max_cache_entries:
                 self._cache.popitem(last=False)
         return artifact
-
-
-preview_engine = PreviewEngine([MarkdownPreviewProvider()])

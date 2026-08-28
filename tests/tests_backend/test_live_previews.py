@@ -1,3 +1,5 @@
+import pytest
+
 from backend.schemas.previews import PreviewPlatform, PreviewRenderRequest, PreviewSource
 from backend.services.platform_previews.engine import (
     MarkdownPreviewProvider,
@@ -153,11 +155,10 @@ def test_render_api_uses_fingerprint_for_unsaved_content(client):
     assert source["working_copy_fingerprint"].startswith("sha256:")
 
 
-def test_unregistered_renderer_returns_typed_not_supported(client):
-    response = client.post(
-        "/api/articles/art_001/previews/render",
-        json={"platform": "hashnode", "title": "T", "content": "Body"},
-    )
+def test_engine_rejects_an_unregistered_renderer():
+    engine = PreviewEngine([])
+    request = PreviewRenderRequest(platform=PreviewPlatform.hashnode, title="T", content="Body")
+    source = PreviewSource(article_id="art_001", working_copy_fingerprint="sha256:none")
 
-    assert response.status_code == 501
-    assert response.json()["detail"]["code"] == "preview_not_supported"
+    with pytest.raises(KeyError, match="hashnode"):
+        engine.render(request, source=source, asset_base_url="/assets")
