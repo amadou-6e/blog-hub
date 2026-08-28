@@ -172,12 +172,7 @@ def _etag_matches(request: Request, etag: str) -> bool:
     return "*" in candidates or etag in candidates or f"W/{etag}" in candidates
 
 
-@router.get("/{article_id}/assets/{asset_id}", response_class=Response)
-def get_article_asset(request: Request, article_id: str, asset_id: int):
-    asset = store.read_article_asset(request.state.user_id, article_id, asset_id)
-    if asset is None:
-        raise HTTPException(status_code=404, detail="Asset not found")
-
+def _article_asset_response(request: Request, asset: dict) -> Response:
     etag = f'"{hashlib.sha256(asset["data"]).hexdigest()}"'
     media_type = _asset_media_type(asset["mime_type"])
     headers = {
@@ -185,17 +180,27 @@ def get_article_asset(request: Request, article_id: str, asset_id: int):
         "Cache-Control": "private, max-age=3600, must-revalidate",
         "Vary": "Cookie",
         "X-Content-Type-Options": "nosniff",
-        "Content-Disposition": _asset_content_disposition(
-            asset["filename"], media_type,
-        ),
+        "Content-Disposition": _asset_content_disposition(asset["filename"], media_type),
     }
     if _etag_matches(request, etag):
         return Response(status_code=304, headers=headers)
-    return Response(
-        content=asset["data"],
-        media_type=media_type,
-        headers=headers,
-    )
+    return Response(content=asset["data"], media_type=media_type, headers=headers)
+
+
+@router.get("/{article_id}/assets/by-filename/{filename:path}", response_class=Response)
+def get_article_asset_by_filename(request: Request, article_id: str, filename: str):
+    asset = store.get_article_asset_by_filename(request.state.user_id, article_id, filename)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return _article_asset_response(request, asset)
+
+
+@router.get("/{article_id}/assets/{asset_id}", response_class=Response)
+def get_article_asset(request: Request, article_id: str, asset_id: int):
+    asset = store.read_article_asset(request.state.user_id, article_id, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return _article_asset_response(request, asset)
 
 
 @router.get("/{article_id}", response_model=ArticleDetailResponse)
