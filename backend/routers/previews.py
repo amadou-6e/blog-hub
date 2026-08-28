@@ -10,7 +10,8 @@ from backend.schemas.previews import (
     PreviewRenderRequest,
     PreviewSource,
 )
-from backend.services.platform_previews.engine import preview_engine, working_copy_fingerprint
+from backend.services.platform_previews.engine import working_copy_fingerprint
+from backend.services.platform_previews.registry import preview_engine
 
 
 router = APIRouter(prefix="/api/articles/{article_id}/previews", tags=["previews"])
@@ -54,4 +55,3 @@ def render_preview(article_id: str, body: PreviewRenderRequest, request: Request
             status_code=501,
             detail={"code": "preview_not_supported", "platform": str(exc.args[0])},
         ) from exc
-
