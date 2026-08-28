@@ -16,7 +16,7 @@ def test_hashnode_preview_has_platform_shell_and_normalized_content():
         asset_base_url="/assets",
     )
 
-    assert artifact.renderer_version == "hashnode-1"
+    assert artifact.renderer_version == "hashnode-2"
     assert 'data-preview-platform="hashnode"' in artifact.html
     assert '<h1 class="article-title">A practical guide</h1>' in artifact.html
     assert artifact.html.count("A practical guide") == 2  # document title + visible title

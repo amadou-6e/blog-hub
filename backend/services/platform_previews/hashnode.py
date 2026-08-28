@@ -31,8 +31,8 @@ color:#4b5563;margin:0 0 24px}.byline{display:flex;align-items:center;gap:11px;c
 height:38px;border-radius:50%;background:#dbeafe;color:#1d4ed8;display:grid;place-items:center;font-weight:700}.author{color:#111827;
 font-weight:600}.layout{width:min(920px,100%);margin:0 auto;display:grid;grid-template-columns:52px minmax(0,800px);gap:24px}
 .rail{padding-top:8px;display:flex;flex-direction:column;align-items:center;gap:15px;color:#6b7280;font-size:12px}.rail-button{width:38px;
-height:38px;border:1px solid #e5e7eb;border-radius:50%;display:grid;place-items:center;background:#fff}.content{font-family:Georgia,
-'Times New Roman',serif;font-size:19px;line-height:1.82;color:#1f2937;min-width:0}.content h1,.content h2,.content h3{
+height:38px;border:1px solid #e5e7eb;border-radius:50%;display:grid;place-items:center;background:#fff}.content{font-family:Inter,
+ui-sans-serif,system-ui,sans-serif;font-size:18px;line-height:1.78;color:#1f2937;min-width:0}.content h1,.content h2,.content h3{
 font-family:Inter,ui-sans-serif,system-ui,sans-serif;line-height:1.25;color:#111827;letter-spacing:0}.content h1{font-size:34px}
 .content h2{font-size:28px;margin:1.7em 0 .55em}.content h3{font-size:22px;margin:1.5em 0 .5em}.content p,.content ul,
 .content ol,.content blockquote,.content pre,.content table{margin:0 0 1.35em}.content a{color:#2563eb}.content img{display:block;
@@ -49,7 +49,7 @@ padding:9px 11px;text-align:left}.content th{background:#f9fafb}@media(max-width
 class HashnodePreviewProvider:
     capabilities = PreviewCapabilities(
         platform=PreviewPlatform.hashnode,
-        renderer_version="hashnode-1",
+        renderer_version="hashnode-2",
         viewports=[PreviewViewport.desktop, PreviewViewport.mobile],
     )
 

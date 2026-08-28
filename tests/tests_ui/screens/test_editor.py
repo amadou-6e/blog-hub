@@ -41,6 +41,10 @@ def goto_editor(page, article_id=ARTICLE_ID):
         "document.getElementById('file-label').textContent !== 'loading…'",
         timeout=10000,
     )
+    page.wait_for_function(
+        "document.body.dataset.editorLoaded === 'true'",
+        timeout=10000,
+    )
 
 
 # ── 1. Initial load ───────────────────────────────────────────────────────────
@@ -295,18 +299,53 @@ def test_preview_strip_re_expands_preview(page):
 
 def test_preview_body_has_content_on_load(page):
     goto_editor(page)
-    body = page.locator("#preview-body")
-    assert len(body.inner_html()) > 0
+    page.wait_for_function(
+        "document.getElementById('preview-frame').srcdoc.includes('data-preview-platform')",
+        timeout=8000,
+    )
+    assert "data-preview-platform" in page.locator("#preview-frame").get_attribute("srcdoc")
 
 
 def test_preview_selector_options(page):
     goto_editor(page)
     options = page.locator("#preview-sel option")
     labels = [options.nth(i).inner_text() for i in range(options.count())]
-    assert "Rendered MD" in labels
-    assert "Medium" in labels
+    assert "Markdown" in labels
     assert "Hashnode" in labels
-    assert "Dev.to" in labels
+    assert "Medium" in labels
+
+
+def test_hashnode_preview_renders_live_working_copy(page):
+    goto_editor(page)
+    page.locator("#preview-sel").select_option("hashnode")
+    page.wait_for_function(
+        "document.getElementById('preview-status').textContent.includes('hashnode-2')",
+        timeout=8000,
+    )
+
+    assert "data-preview-platform=\"hashnode\"" in page.locator("#preview-frame").get_attribute("srcdoc")
+    assert page.locator("#preview-kind").inner_text().lower() == "live simulation"
+
+
+def test_medium_preview_updates_after_edit_without_waiting_for_autosave(page):
+    goto_editor(page)
+    page.locator("#preview-sel").select_option("medium")
+    page.locator("#raw-editor").press("Control+End")
+    page.keyboard.type(" live-preview-marker")
+    page.wait_for_function(
+        "document.getElementById('preview-frame').srcdoc.includes('live-preview-marker')",
+        timeout=8000,
+    )
+
+    assert "unsaved working copy" in page.locator("#preview-status").inner_text()
+
+
+def test_mobile_preview_uses_fixed_mobile_canvas(page):
+    goto_editor(page)
+    page.get_by_role("button", name="Mobile preview").click()
+
+    assert "mobile" in (page.locator("#preview-frame-shell").get_attribute("class") or "")
+    assert page.get_by_role("button", name="Mobile preview").evaluate("el => el.classList.contains('active')")
 
 
 # ── 7. Top nav actions ────────────────────────────────────────────────────────
@@ -326,7 +365,7 @@ def test_publish_button_visible(page):
 
 def test_review_button_visible(page):
     goto_editor(page)
-    btn = page.get_by_role("button", name="Review")
+    btn = page.get_by_role("button", name="Review", exact=True)
     assert btn.is_visible()
 
 
@@ -480,6 +519,10 @@ def test_comments_section_shows_empty_state_when_no_comments(page, requests_sess
 def test_resolve_button_present_for_open_comment(page, requests_session):
     """POST a comment via API then check Resolve button appears in the panel."""
     requests_session.post(
+        f"{BASE_URL}/api/auth/login",
+        json={"email": "seed@example.com", "password": "seed1234", "remember_me": False},
+    )
+    requests_session.post(
         f"{BASE_URL}/api/articles/{ARTICLE_ID}/comments",
         json={"author": "Tester", "text": "This paragraph needs work."},
     )
@@ -494,6 +537,10 @@ def test_resolve_button_present_for_open_comment(page, requests_session):
 
 def test_resolve_comment_removes_it_from_active_list(page, requests_session):
     """Clicking Resolve calls the API and the comment disappears from the open list."""
+    requests_session.post(
+        f"{BASE_URL}/api/auth/login",
+        json={"email": "seed@example.com", "password": "seed1234", "remember_me": False},
+    )
     requests_session.post(
         f"{BASE_URL}/api/articles/{ARTICLE_ID}/comments",
         json={"author": "Tester", "text": "Resolve me."},
