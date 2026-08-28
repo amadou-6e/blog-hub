@@ -1199,14 +1199,37 @@ class SQLiteStore(
     def get_article_asset_by_filename(
         self, user_id: str, article_id: str, filename: str,
     ) -> dict | None:
-        row = self._con.execute(
-            """SELECT aa.id, aa.filename, aa.mime_type
-               FROM article_assets aa
-               JOIN articles a ON a.id=aa.article_id
-               WHERE aa.article_id=? AND aa.filename=? AND a.user_id=?""",
-            (article_id, filename, user_id),
-        ).fetchone()
-        return dict(row) if row else None
+        with self._workspace_lock.acquire():
+            row = self._con.execute(
+                """SELECT aa.id, aa.filename, aa.asset_path, aa.mime_type
+                   FROM article_assets aa
+                   JOIN articles a ON a.id=aa.article_id
+                   WHERE aa.article_id=? AND aa.filename=? AND a.user_id=?""",
+                (article_id, filename, user_id),
+            ).fetchone()
+            if row is None:
+                return None
+
+            assets_root = (
+                self._blobs_dir / "articles" / article_id / "assets"
+            ).resolve()
+            candidate = (self._blobs_dir / row["asset_path"]).resolve()
+            try:
+                candidate.relative_to(assets_root)
+            except ValueError:
+                return None
+            try:
+                if not candidate.is_file():
+                    return None
+                data = candidate.read_bytes()
+            except OSError:
+                return None
+            return {
+                "id": row["id"],
+                "filename": row["filename"],
+                "mime_type": row["mime_type"],
+                "data": data,
+            }
 
     def reset(self) -> None:
         """Drop all data and re-seed. Used by the /api/dev/reset endpoint in tests."""

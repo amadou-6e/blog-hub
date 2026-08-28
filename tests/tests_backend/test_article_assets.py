@@ -38,6 +38,10 @@ def _asset_url(article_id: str, asset_id: int) -> str:
     return f"/api/articles/{article_id}/assets/{asset_id}"
 
 
+def _filename_asset_url(article_id: str, filename: str) -> str:
+    return f"/api/articles/{article_id}/assets/by-filename/{filename}"
+
+
 def test_owner_can_read_registered_cover_with_safe_headers(client: TestClient):
     asset_id, _ = _add_cover()
     with store._backend._con:
@@ -58,6 +62,17 @@ def test_owner_can_read_registered_cover_with_safe_headers(client: TestClient):
     assert disposition.startswith("inline;")
     assert ".." not in disposition
     assert "\n" not in disposition and "\r" not in disposition
+
+
+def test_owner_can_read_registered_asset_by_filename(client: TestClient):
+    _add_cover(filename="preview image.png", content=b"preview-bytes")
+
+    response = client.get(_filename_asset_url("art_001", "preview image.png"))
+
+    assert response.status_code == 200
+    assert response.content == b"preview-bytes"
+    assert response.headers["content-type"] == "image/png"
+    assert response.headers["etag"].startswith('"')
 
 
 def test_asset_read_requires_authentication(anon_client: TestClient):

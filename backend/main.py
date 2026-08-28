@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.routers import agent, agent_sessions, articles, comments, connections, dev, jobs, patches, platforms, reconciliation
+from backend.routers import agent, agent_sessions, articles, comments, connections, dev, jobs, patches, platforms, previews, reconciliation
 from backend.routers import auth as auth_router
 from backend.middleware.auth import AuthMiddleware
 from backend.security import install_secret_redaction
@@ -55,6 +55,7 @@ app.include_router(auth_router.router)
 app.include_router(agent.router)
 app.include_router(agent_sessions.router)
 app.include_router(articles.router)
+app.include_router(previews.router)
 app.include_router(reconciliation.router)
 app.include_router(comments.router)
 app.include_router(patches.router)
