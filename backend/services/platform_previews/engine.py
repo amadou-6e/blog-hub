@@ -23,7 +23,6 @@ from backend.schemas.previews import (
 )
 
 
-_LOCAL_IMAGE = re.compile(r"(!\[[^\]]*\]\()([^)\s]+)([^)]*\))")
 _RAW_HTML = re.compile(r"<\s*/?\s*[A-Za-z][^>]*>")
 
 
@@ -37,15 +36,11 @@ def working_copy_fingerprint(title: str, content: str) -> str:
     return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def rewrite_local_images(markdown: str, asset_base_url: str) -> str:
-    def replace(match: re.Match[str]) -> str:
-        target = match.group(2)
-        if target.startswith(("https://", "http://", "data:", "/")):
-            return match.group(0)
-        clean = target.lstrip("./").replace("\\", "/")
-        return f"{match.group(1)}{asset_base_url}/{quote(clean, safe='/')}{match.group(3)}"
-
-    return _LOCAL_IMAGE.sub(replace, markdown)
+def _rewrite_image_url(target: str, asset_base_url: str) -> str:
+    if target.startswith(("https://", "http://", "data:", "/")):
+        return target
+    clean = target.lstrip("./").replace("\\", "/")
+    return f"{asset_base_url}/{quote(clean, safe='/')}"
 
 
 def render_markdown_fragment(markdown: str, asset_base_url: str) -> tuple[str, list[PreviewWarning]]:
@@ -57,7 +52,15 @@ def render_markdown_fragment(markdown: str, asset_base_url: str) -> tuple[str, l
             severity="info",
         ))
     parser = MarkdownIt("commonmark", {"html": False, "linkify": True}).enable("table")
-    return parser.render(rewrite_local_images(markdown, asset_base_url)), warnings
+    tokens = parser.parse(markdown)
+    for token in tokens:
+        for child in token.children or ():
+            if child.type != "image":
+                continue
+            source = child.attrGet("src")
+            if source:
+                child.attrSet("src", _rewrite_image_url(source, asset_base_url))
+    return parser.renderer.render(tokens, parser.options, {}), warnings
 
 
 def preview_document(*, title: str, body: str, css: str, platform: str) -> str:
@@ -140,6 +143,8 @@ class PreviewEngine:
         if provider is None:
             raise KeyError(request.platform.value)
         cache_key = "|".join((
+            source.article_id,
+            asset_base_url,
             request.platform.value,
             request.viewport.value,
             source.working_copy_fingerprint or source.revision_id or "",
@@ -160,4 +165,3 @@ class PreviewEngine:
 
 
 preview_engine = PreviewEngine([MarkdownPreviewProvider()])
-

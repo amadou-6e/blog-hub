@@ -46,6 +46,21 @@ def test_markdown_renderer_rewrites_local_images_only():
     assert "https://example.com/a.png" in artifact.html
 
 
+def test_markdown_renderer_does_not_rewrite_images_inside_fenced_code():
+    artifact = MarkdownPreviewProvider().render(
+        PreviewRenderRequest(
+            platform=PreviewPlatform.markdown,
+            title="Image syntax",
+            content="```markdown\n![literal](./logo.png)\n```\n\n![real](./logo.png)",
+        ),
+        source=PreviewSource(article_id="art_001", working_copy_fingerprint="sha256:x"),
+        asset_base_url="/api/articles/art_001/assets/by-filename",
+    )
+
+    assert "![literal](./logo.png)" in artifact.html
+    assert artifact.html.count("/api/articles/art_001/assets/by-filename/logo.png") == 1
+
+
 def test_engine_cache_is_keyed_by_fingerprint_and_returns_copies():
     class CountingProvider(MarkdownPreviewProvider):
         calls = 0
@@ -65,6 +80,39 @@ def test_engine_cache_is_keyed_by_fingerprint_and_returns_copies():
 
     assert provider.calls == 1
     assert first.html != second.html
+
+
+def test_engine_cache_is_isolated_by_article_and_asset_base_url():
+    class CountingProvider(MarkdownPreviewProvider):
+        calls = 0
+
+        def render(self, *args, **kwargs):
+            self.calls += 1
+            return super().render(*args, **kwargs)
+
+    provider = CountingProvider()
+    engine = PreviewEngine([provider])
+    request = PreviewRenderRequest(
+        platform=PreviewPlatform.markdown,
+        title="Same",
+        content="![cover](./cover.png)",
+    )
+    first = engine.render(
+        request,
+        source=PreviewSource(article_id="art_001", working_copy_fingerprint="sha256:same"),
+        asset_base_url="/api/articles/art_001/assets/by-filename",
+    )
+    second = engine.render(
+        request,
+        source=PreviewSource(article_id="art_002", working_copy_fingerprint="sha256:same"),
+        asset_base_url="/api/articles/art_002/assets/by-filename",
+    )
+
+    assert provider.calls == 2
+    assert first.source.article_id == "art_001"
+    assert second.source.article_id == "art_002"
+    assert "/art_001/assets/" in first.html
+    assert "/art_002/assets/" in second.html
 
 
 def test_render_api_uses_revision_for_saved_content(client):
