@@ -191,15 +191,16 @@ test.describe('Current overview screen', () => {
     expect(await page.evaluate(() => selectedId)).toBeNull();
   });
 
-  test('keeps a filtered selection coherent with the authoritative lifecycle', async ({ page }) => {
+  test('OV-S14 clears selection when filtering excludes the selected article', async ({ page }) => {
     const firstCard = page.locator('.article-card').first();
-    const selectedTitle = await firstCard.locator('.article-card-title').innerText();
     await firstCard.click();
+    await expect(page.locator('#side-panel')).not.toHaveClass(/hidden/);
 
     await page.locator('#search-input').fill('definitely no matching article');
 
     await expect(page.locator('.article-card')).toHaveCount(0);
-    await expect(page.locator('#panel-title')).toHaveText(selectedTitle);
-    await expect(page.locator('#side-panel')).not.toHaveClass(/hidden/);
+    await expect(page.locator('#side-panel')).toHaveClass(/hidden/);
+    await expect(page.locator('#panel-title')).toHaveText('');
+    expect(await page.evaluate(() => selectedId)).toBeNull();
   });
 });
