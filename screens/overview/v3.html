@@ -757,31 +757,40 @@ async function loadOverview() {
   const generation = (overviewLoadGeneration += 1);
   invalidateInFlightPageLoad();
 
-  const pagesToLoad = Math.max(1, currentPage);
-  const [articlesResult, connectionsPayload] = await Promise.all([
-    fetchArticlePages(pagesToLoad, generation, signal),
-    fetchJson('/api/connections', { signal }),
-  ]);
+  try {
+    const pagesToLoad = Math.max(1, currentPage);
+    const [articlesResult, connectionsPayload] = await Promise.all([
+      fetchArticlePages(pagesToLoad, generation, signal),
+      fetchJson('/api/connections', { signal }),
+    ]);
 
-  if (generation !== overviewLoadGeneration || articlesResult === null) return; // stale
+    if (generation !== overviewLoadGeneration || articlesResult === null) return; // stale
 
-  loadedArticleIds.clear();
-  ARTICLES = articlesResult.items.map((raw, index) => {
-    loadedArticleIds.add(raw.id);
-    return buildLiveArticle(raw, index);
-  });
-  totalArticleCount = articlesResult.total;
-  currentPage = pagesToLoad;
+    loadedArticleIds.clear();
+    ARTICLES = articlesResult.items.map((raw, index) => {
+      loadedArticleIds.add(raw.id);
+      return buildLiveArticle(raw, index);
+    });
+    totalArticleCount = articlesResult.total;
+    currentPage = pagesToLoad;
 
-  const connected = connectionsPayload.connections.filter(
-    item => ['medium', 'hashnode', 'devto'].includes(item.id) && item.status === 'connected'
-  );
-  document.getElementById('connected-count').innerHTML = `
-    <span style="width:6px;height:6px;border-radius:50%;background:#4ade80;display:inline-block;"></span>
-    ${connected.length} platforms connected
-  `;
+    const connected = connectionsPayload.connections.filter(
+      item => ['medium', 'hashnode', 'devto'].includes(item.id) && item.status === 'connected'
+    );
+    document.getElementById('connected-count').innerHTML = `
+      <span style="width:6px;height:6px;border-radius:50%;background:#4ade80;display:inline-block;"></span>
+      ${connected.length} platforms connected
+    `;
 
-  if (hasActiveFilters()) await loadRemainingArticlesForFilters();
+    if (hasActiveFilters()) await loadRemainingArticlesForFilters();
+  } catch (error) {
+    if (error.name === 'AbortError' || generation !== overviewLoadGeneration) return;
+    throw error;
+  } finally {
+    if (overviewLoadController && overviewLoadController.signal === signal) {
+      overviewLoadController = null;
+    }
+  }
 }
 
 function hasMoreArticles() {

@@ -166,6 +166,34 @@ test.describe('Current overview screen', () => {
     await page.unroute('**/api/articles?**');
   });
 
+  test('treats an aborted overview reload as a superseded request', async ({ page }) => {
+    const article = await page.evaluate(() => ARTICLES[0]);
+    let articleRequests = 0;
+    await page.route('**/api/articles?**', async route => {
+      articleRequests += 1;
+      if (articleRequests === 1) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      try {
+        await route.fulfill({ json: { items: [article], total: 1 } });
+      } catch (error) {
+        // The first routed request can be retired before its delayed response.
+      }
+    });
+    await page.route('**/api/connections', route => route.fulfill({ json: { connections: [] } }));
+
+    const results = await page.evaluate(async () => {
+      const first = loadOverview();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      const second = loadOverview();
+      return Promise.allSettled([first, second]);
+    });
+
+    expect(results.map(result => result.status)).toEqual(['fulfilled', 'fulfilled']);
+    await expect(page.locator('.article-card')).not.toHaveCount(0);
+    expect(articleRequests).toBeGreaterThanOrEqual(2);
+  });
+
   test('opens the selected article in the editor', async ({ page }) => {
     await page.locator('.article-card').first().locator('.card-edit').click();
     await expect(page).toHaveURL(/\/screens\/editor\/v2\.html\?id=/);
