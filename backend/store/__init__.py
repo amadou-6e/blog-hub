@@ -93,6 +93,18 @@ def delete_articles(user_id: str, *a, **kw):
     return _backend.delete_articles(user_id, *a, **kw)
 
 
+def duplicate_article(user_id: str, *a, **kw):
+    return _backend.duplicate_article(user_id, *a, **kw)
+
+
+def archive_article(user_id: str, *a, **kw):
+    return _backend.archive_article(user_id, *a, **kw)
+
+
+def delete_article(user_id: str, *a, **kw):
+    return _backend.delete_article(user_id, *a, **kw)
+
+
 def find_article_by_canonical_url(user_id: str, *a, **kw):
     return _backend.find_article_by_canonical_url(user_id, *a, **kw)
 

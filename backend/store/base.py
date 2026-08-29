@@ -133,6 +133,21 @@ class ArticleStore(Protocol):
     def delete_articles(self, user_id: str, ids: list[str], force: bool = False) -> list[str]:
         ...
 
+    def duplicate_article(
+        self, user_id: str, article_id: str, idempotency_key: str,
+    ) -> tuple[dict | None, bool]:
+        ...
+
+    def archive_article(
+        self, user_id: str, article_id: str, idempotency_key: str | None = None,
+    ) -> bool:
+        ...
+
+    def delete_article(
+        self, user_id: str, article_id: str, idempotency_key: str | None = None,
+    ) -> str:
+        ...
+
     def find_article_by_canonical_url(self, canonical_url: str) -> dict | None:
         ...
 
