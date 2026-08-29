@@ -83,6 +83,40 @@ def test_idempotency_keys_are_scoped_by_job_type(store):
     )["job_id"] == pushed["job_id"]
 
 
+def test_list_jobs_filters_article_and_active_lifecycle(store):
+    active = _enqueue(store, article_id="art_001")
+    terminal = _enqueue(store, article_id="art_001")
+    other = _enqueue(store, article_id="art_002")
+    store.request_job_cancellation(store.SEED_USER_ID, terminal["job_id"])
+
+    assert [job["job_id"] for job in store.list_jobs(
+        store.SEED_USER_ID, article_id="art_001", active=True
+    )] == [active["job_id"]]
+    assert [job["job_id"] for job in store.list_jobs(
+        store.SEED_USER_ID, article_id="art_001", active=False
+    )] == [terminal["job_id"]]
+    assert other["job_id"] not in {
+        job["job_id"] for job in store.list_jobs(
+            store.SEED_USER_ID, article_id="art_001"
+        )
+    }
+
+
+def test_retry_idempotency_survives_terminal_state(store):
+    job = _enqueue(store)
+    store.request_job_cancellation(store.SEED_USER_ID, job["job_id"])
+    first = store.retry_job(
+        store.SEED_USER_ID, job["job_id"], idempotency_key="retry-once"
+    )
+    store.request_job_cancellation(store.SEED_USER_ID, job["job_id"])
+    repeated = store.retry_job(
+        store.SEED_USER_ID, job["job_id"], idempotency_key="retry-once"
+    )
+
+    assert first["status"] == "queued"
+    assert repeated["status"] == "canceled"
+
+
 def test_queued_and_running_jobs_can_be_canceled(store):
     queued = _enqueue(store)
     canceled = store.request_job_cancellation(store.SEED_USER_ID, queued["job_id"])

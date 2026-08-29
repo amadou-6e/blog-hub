@@ -242,6 +242,203 @@ test.describe('Current overview screen', () => {
     await expect(page).toHaveURL(/\/screens\/editor\/v2\.html\?id=/);
   });
 
+  test('does not reload articles when recovery finds no active job', async ({ page }) => {
+    let articleReloads = 0;
+    page.on('request', request => {
+      if (request.url().includes('/api/articles?')) articleReloads += 1;
+    });
+    await page.route('**/api/jobs?article_id=*&active=true&limit=10', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ jobs: [] }),
+    }));
+
+    const recovery = page.waitForResponse(
+      response => response.url().includes('/api/jobs?article_id=')
+    );
+    await page.locator('.article-card').first().click();
+    await recovery;
+
+    expect(articleReloads).toBe(0);
+    await expect(page.locator('#panel-job-region')).toBeHidden();
+  });
+
+  test('stops an abandoned job poller when switching cards', async ({ page }) => {
+    const cards = page.locator('.article-card');
+    const firstId = await cards.nth(0).getAttribute('data-id');
+    const secondId = await cards.nth(1).getAttribute('data-id');
+    await page.route('**/api/jobs?article_id=*&active=true&limit=10', route => {
+      const articleId = new URL(route.request().url()).searchParams.get('article_id');
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ jobs: articleId === firstId ? [{
+          jobId: 'job_switch', articleId: firstId, operation: 'push', status: 'running',
+          pollUrl: '/api/jobs/job_switch', pollAfterMs: 5000, retryable: false,
+        }] : [] }),
+      });
+    });
+
+    await cards.nth(0).click();
+    await expect(page.locator('#panel-job-title')).toHaveText('Running');
+    expect(await page.evaluate(id => jobLifecycle.pollTokens.has(id), firstId)).toBe(true);
+
+    await cards.nth(1).click();
+    await expect.poll(() => page.evaluate(id => ({
+      state: jobLifecycle.state(id),
+      polling: jobLifecycle.pollTokens.has(id),
+    }), firstId)).toEqual({ state: null, polling: false });
+    expect(secondId).not.toBe(firstId);
+  });
+
+  test('marks unavailable scheduling as disabled', async ({ page }) => {
+    const articleId = await page.evaluate(() => {
+      const article = ARTICLES[0];
+      article.action = {
+        ...article.action,
+        kind: 'schedule',
+        label: 'Schedule →',
+      };
+      render();
+      return article.id;
+    });
+
+    await page.locator(`.article-card[data-id="${articleId}"]`).click();
+    await expect(page.locator('#panel-primary-btn')).toBeDisabled();
+    await expect(page.locator('#panel-primary-btn')).toHaveAttribute(
+      'title', 'Publishing queue is not available yet'
+    );
+  });
+
+  test('submits one inspection and prevents duplicate actions while queued', async ({ page }) => {
+    let submissions = 0;
+    await page.route('**/api/articles/*/inspect', async route => {
+      submissions += 1;
+      await route.fulfill({
+        status: 202,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          jobId: 'job_inspect_once', status: 'queued',
+          pollUrl: '/api/jobs/job_inspect_once', pollAfterMs: 5000,
+        }),
+      });
+    });
+    await page.route('**/api/jobs/job_inspect_once', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        jobId: 'job_inspect_once', operation: 'inspect', status: 'queued',
+        pollUrl: '/api/jobs/job_inspect_once', pollAfterMs: 5000,
+      }),
+    }));
+
+    await page.locator('.article-card').first().click();
+    const inspect = page.locator('#panel-inspect-btn');
+    await inspect.click();
+    await inspect.click({ force: true });
+
+    await expect(page.locator('#panel-job-title')).toHaveText('Queued');
+    await expect(inspect).toBeDisabled();
+    expect(submissions).toBe(1);
+  });
+
+  test('recovers a running job after reload and supports durable cancel and retry', async ({ page }) => {
+    await page.locator('.article-card').first().click();
+    const articleId = await page.locator('.article-card').first().getAttribute('data-id');
+    let recoveryRequests = 0;
+    await page.route('**/api/jobs?article_id=*&active=true&limit=10', route => {
+      recoveryRequests += 1;
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ jobs: [{
+          jobId: 'job_recovered', articleId, operation: 'push', status: 'running',
+          pollUrl: '/api/jobs/job_recovered', pollAfterMs: 5000, retryable: false,
+        }] }),
+      });
+    });
+    await page.route('**/api/jobs/job_recovered', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        jobId: 'job_recovered', articleId, operation: 'push', status: 'running',
+        pollUrl: '/api/jobs/job_recovered', pollAfterMs: 5000, retryable: false,
+      }),
+    }));
+    await page.route('**/api/jobs/job_recovered/cancel', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        jobId: 'job_recovered', articleId, operation: 'push', status: 'canceled',
+        pollUrl: '/api/jobs/job_recovered', pollAfterMs: 5000,
+        retryable: true, error: 'Canceled by user',
+      }),
+    }));
+    await page.route('**/api/jobs/job_recovered/retry', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        jobId: 'job_recovered', articleId, operation: 'push', status: 'queued',
+        pollUrl: '/api/jobs/job_recovered', pollAfterMs: 5000, retryable: false,
+      }),
+    }));
+
+    await page.reload();
+    await page.locator('.article-card').first().waitFor();
+    await expect(page.locator('#panel-job-title')).toHaveText('Running');
+    expect(recoveryRequests).toBe(1);
+
+    await page.locator('#panel-cancel-job-btn').click();
+    await expect(page.locator('#panel-job-title')).toHaveText('Canceled');
+    await expect(page.locator('#panel-job-error')).toHaveText('Canceled by user');
+    await page.locator('#panel-retry-job-btn').click();
+    await expect(page.locator('#panel-job-title')).toHaveText('Queued');
+  });
+
+  test('shows a backend terminal timeout inline and refreshes after completion', async ({ page }) => {
+    let status = 'failed';
+    let articleRefreshes = 0;
+    page.on('request', request => {
+      if (request.method() === 'GET' && /\/api\/articles\?/.test(request.url())) articleRefreshes += 1;
+    });
+    await page.route('**/api/articles/*/inspect', route => route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        jobId: 'job_timeout', status: 'queued',
+        pollUrl: '/api/jobs/job_timeout', pollAfterMs: 10,
+      }),
+    }));
+    await page.route('**/api/jobs/job_timeout', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        jobId: 'job_timeout', operation: 'inspect', status,
+        pollUrl: '/api/jobs/job_timeout', pollAfterMs: 10,
+        retryable: true,
+        error: status === 'failed' ? 'Job exceeded its 60 second backend timeout' : null,
+      }),
+    }));
+    await page.route('**/api/jobs/job_timeout/retry', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        jobId: 'job_timeout', operation: 'inspect', status: 'queued',
+        pollUrl: '/api/jobs/job_timeout', pollAfterMs: 10, retryable: false,
+      }),
+    }));
+
+    await page.locator('.article-card').first().click();
+    await page.locator('#panel-inspect-btn').click();
+    await expect(page.locator('#panel-job-title')).toHaveText('Action failed');
+    await expect(page.locator('#panel-job-error')).toContainText('backend timeout');
+
+    status = 'completed';
+    await page.locator('#panel-retry-job-btn').click();
+    await expect(page.locator('#panel-job-region')).toBeHidden();
+    expect(articleRefreshes).toBeGreaterThan(0);
+  });
+
   test('renders all gate states and keeps Pending passive', async ({ page }) => {
     await expect(page.locator('.card-gate[data-state="pass"]')).toHaveCount(3);
     await expect(page.locator('.card-gate[data-state="warn"]')).toHaveCount(1);

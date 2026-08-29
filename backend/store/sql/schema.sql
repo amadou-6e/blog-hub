@@ -149,6 +149,14 @@ CREATE TABLE IF NOT EXISTS jobs (
     user_id             TEXT REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS job_retry_requests (
+    job_id           TEXT NOT NULL REFERENCES jobs(job_id) ON DELETE CASCADE,
+    user_id          TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    idempotency_key  TEXT NOT NULL,
+    created_at       TEXT NOT NULL,
+    PRIMARY KEY (job_id, idempotency_key)
+);
+
 CREATE TABLE IF NOT EXISTS job_attempts (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id       TEXT NOT NULL REFERENCES jobs(job_id) ON DELETE CASCADE,

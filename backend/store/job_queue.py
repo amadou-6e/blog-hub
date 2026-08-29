@@ -137,6 +137,7 @@ class DurableJobStoreMixin:
 
     def list_jobs(
         self, user_id: str, *, status: str | None = None, queue: str | None = None,
+        article_id: str | None = None, active: bool | None = None,
         limit: int = 50, offset: int = 0,
     ) -> list[dict]:
         clauses = ["user_id=?"]
@@ -147,6 +148,13 @@ class DurableJobStoreMixin:
         if queue:
             clauses.append("queue=?")
             params.append(queue)
+        if article_id:
+            clauses.append("article_id=?")
+            params.append(_sanitize(article_id))
+        if active is True:
+            clauses.append("status IN ('queued','running','waiting')")
+        elif active is False:
+            clauses.append("status IN ('completed','failed','canceled','expired')")
         params.extend([max(1, min(limit, 200)), max(0, offset)])
         rows = self._con.execute(
             "SELECT * FROM jobs WHERE " + " AND ".join(clauses) +
@@ -417,27 +425,48 @@ class DurableJobStoreMixin:
                 (now_s, _sanitize(error), job_id, row["attempt_count"]),
             )
 
-    def retry_job(self, user_id: str, job_id: str) -> dict | None:
+    def retry_job(
+        self, user_id: str, job_id: str, *, idempotency_key: str | None = None,
+    ) -> dict | None:
         now_s = _ts(_now())
-        with self._con:
-            row = self._con.execute(
-                "SELECT status FROM jobs WHERE job_id=? AND user_id=?", (job_id, user_id)
-            ).fetchone()
-            if row is None:
-                return None
-            if row["status"] == "running":
-                raise ValueError("A running job cannot be retried")
-            if row["status"] == "completed":
-                return self.get_job(user_id, job_id)
-            self._con.execute(
-                """UPDATE jobs SET status='queued', available_at=?, completed_at=NULL,
-                   cancel_requested_at=NULL, terminal_error=NULL, error=NULL,
-                   claimed_by=NULL, lease_expires_at=NULL, updated_at=?
-                   , max_attempts=CASE WHEN attempt_count >= max_attempts
-                                      THEN attempt_count + 1 ELSE max_attempts END
-                   WHERE job_id=? AND user_id=?""",
-                (now_s, now_s, job_id, user_id),
-            )
+        safe_key = _sanitize(idempotency_key) if idempotency_key else None
+        with self._workspace_lock.acquire():
+            with self._con:
+                row = self._con.execute(
+                    "SELECT status FROM jobs WHERE job_id=? AND user_id=?",
+                    (job_id, user_id),
+                ).fetchone()
+                if row is None:
+                    return None
+                if safe_key:
+                    repeated = self._con.execute(
+                        "SELECT 1 FROM job_retry_requests "
+                        "WHERE job_id=? AND user_id=? AND idempotency_key=?",
+                        (job_id, user_id, safe_key),
+                    ).fetchone()
+                    if repeated:
+                        return self.get_job(user_id, job_id)
+                if row["status"] in {"queued", "running"}:
+                    raise ValueError("This job is already active")
+                if row["status"] == "completed":
+                    raise ValueError("A completed job cannot be retried")
+                if safe_key:
+                    self._con.execute(
+                        "INSERT INTO job_retry_requests "
+                        "(job_id, user_id, idempotency_key, created_at) "
+                        "VALUES (?,?,?,?)",
+                        (job_id, user_id, safe_key, now_s),
+                    )
+                self._con.execute(
+                    """UPDATE jobs SET status='queued', available_at=?,
+                       completed_at=NULL, cancel_requested_at=NULL,
+                       terminal_error=NULL, error=NULL, claimed_by=NULL,
+                       lease_expires_at=NULL, updated_at=?,
+                       max_attempts=CASE WHEN attempt_count >= max_attempts
+                                         THEN attempt_count + 1 ELSE max_attempts END
+                       WHERE job_id=? AND user_id=?""",
+                    (now_s, now_s, job_id, user_id),
+                )
         return self.get_job(user_id, job_id)
 
     def begin_job_effect(

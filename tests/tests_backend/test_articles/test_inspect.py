@@ -14,6 +14,14 @@ class TestInspectArticle:
         r = client.post("/api/articles/art_unknown/inspect")
         assert r.status_code == 404
 
+    def test_repeated_idempotency_key_returns_the_same_job(self, client: TestClient):
+        headers = {"Idempotency-Key": "overview-inspect-art-001"}
+        first = client.post("/api/articles/art_001/inspect", headers=headers)
+        second = client.post("/api/articles/art_001/inspect", headers=headers)
+
+        assert first.status_code == second.status_code == 202
+        assert second.json()["jobId"] == first.json()["jobId"]
+
     def test_gate_pass_for_long_article(self, client: TestClient, run_jobs):
         # art_001 word_count=1820 → expect pass
         client.post("/api/articles/art_001/inspect")
