@@ -61,7 +61,9 @@
         ...normalizeDestination(article.destinations && article.destinations[platform]),
       })),
       timeline: Array.isArray(article.timeline) ? article.timeline : [],
-      primaryAction: activeJob ? { ...action, label: busyLabel, disabled: true } : action,
+      primaryAction: activeJob
+        ? { ...action, label: busyLabel, disabled: true }
+        : { ...action, disabled: action.kind === 'schedule' },
       inspectDisabled: Boolean(activeJob),
     };
   }
