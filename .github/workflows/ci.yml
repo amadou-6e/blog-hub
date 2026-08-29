@@ -83,6 +83,9 @@ jobs:
       - name: Validate generated contracts
         run: npm run check:contracts
 
+      - name: Run JavaScript unit tests
+        run: npm run test:unit:js
+
   pytest-browser-tests:
     name: Pytest browser smoke gate
     runs-on: ubuntu-latest

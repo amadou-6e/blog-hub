@@ -483,7 +483,7 @@
         <!-- Search -->
         <div style="position:relative;flex-shrink:0;">
           <svg style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:#5a6080;" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path stroke-linecap="round" d="m21 21-4.35-4.35"/></svg>
-          <input id="search-input" type="text" placeholder="Search articles…" oninput="applyFilters()"
+          <input id="search-input" type="text" placeholder="Search articles…" oninput="scheduleSearchFilter(this.value)" onkeydown="handleSearchKeydown(event)"
             style="padding:6px 10px 6px 30px;font-size:12px;border-radius:6px;border:1px solid #252a38;background:#181c27;color:#c9cfe0;width:260px;font-family:inherit;outline:none;"
             onfocus="this.style.borderColor='#6366f1'" onblur="this.style.borderColor='#252a38'" />
         </div>
@@ -567,6 +567,7 @@
   </div>
 </div>
 
+<script src="filter-state.js"></script>
 <script>
 // --- Data ----------------------------------------------------------
 let ARTICLES = [];
@@ -618,6 +619,7 @@ const PLATFORM_LABEL = { medium: 'Medium', hashnode: 'Hashnode', devto: 'Dev.to'
 let selectedId     = null;
 let statusFilter   = 'all';
 let platformFilter = new Set();
+let searchQuery    = '';
 let showSkeleton   = false;
 let showEmpty      = false;
 let openMenuId     = null;
@@ -633,7 +635,10 @@ let isLoadingMore     = false; // a "Load more" fetch is in flight
 let loadMoreError     = null;  // message from the last failed "Load more" attempt
 let overviewLoadGeneration = 0; // invalidates stale full-overview reloads
 let pageLoadGeneration     = 0; // invalidates stale incremental page loads
+let overviewLoadController = null;
+let pageLoadController     = null;
 const loadedArticleIds = new Set();
+const searchFilter = OverviewFilters.createDebouncedFilter(settleSearchFilter, 250);
 
 // --- Helpers -------------------------------------------------------
 const DOT_COLOR = {
@@ -730,11 +735,11 @@ function articlesPageUrl(page) {
 
 // Fetch pages 1..pagesToLoad and concatenate them, preserving server order.
 // Returns null if a newer load generation started while this was in flight.
-async function fetchArticlePages(pagesToLoad, generation) {
+async function fetchArticlePages(pagesToLoad, generation, signal) {
   let items = [];
   let total = 0;
   for (let page = 1; page <= pagesToLoad; page += 1) {
-    const payload = await fetchJson(articlesPageUrl(page));
+    const payload = await fetchJson(articlesPageUrl(page), { signal });
     if (generation !== overviewLoadGeneration) return null; // superseded — discard
     items = items.concat(payload.items);
     total = payload.total;
@@ -746,15 +751,16 @@ async function fetchArticlePages(pagesToLoad, generation) {
 // action-triggered refresh (push/inspect/etc.) never collapses an already
 // expanded list back down to the first 100 articles.
 async function loadOverview() {
+  if (overviewLoadController) overviewLoadController.abort();
+  overviewLoadController = new AbortController();
+  const signal = overviewLoadController.signal;
   const generation = (overviewLoadGeneration += 1);
-  pageLoadGeneration += 1;
-  isLoadingMore = false;
-  loadMoreError = null;
+  invalidateInFlightPageLoad();
 
   const pagesToLoad = Math.max(1, currentPage);
   const [articlesResult, connectionsPayload] = await Promise.all([
-    fetchArticlePages(pagesToLoad, generation),
-    fetchJson('/api/connections'),
+    fetchArticlePages(pagesToLoad, generation, signal),
+    fetchJson('/api/connections', { signal }),
   ]);
 
   if (generation !== overviewLoadGeneration || articlesResult === null) return; // stale
@@ -783,8 +789,7 @@ function hasMoreArticles() {
 }
 
 function hasActiveFilters() {
-  const query = document.getElementById('search-input').value.trim();
-  return query.length > 0 || statusFilter !== 'all' || platformFilter.size > 0;
+  return searchQuery.length > 0 || statusFilter !== 'all' || platformFilter.size > 0;
 }
 
 function appendArticlePage(payload, page) {
@@ -806,28 +811,35 @@ async function loadMoreArticles() {
   if (isLoadingMore || !hasMoreArticles()) return;
   const generation = pageLoadGeneration;
   const nextPage = currentPage + 1;
+  pageLoadController = new AbortController();
+  const signal = pageLoadController.signal;
 
   isLoadingMore = true;
   loadMoreError = null;
   render();
 
   try {
-    const payload = await fetchJson(articlesPageUrl(nextPage));
+    const payload = await fetchJson(articlesPageUrl(nextPage), { signal });
     if (generation !== pageLoadGeneration) return; // superseded
     appendArticlePage(payload, nextPage);
   } catch (error) {
-    if (generation === pageLoadGeneration) {
+    if (error.name !== 'AbortError' && generation === pageLoadGeneration) {
       loadMoreError = error.message || 'Failed to load more articles.';
     }
   } finally {
-    if (generation === pageLoadGeneration) isLoadingMore = false;
-    render();
+    if (generation === pageLoadGeneration) {
+      isLoadingMore = false;
+      pageLoadController = null;
+      render();
+    }
   }
 }
 
 async function loadRemainingArticlesForFilters() {
   if (isLoadingMore || !hasActiveFilters() || !hasMoreArticles()) return;
   const generation = pageLoadGeneration;
+  pageLoadController = new AbortController();
+  const signal = pageLoadController.signal;
   isLoadingMore = true;
   loadMoreError = null;
   render();
@@ -835,17 +847,20 @@ async function loadRemainingArticlesForFilters() {
   try {
     while (generation === pageLoadGeneration && hasMoreArticles()) {
       const nextPage = currentPage + 1;
-      const payload = await fetchJson(articlesPageUrl(nextPage));
+      const payload = await fetchJson(articlesPageUrl(nextPage), { signal });
       if (generation !== pageLoadGeneration) return;
       appendArticlePage(payload, nextPage);
     }
   } catch (error) {
-    if (generation === pageLoadGeneration) {
+    if (error.name !== 'AbortError' && generation === pageLoadGeneration) {
       loadMoreError = error.message || 'Failed to load all articles for filtering.';
     }
   } finally {
-    if (generation === pageLoadGeneration) isLoadingMore = false;
-    render();
+    if (generation === pageLoadGeneration) {
+      isLoadingMore = false;
+      pageLoadController = null;
+      render();
+    }
   }
 }
 
@@ -856,6 +871,8 @@ async function loadRemainingArticlesForFilters() {
 // state the user has since changed. The user can simply press "Load more"
 // again once filters settle.
 function invalidateInFlightPageLoad() {
+  if (pageLoadController) pageLoadController.abort();
+  pageLoadController = null;
   pageLoadGeneration += 1;
   isLoadingMore = false;
   loadMoreError = null;
@@ -935,20 +952,11 @@ function defaultPreviewPlatform(a) {
 }
 
 function matchesFilters(a) {
-  const q = document.getElementById('search-input').value.toLowerCase();
-  if (q && !a.title.toLowerCase().includes(q)) return false;
-  if (statusFilter !== 'all') {
-    const statuses = Object.values(a.destinations).map(d => d.status);
-    if (statusFilter === 'error'     && !statuses.includes('error'))     return false;
-    if (statusFilter === 'ready'     && !statuses.includes('ready'))     return false;
-    if (statusFilter === 'published' && !statuses.every(d => d === 'published')) return false;
-    if (statusFilter === 'drafting'  && !statuses.some(d => ['draft','pending','review'].includes(d))) return false;
-  }
-  if (platformFilter.size > 0) {
-    const hasPlatform = [...platformFilter].some(p => a.destinations[p] && a.destinations[p].status !== 'none');
-    if (!hasPlatform) return false;
-  }
-  return true;
+  return OverviewFilters.matchesOverviewFilters(a, {
+    search: searchQuery,
+    status: statusFilter,
+    platforms: [...platformFilter],
+  });
 }
 
 // --- Thumbnail builder ---------------------------------------------
@@ -1377,8 +1385,27 @@ function applyFilters() {
   void loadRemainingArticlesForFilters();
 }
 
+function settleSearchFilter(value) {
+  searchQuery = OverviewFilters.normalizeSearch(value);
+  applyFilters();
+}
+
+function scheduleSearchFilter(value) {
+  searchFilter.schedule(value);
+}
+
+function handleSearchKeydown(event) {
+  if (event.key !== 'Escape') return;
+  event.preventDefault();
+  const input = document.getElementById('search-input');
+  input.value = '';
+  searchFilter.flush('');
+}
+
 function clearFilters() {
+  searchFilter.cancel();
   document.getElementById('search-input').value = '';
+  searchQuery = '';
   statusFilter = 'all';
   platformFilter.clear();
   document.querySelectorAll('.pill-filter').forEach(b => b.classList.remove('active'));

@@ -7,6 +7,7 @@ const windowsPython = path.join(__dirname, '.venv', 'Scripts', 'python.exe');
 const PYTHON = process.env.PYTHON ||
   (process.platform === 'win32' && fs.existsSync(windowsPython) ? windowsPython : 'python');
 const PYTHON_COMMAND = process.env.BLOGHUB_PLAYWRIGHT_PYTHON_COMMAND || `"${PYTHON}"`;
+const BASE_URL = process.env.BLOGHUB_TEST_URL || 'http://localhost:8000';
 
 module.exports = defineConfig({
   testDir: './tests',
@@ -19,7 +20,7 @@ module.exports = defineConfig({
     ? [['list'], ['html', { outputFolder: 'tests/results/html', open: 'never' }], ['json', { outputFile: 'tests/results/report.json' }]]
     : [['list'], ['json', { outputFile: 'tests/results/report.json' }]],
 
-  webServer: {
+  webServer: process.env.BLOGHUB_TEST_URL ? undefined : {
     command: `${PYTHON_COMMAND} -m uvicorn backend.main:app --port 8000 --no-access-log`,
     cwd: __dirname,
     url: 'http://localhost:8000/health',
@@ -34,7 +35,7 @@ module.exports = defineConfig({
   },
 
   use: {
-    baseURL: 'http://localhost:8000',
+    baseURL: BASE_URL,
     trace: 'on-first-retry',
   },
 
