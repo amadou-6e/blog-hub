@@ -153,15 +153,23 @@ def duplicate_article(
 
 
 @router.post("/{article_id}/archive", response_model=ArchiveArticleResponse)
-def archive_article(request: Request, article_id: str):
-    if not store.archive_article(request.state.user_id, article_id):
+def archive_article(
+    request: Request,
+    article_id: str,
+    idempotency_key: str | None = Header(default=None, min_length=1, max_length=200),
+):
+    if not store.archive_article(request.state.user_id, article_id, idempotency_key):
         raise _article_not_found()
     return ArchiveArticleResponse(id=article_id, archived=True)
 
 
 @router.delete("/{article_id}", status_code=204)
-def delete_article(request: Request, article_id: str):
-    result = store.delete_article(request.state.user_id, article_id)
+def delete_article(
+    request: Request,
+    article_id: str,
+    idempotency_key: str | None = Header(default=None, min_length=1, max_length=200),
+):
+    result = store.delete_article(request.state.user_id, article_id, idempotency_key)
     if result == "not_found":
         raise _article_not_found()
     if result == "published":

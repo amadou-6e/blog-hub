@@ -7,6 +7,13 @@ import backend.store as store
 
 def test_duplicate_is_idempotent_and_creates_an_independent_draft(client: TestClient):
     original = client.get("/api/articles/art_001").json()
+    store.store_asset(
+        store._backend.SEED_USER_ID,
+        "art_001",
+        "diagram.png",
+        b"duplicate-me",
+        "image/png",
+    )
     headers = {"Idempotency-Key": "duplicate-art-001-once"}
 
     first = client.post("/api/articles/art_001/duplicate", headers=headers)
@@ -21,7 +28,15 @@ def test_duplicate_is_idempotent_and_creates_an_independent_draft(client: TestCl
     assert duplicate["content"] == original["content"]
     assert duplicate["word_count"] == original["word_count"]
     assert duplicate["gate"] == "pending"
+    assert duplicate["preview_image_url"].startswith(
+        f"/api/articles/{duplicate_id}/assets/"
+    )
     assert all(item["status"] == "none" for item in duplicate["destinations"].values())
+    copied_asset = client.get(
+        f"/api/articles/{duplicate_id}/assets/by-filename/diagram.png"
+    )
+    assert copied_asset.status_code == 200
+    assert copied_asset.content == b"duplicate-me"
     ids = [item["id"] for item in client.get("/api/articles").json()["items"]]
     assert ids.count(duplicate_id) == 1
 
@@ -42,15 +57,21 @@ def test_duplicate_unknown_article_returns_structured_404(client: TestClient):
 
 
 def test_archive_removes_article_from_active_list_but_retains_history(client: TestClient):
-    response = client.post("/api/articles/art_004/archive")
+    headers = {"Idempotency-Key": "archive-art-004"}
+    response = client.post("/api/articles/art_004/archive", headers=headers)
 
     assert response.status_code == 200
     assert response.json() == {"id": "art_004", "archived": True}
     ids = [item["id"] for item in client.get("/api/articles").json()["items"]]
     assert "art_004" not in ids
-    archived = store.get_article("user_seed", "art_004")
-    assert archived is not None
-    assert any(entry["event"] == "Article archived" for entry in archived["recent_timeline"])
+    assert client.get("/api/articles/art_004").status_code == 404
+    assert client.post("/api/articles/art_004/inspect").status_code == 404
+    assert client.post("/api/articles/art_004/push").status_code == 404
+    timeline = store._backend._con.execute(
+        "SELECT event FROM article_timeline WHERE article_id='art_004'"
+    ).fetchall()
+    assert any(row["event"] == "Article archived" for row in timeline)
+    assert client.post("/api/articles/art_004/archive", headers=headers).status_code == 200
 
 
 def test_archive_unknown_or_already_archived_article_returns_404(client: TestClient):
@@ -60,11 +81,30 @@ def test_archive_unknown_or_already_archived_article_returns_404(client: TestCli
 
 
 def test_delete_single_article_and_report_not_found(client: TestClient):
-    assert client.delete("/api/articles/art_004").status_code == 204
+    headers = {"Idempotency-Key": "delete-art-004"}
+    assert client.delete("/api/articles/art_004", headers=headers).status_code == 204
+    assert client.delete("/api/articles/art_004", headers=headers).status_code == 204
     missing = client.delete("/api/articles/art_004")
 
     assert missing.status_code == 404
     assert missing.json()["detail"]["error"] == "not_found"
+
+
+def test_archived_articles_do_not_match_import_identity_lookups(client: TestClient):
+    article = client.get("/api/articles/art_004").json()
+    store._backend._con.execute(
+        "UPDATE articles SET canonical_url=? WHERE id='art_004'",
+        ("https://example.test/archived",),
+    )
+    store._backend._con.commit()
+    assert client.post("/api/articles/art_004/archive").status_code == 200
+
+    assert store.find_article_by_canonical_url(
+        store._backend.SEED_USER_ID, "https://example.test/archived"
+    ) is None
+    assert store.find_article_by_title(
+        store._backend.SEED_USER_ID, article["title"]
+    ) is None
 
 
 def test_delete_published_article_returns_structured_conflict(client: TestClient):

@@ -51,6 +51,15 @@ CREATE TABLE IF NOT EXISTS article_duplicate_requests (
     PRIMARY KEY (user_id, source_article_id, idempotency_key)
 );
 
+CREATE TABLE IF NOT EXISTS article_mutation_requests (
+    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    article_id      TEXT NOT NULL,
+    action          TEXT NOT NULL CHECK (action IN ('archive', 'delete')),
+    idempotency_key TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    PRIMARY KEY (user_id, article_id, action, idempotency_key)
+);
+
 CREATE TABLE IF NOT EXISTS article_destinations (
     article_id  TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
     platform    TEXT NOT NULL,

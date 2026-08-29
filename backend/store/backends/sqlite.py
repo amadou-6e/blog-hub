@@ -339,6 +339,13 @@ class SQLiteStore(
             (article_id,),
         ).fetchone()
         if row is None:
+            row = self._con.execute(
+                """SELECT id AS cover_asset_id FROM article_assets
+                   WHERE article_id=? AND mime_type LIKE 'image/%'
+                   ORDER BY id LIMIT 1""",
+                (article_id,),
+            ).fetchone()
+        if row is None:
             return None
         return f"/api/articles/{article_id}/assets/{row['cover_asset_id']}"
 
@@ -477,7 +484,10 @@ class SQLiteStore(
         return [self._load_article(r) for r in rows], total
 
     def get_article(self, user_id: str, article_id: str) -> dict | None:
-        row = self._con.execute("SELECT * FROM articles WHERE id=? AND user_id=?", (article_id, user_id)).fetchone()
+        row = self._con.execute(
+            "SELECT * FROM articles WHERE id=? AND user_id=? AND archived_at IS NULL",
+            (article_id, user_id),
+        ).fetchone()
         return self._load_article(row) if row else None
 
     def create_article(
@@ -822,6 +832,44 @@ class SQLiteStore(
                 duplicate_id, 1, title, body, source="user",
                 description="Article duplicated", created_by=user_id, created_at=now_s,
             )
+            asset_rows = self._con.execute(
+                """SELECT filename, asset_path, mime_type FROM article_assets
+                   WHERE article_id=? ORDER BY id""",
+                (article_id,),
+            ).fetchall()
+            source_assets_root = (
+                self._blobs_dir / "articles" / article_id / "assets"
+            ).resolve()
+            duplicate_assets_root = (
+                self._blobs_dir / "articles" / duplicate_id / "assets"
+            ).resolve()
+            for asset in asset_rows:
+                source_path = (self._blobs_dir / asset["asset_path"]).resolve()
+                try:
+                    source_path.relative_to(source_assets_root)
+                except ValueError:
+                    continue
+                if not source_path.is_file():
+                    continue
+                destination = (duplicate_assets_root / asset["filename"]).resolve()
+                try:
+                    destination.relative_to(duplicate_assets_root)
+                except ValueError:
+                    continue
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source_path, destination)
+                self._con.execute(
+                    """INSERT INTO article_assets
+                       (article_id, filename, asset_path, mime_type, created_at)
+                       VALUES (?,?,?,?,?)""",
+                    (
+                        duplicate_id,
+                        asset["filename"],
+                        str(destination.relative_to(self._blobs_dir)),
+                        asset["mime_type"],
+                        now_s,
+                    ),
+                )
             self._con.execute(
                 """INSERT INTO article_duplicate_requests
                    (user_id, source_article_id, idempotency_key, duplicate_article_id, created_at)
@@ -831,8 +879,17 @@ class SQLiteStore(
             self._con.commit()
             return self.get_article(user_id, duplicate_id), True
 
-    def archive_article(self, user_id: str, article_id: str) -> bool:
+    def archive_article(
+        self, user_id: str, article_id: str, idempotency_key: str | None = None,
+    ) -> bool:
         with self._workspace_lock.acquire():
+            if idempotency_key and self._con.execute(
+                """SELECT 1 FROM article_mutation_requests
+                   WHERE user_id=? AND article_id=? AND action='archive'
+                     AND idempotency_key=?""",
+                (user_id, article_id, idempotency_key),
+            ).fetchone():
+                return True
             cursor = self._con.execute(
                 """UPDATE articles SET archived_at=?, updated_at=?
                    WHERE id=? AND user_id=? AND archived_at IS NULL""",
@@ -840,11 +897,27 @@ class SQLiteStore(
             )
             if cursor.rowcount:
                 self._add_timeline(article_id, "Article archived")
+                if idempotency_key:
+                    self._con.execute(
+                        """INSERT INTO article_mutation_requests
+                           (user_id, article_id, action, idempotency_key, created_at)
+                           VALUES (?,?,'archive',?,?)""",
+                        (user_id, article_id, idempotency_key, _ts(_now())),
+                    )
             self._con.commit()
             return bool(cursor.rowcount)
 
-    def delete_article(self, user_id: str, article_id: str) -> str:
+    def delete_article(
+        self, user_id: str, article_id: str, idempotency_key: str | None = None,
+    ) -> str:
         with self._workspace_lock.acquire():
+            if idempotency_key and self._con.execute(
+                """SELECT 1 FROM article_mutation_requests
+                   WHERE user_id=? AND article_id=? AND action='delete'
+                     AND idempotency_key=?""",
+                (user_id, article_id, idempotency_key),
+            ).fetchone():
+                return "deleted"
             article = self._con.execute(
                 "SELECT id FROM articles WHERE id=? AND user_id=?",
                 (article_id, user_id),
@@ -861,6 +934,13 @@ class SQLiteStore(
             self._con.execute(
                 "DELETE FROM articles WHERE id=? AND user_id=?", (article_id, user_id),
             )
+            if idempotency_key:
+                self._con.execute(
+                    """INSERT INTO article_mutation_requests
+                       (user_id, article_id, action, idempotency_key, created_at)
+                       VALUES (?,?,'delete',?,?)""",
+                    (user_id, article_id, idempotency_key, _ts(_now())),
+                )
             self._con.commit()
             blob_dir = self._blobs_dir / "articles" / article_id
             if blob_dir.exists():
@@ -869,13 +949,18 @@ class SQLiteStore(
 
     def find_article_by_canonical_url(self, user_id: str, canonical_url: str) -> dict | None:
         url = canonical_url.strip().lower()
-        row = self._con.execute("SELECT * FROM articles WHERE LOWER(TRIM(canonical_url))=? AND user_id=?",
+        row = self._con.execute("""SELECT * FROM articles
+                                   WHERE LOWER(TRIM(canonical_url))=? AND user_id=?
+                                     AND archived_at IS NULL""",
                                 (url, user_id)).fetchone()
         return self._load_article(row) if row else None
 
     def find_article_by_title(self, user_id: str, title: str) -> dict | None:
         needle = " ".join(title.strip().lower().split())
-        rows = self._con.execute("SELECT * FROM articles WHERE user_id=?", (user_id,)).fetchall()
+        rows = self._con.execute(
+            "SELECT * FROM articles WHERE user_id=? AND archived_at IS NULL",
+            (user_id,),
+        ).fetchall()
         for row in rows:
             hay = " ".join(row["title"].strip().lower().split())
             if hay == needle:

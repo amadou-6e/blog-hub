@@ -187,7 +187,7 @@
       this.showPending(article, action, context);
 
       try {
-        const headers = action === 'duplicate' ? { 'Idempotency-Key': idempotencyKey } : {};
+        const headers = { 'Idempotency-Key': idempotencyKey };
         const response = await fetch(
           `/api/articles/${encodeURIComponent(article.id)}/${action === 'delete' ? '' : action}`.replace(/\/$/, ''),
           { method: action === 'delete' ? 'DELETE' : 'POST', headers },

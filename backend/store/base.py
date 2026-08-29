@@ -138,10 +138,14 @@ class ArticleStore(Protocol):
     ) -> tuple[dict | None, bool]:
         ...
 
-    def archive_article(self, user_id: str, article_id: str) -> bool:
+    def archive_article(
+        self, user_id: str, article_id: str, idempotency_key: str | None = None,
+    ) -> bool:
         ...
 
-    def delete_article(self, user_id: str, article_id: str) -> str:
+    def delete_article(
+        self, user_id: str, article_id: str, idempotency_key: str | None = None,
+    ) -> str:
         ...
 
     def find_article_by_canonical_url(self, canonical_url: str) -> dict | None:

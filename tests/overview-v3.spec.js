@@ -90,13 +90,20 @@ test.describe('Current overview screen', () => {
     await expect(copies).toHaveClass(/selected/);
   });
 
-  test('Archive removes the article from active results while retaining it in storage', async ({ page }) => {
+  test('Archive removes the article from active results and active APIs', async ({ page }) => {
+    let idempotencyKey = null;
+    page.on('request', request => {
+      if (request.url().endsWith('/api/articles/art_004/archive')) {
+        idempotencyKey = request.headers()['idempotency-key'];
+      }
+    });
     await page.locator('.article-card[data-id="art_004"] .card-context-trigger').click();
     await page.getByRole('menuitem', { name: 'Archive' }).click();
 
     await expect(page.locator('.article-card[data-id="art_004"]')).toHaveCount(0);
     const retained = await page.request.get('/api/articles/art_004');
-    expect(retained.ok()).toBeTruthy();
+    expect(retained.status()).toBe(404);
+    expect(idempotencyKey).toBeTruthy();
   });
 
   test('Delete uses inline confirmation and Cancel sends no request', async ({ page }) => {
@@ -116,12 +123,19 @@ test.describe('Current overview screen', () => {
   });
 
   test('confirmed Delete removes an unpublished article', async ({ page }) => {
+    let idempotencyKey = null;
+    page.on('request', request => {
+      if (request.method() === 'DELETE' && request.url().endsWith('/api/articles/art_004')) {
+        idempotencyKey = request.headers()['idempotency-key'];
+      }
+    });
     await page.locator('.article-card[data-id="art_004"] .card-context-trigger').click();
     await page.getByRole('menuitem', { name: 'Delete' }).click();
     await page.locator('.card-delete-confirm').click();
 
     await expect(page.locator('.article-card[data-id="art_004"]')).toHaveCount(0);
     expect((await page.request.get('/api/articles/art_004')).status()).toBe(404);
+    expect(idempotencyKey).toBeTruthy();
   });
 
   test('published delete conflict remains inline and preserves the article', async ({ page }) => {
