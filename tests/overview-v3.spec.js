@@ -67,24 +67,43 @@ test.describe('Current overview screen', () => {
     expect(secondPageRequests).toBe(1);
   });
 
-  test('Escape clears search and restores the retained selection', async ({ page }) => {
+  test('settled search clears selection and Escape restores only the results', async ({ page }) => {
     const card = page.locator('.article-card').first();
     await card.locator('.article-card-title').click();
     await expect(page.locator('#side-panel')).not.toHaveClass(/hidden/);
-    const selectedId = await page.locator('.article-card.selected').getAttribute('data-id');
-    expect(selectedId).not.toBeNull();
 
     const input = page.locator('#search-input');
     await input.fill('no article has this title');
     await expect(page.locator('#no-results')).toBeVisible();
     await expect(page.locator('#article-count')).toHaveText('0 articles');
-    await expect(page.locator('#side-panel')).not.toHaveClass(/hidden/);
+    await expect(page.locator('#side-panel')).toHaveClass(/hidden/);
+    expect(await page.evaluate(() => selectedId)).toBeNull();
 
     await input.press('Escape');
     await expect(input).toHaveValue('');
     await expect(page.locator('.article-card')).toHaveCount(6);
-    await expect(page.locator(`.article-card[data-id="${selectedId}"]`)).toHaveClass(/selected/);
+    await expect(page.locator('.article-card.selected')).toHaveCount(0);
+    await expect(page.locator('#side-panel')).toHaveClass(/hidden/);
+    expect(await page.evaluate(() => selectedId)).toBeNull();
+  });
+
+  test('status and platform filters clear excluded selections', async ({ page }) => {
+    const published = page.locator('.article-card[data-id="art_003"]');
+    await published.locator('.article-card-title').click();
     await expect(page.locator('#side-panel')).not.toHaveClass(/hidden/);
+
+    await page.locator('#sf-drafting').click();
+    await expect(page.locator('#side-panel')).toHaveClass(/hidden/);
+    expect(await page.evaluate(() => selectedId)).toBeNull();
+
+    await page.locator('#sf-all').click();
+    const mediumOnly = page.locator('.article-card[data-id="art_004"]');
+    await mediumOnly.locator('.article-card-title').click();
+    await expect(page.locator('#side-panel')).not.toHaveClass(/hidden/);
+
+    await page.locator('#pf-hashnode').click();
+    await expect(page.locator('#side-panel')).toHaveClass(/hidden/);
+    expect(await page.evaluate(() => selectedId)).toBeNull();
   });
 
   test('keeps status single-select and combines platforms with OR semantics', async ({ page }) => {
