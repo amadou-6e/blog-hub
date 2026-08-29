@@ -7,7 +7,7 @@ test.describe('Current overview screen', () => {
     const reset = await page.request.post('/api/dev/reset');
     expect(reset.ok()).toBeTruthy();
     await page.goto(OVERVIEW_URL);
-    await page.locator('.article-card').first().waitFor();
+    await expect(page.locator('#article-count')).not.toHaveText('— articles');
   });
 
   test('renders article cards from the backend', async ({ page }) => {
@@ -32,6 +32,74 @@ test.describe('Current overview screen', () => {
   test('opens the selected article in the editor', async ({ page }) => {
     await page.locator('.article-card').first().locator('.card-edit').click();
     await expect(page).toHaveURL(/\/screens\/editor\/v2\.html\?id=/);
+  });
+
+  test('does not reload articles when recovery finds no active job', async ({ page }) => {
+    let articleReloads = 0;
+    page.on('request', request => {
+      if (request.url().includes('/api/articles?')) articleReloads += 1;
+    });
+    await page.route('**/api/jobs?article_id=*&active=true&limit=10', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ jobs: [] }),
+    }));
+
+    const recovery = page.waitForResponse(
+      response => response.url().includes('/api/jobs?article_id=')
+    );
+    await page.locator('.article-card').first().click();
+    await recovery;
+
+    expect(articleReloads).toBe(0);
+    await expect(page.locator('#panel-job-region')).toBeHidden();
+  });
+
+  test('stops an abandoned job poller when switching cards', async ({ page }) => {
+    const cards = page.locator('.article-card');
+    const firstId = await cards.nth(0).getAttribute('data-id');
+    const secondId = await cards.nth(1).getAttribute('data-id');
+    await page.route('**/api/jobs?article_id=*&active=true&limit=10', route => {
+      const articleId = new URL(route.request().url()).searchParams.get('article_id');
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ jobs: articleId === firstId ? [{
+          jobId: 'job_switch', articleId: firstId, operation: 'push', status: 'running',
+          pollUrl: '/api/jobs/job_switch', pollAfterMs: 5000, retryable: false,
+        }] : [] }),
+      });
+    });
+
+    await cards.nth(0).click();
+    await expect(page.locator('#panel-job-title')).toHaveText('Running');
+    expect(await page.evaluate(id => jobLifecycle.pollTokens.has(id), firstId)).toBe(true);
+
+    await cards.nth(1).click();
+    await expect.poll(() => page.evaluate(id => ({
+      state: jobLifecycle.state(id),
+      polling: jobLifecycle.pollTokens.has(id),
+    }), firstId)).toEqual({ state: null, polling: false });
+    expect(secondId).not.toBe(firstId);
+  });
+
+  test('marks unavailable scheduling as disabled', async ({ page }) => {
+    const articleId = await page.evaluate(() => {
+      const article = ARTICLES[0];
+      article.action = {
+        ...article.action,
+        kind: 'schedule',
+        label: 'Schedule →',
+      };
+      render();
+      return article.id;
+    });
+
+    await page.locator(`.article-card[data-id="${articleId}"]`).click();
+    await expect(page.locator('#panel-primary-btn')).toBeDisabled();
+    await expect(page.locator('#panel-primary-btn')).toHaveAttribute(
+      'title', 'Publishing queue is not available yet'
+    );
   });
 
   test('submits one inspection and prevents duplicate actions while queued', async ({ page }) => {

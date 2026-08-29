@@ -63,6 +63,7 @@ class JobStatus(str, Enum):
     queued = "queued"
     running = "running"
     waiting = "waiting"
+    parked = "parked"
     retrying = "retrying"
     completed = "completed"
     failed = "failed"

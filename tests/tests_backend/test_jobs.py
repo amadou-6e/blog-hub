@@ -84,6 +84,21 @@ class TestJobs:
         assert response.json()["status"] == "retrying"
         assert response.json()["error"] == "temporary outage"
 
+    def test_parked_job_is_exposed_as_needing_explicit_retry(self, client: TestClient):
+        job_id = client.post("/api/articles/art_001/inspect").json()["jobId"]
+        claimed = store._backend.claim_job("test-worker", queues=("default",))
+        assert claimed["job_id"] == job_id
+        store._backend.defer_job(
+            job_id, "test-worker", "Remote result requires reconciliation"
+        )
+
+        response = client.get(f"/api/jobs/{job_id}")
+        assert response.status_code == 200
+        assert response.json()["status"] == "parked"
+        assert response.json()["retryable"] is True
+        active = client.get("/api/jobs?article_id=art_001&active=true").json()["jobs"]
+        assert active[0]["status"] == "parked"
+
 
 class TestSyncSchedules:
 

@@ -6,6 +6,11 @@
   const BUSY = new Set(['submitting', 'queued', 'running', 'retrying', 'recovering', 'canceling']);
   const TERMINAL = new Set(['completed', 'done', 'failed', 'canceled', 'expired']);
 
+  function publicStatus(job) {
+    if (job.status !== 'waiting') return job.status;
+    return job.availableAt || job.available_at ? 'retrying' : 'parked';
+  }
+
   function randomKey(prefix) {
     const value = globalThis.crypto && globalThis.crypto.randomUUID
       ? globalThis.crypto.randomUUID()
@@ -44,6 +49,11 @@
       this.states.delete(articleId);
       this.pollTokens.delete(articleId);
       this.onChange(articleId, null);
+    }
+
+    stop(articleId) {
+      if (!articleId) return;
+      this._clear(articleId);
     }
 
     _storageKey(articleId, operation) {
@@ -108,14 +118,12 @@
 
     async recover(articleId) {
       if (this.isBusy(articleId)) return this.state(articleId);
-      this._set(articleId, { status: 'recovering', operation: null });
       try {
         const payload = await this.request(
           `/api/jobs?article_id=${encodeURIComponent(articleId)}&active=true&limit=10`
         );
         const job = (payload.jobs || []).find(item => item.operation === 'push' || item.operation === 'inspect');
         if (job) return this._attach(articleId, job);
-        await this.onCompleted(articleId, null);
         this._clear(articleId);
         return null;
       } catch (error) {
@@ -175,13 +183,16 @@
         ...job,
         jobId: job.jobId || job.job_id,
         operation: job.operation || job.type,
-        status: job.status === 'waiting' ? 'retrying' : job.status,
+        status: publicStatus(job),
         pollUrl: job.pollUrl || `/api/jobs/${job.jobId || job.job_id}`,
         pollAfterMs: job.pollAfterMs || 2000,
       };
       this._set(articleId, normalized);
-      if (!TERMINAL.has(normalized.status)) void this._poll(articleId, normalized.jobId);
-      else void this._finish(articleId, normalized);
+      if (TERMINAL.has(normalized.status)) {
+        void this._finish(articleId, normalized);
+      } else if (normalized.status !== 'parked') {
+        void this._poll(articleId, normalized.jobId);
+      }
       return normalized;
     }
 
@@ -198,9 +209,13 @@
           const normalized = {
             ...current, ...job,
             operation: job.operation || job.type || current.operation,
-            status: job.status === 'waiting' ? 'retrying' : job.status,
+            status: publicStatus(job),
           };
           this._set(articleId, normalized);
+          if (normalized.status === 'parked') {
+            this.pollTokens.delete(articleId);
+            return;
+          }
           if (TERMINAL.has(normalized.status)) {
             await this._finish(articleId, normalized);
             return;

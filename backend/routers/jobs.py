@@ -18,7 +18,9 @@ class SyncScheduleRequest(BaseModel):
 
 
 def _response(job: dict) -> JobResponse:
-    public_status = "retrying" if job["status"] == "waiting" else job["status"]
+    public_status = job["status"]
+    if public_status == "waiting":
+        public_status = "retrying" if job["available_at"] is not None else "parked"
     return JobResponse(
         jobId=job["job_id"],
         type=job["type"],
@@ -40,7 +42,10 @@ def _response(job: dict) -> JobResponse:
         operation=job["type"],
         retryable=(
             job["type"] in {"push", "inspect"}
-            and job["status"] in {"failed", "canceled", "expired"}
+            and (
+                job["status"] in {"failed", "canceled", "expired"}
+                or (job["status"] == "waiting" and job["available_at"] is None)
+            )
         ),
         pollUrl=f"/api/jobs/{job['job_id']}",
         pollAfterMs=2000,
