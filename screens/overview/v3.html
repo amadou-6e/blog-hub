@@ -121,6 +121,26 @@
       overflow: hidden;
       background: #13172a;
     }
+    #panel-job-region {
+      margin: 0 16px 12px;
+      padding: 10px;
+      border: 1px solid #30364a;
+      border-radius: 6px;
+      background: #181d2d;
+    }
+    #panel-job-region[data-tone="error"] { border-color: #5a3038; background: #21181f; }
+    #panel-job-region[data-tone="warning"] { border-color: #554921; background: #211e16; }
+    #panel-job-region[data-tone="success"] { border-color: #28523c; background: #15231d; }
+    .panel-job-action {
+      font: 500 11px Inter, system-ui, sans-serif;
+      padding: 5px 8px;
+      border-radius: 5px;
+      border: 1px solid #3a4054;
+      color: #c9cfe0;
+      background: transparent;
+      cursor: pointer;
+    }
+    .panel-job-action:hover { border-color: #6366f1; color: #fff; }
 
     ::-webkit-scrollbar { width: 5px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -555,6 +575,16 @@
         <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#5a6080;margin-bottom:10px;">Timeline</div>
         <div id="panel-timeline" style="display:flex;flex-direction:column;gap:8px;"></div>
       </div>
+      <div id="panel-job-region" hidden role="status" aria-live="polite">
+        <div id="panel-job-title" style="font-size:12px;font-weight:600;color:#e8eaf2;"></div>
+        <div id="panel-job-meta" style="margin-top:4px;font:10px 'JetBrains Mono',monospace;color:#8a93b0;overflow-wrap:anywhere;"></div>
+        <div id="panel-job-error" style="display:none;margin-top:7px;font-size:11px;line-height:1.45;color:#fca5a5;"></div>
+        <div id="panel-job-actions" style="display:none;gap:6px;margin-top:8px;">
+          <button id="panel-cancel-job-btn" class="panel-job-action" type="button">Cancel</button>
+          <button id="panel-retry-job-btn" class="panel-job-action" type="button">Retry</button>
+          <button id="panel-retry-recovery-btn" class="panel-job-action" type="button">Retry recovery</button>
+        </div>
+      </div>
       <div style="padding:12px 16px;border-top:1px solid #252a38;display:flex;flex-direction:column;gap:6px;">
         <button id="panel-primary-btn" style="font-size:12px;font-weight:500;padding:8px;border-radius:6px;background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;width:100%;">—</button>
         <div style="display:flex;gap:6px;">
@@ -567,6 +597,7 @@
   </div>
 </div>
 
+<script src="./overview-job-lifecycle.js"></script>
 <script>
 // --- Data ----------------------------------------------------------
 let ARTICLES = [];
@@ -622,6 +653,7 @@ let showSkeleton   = false;
 let showEmpty      = false;
 let openMenuId     = null;
 let detailsPanelOpen = true;
+const SELECTED_ARTICLE_KEY = 'bloghub:overview:selected-article';
 // Per-card active preview platform: Map<articleId, 'medium'|'hashnode'|'devto'>
 const activePreview = new Map();
 
@@ -642,7 +674,7 @@ const DOT_COLOR = {
 };
 const GATE_COLOR = { pass: '#4ade80', warn: '#fbbf24', fail: '#f87171', pending: '#5a6080' };
 const GATE_LABEL = { pass: '✓ Pass', warn: '⚠ Warn', fail: '✗ Fail', pending: '—' };
-const activeJobs = new Map();
+let jobLifecycle = null;
 
 function formatRelative(isoValue) {
   const date = new Date(isoValue);
@@ -719,7 +751,19 @@ function buildLiveArticle(raw, index) {
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, options);
   if (!response.ok) {
-    throw new Error(await response.text() || `Request failed: ${response.status}`);
+    let message = `Request failed: ${response.status}`;
+    const body = await response.text();
+    try {
+      const payload = JSON.parse(body);
+      message = typeof payload.detail === 'string'
+        ? payload.detail
+        : payload.detail?.message || payload.detail?.error || message;
+    } catch (_) {
+      if (body) message = body;
+    }
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
   return response.json();
 }
@@ -868,38 +912,10 @@ async function runArticleAction(article, overrideKind = null) {
     return;
   }
   if (action.kind === 'schedule') {
-    alert('Schedule is not wired yet.');
     return;
   }
   const endpoint = action.kind === 'inspect' ? 'inspect' : 'push';
-  activeJobs.set(article.id, endpoint);
-  render();
-  try {
-    const accepted = await fetchJson(`/api/articles/${article.id}/${endpoint}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-    await pollJob(accepted.jobId);
-    await loadOverview();
-  } catch (error) {
-    alert(`Action failed: ${error.message}`);
-  } finally {
-    activeJobs.delete(article.id);
-    render();
-  }
-}
-
-async function pollJob(jobId) {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const job = await fetchJson(`/api/jobs/${jobId}`);
-    if (job.status === 'completed' || job.status === 'done') return job;
-    if (['failed','canceled','expired','error'].includes(job.status)) {
-      throw new Error(job.error || `Job ${job.status}`);
-    }
-    await new Promise(resolve => window.setTimeout(resolve, 500));
-  }
-  throw new Error('Timed out waiting for job completion');
+  await jobLifecycle.submit(article.id, endpoint);
 }
 
 function platformActionProps(status) {
@@ -1292,6 +1308,14 @@ function syncDetailsPanel() {
     return;
   }
 
+  const article = ARTICLES.find(item => item.id === selectedId);
+  if (!article) {
+    selectedId = null;
+    sessionStorage.removeItem(SELECTED_ARTICLE_KEY);
+    panel.classList.add('hidden');
+    return;
+  }
+
   panel.classList.remove('hidden');
   if (detailsPanelOpen) {
     panel.style.width = '300px';
@@ -1304,6 +1328,81 @@ function syncDetailsPanel() {
     content.style.display = 'none';
     arrow.innerHTML = '<polyline points="15 18 9 12 15 6"/>';
   }
+  renderDetailsArticle(article);
+}
+
+function renderDetailsArticle(article) {
+  document.getElementById('panel-title').textContent = article.title;
+  document.getElementById('panel-destinations').innerHTML = ['medium','hashnode','devto'].map(platform => {
+    const destination = article.destinations[platform];
+    return `<div style="display:flex;align-items:center;justify-content:space-between;">
+      <span style="color:#c9cfe0;font-size:12px;">${PLATFORM_LABEL[platform]}</span>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <span style="width:7px;height:7px;border-radius:50%;background:${DOT_COLOR[destination.status]||'#252a38'};display:inline-block;"></span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:${DOT_COLOR[destination.status]||'#5a6080'}">${destination.label}</span>
+      </div>
+    </div>`;
+  }).join('');
+  document.getElementById('panel-timeline').innerHTML = article.timeline.map(item =>
+    `<div style="display:flex;gap:8px;">
+      <span style="color:#5a6080;font-family:'JetBrains Mono',monospace;font-size:10px;width:48px;flex-shrink:0;padding-top:1px;">${item.time}</span>
+      <span style="color:#c9cfe0;font-size:12px;line-height:1.5;">${item.event}</span>
+    </div>`
+  ).join('');
+
+  const state = jobLifecycle ? jobLifecycle.state(article.id) : null;
+  const busy = jobLifecycle ? jobLifecycle.isBusy(article.id) : false;
+  const primary = document.getElementById('panel-primary-btn');
+  primary.textContent = article.action.label;
+  primary.style.background = article.action.bg;
+  primary.style.color = article.action.color;
+  primary.style.border = `1px solid ${article.action.border}`;
+  primary.disabled = busy;
+  primary.onclick = async () => { await runArticleAction(article); };
+  const inspect = document.getElementById('panel-inspect-btn');
+  inspect.disabled = busy;
+  inspect.onclick = async () => { await runArticleAction(article, 'inspect'); };
+  renderPanelJobState(article.id, state);
+}
+
+function renderPanelJobState(articleId, state) {
+  const region = document.getElementById('panel-job-region');
+  if (!state) {
+    region.hidden = true;
+    return;
+  }
+  const labels = {
+    submitting: 'Submitting action', queued: 'Queued', running: 'Running',
+    retrying: 'Retrying', canceling: 'Canceling', canceled: 'Canceled',
+    failed: 'Action failed', recovering: 'Recovering after reload',
+    'recovery-error': 'Recovery unavailable', completed: 'Completed',
+  };
+  const operation = state.operation
+    ? `${state.operation === 'inspect' ? 'Inspection' : 'Push'} operation`
+    : '';
+  region.hidden = false;
+  region.dataset.tone = ['failed', 'canceled'].includes(state.status)
+    ? 'error'
+    : ['retrying', 'recovering', 'recovery-error', 'canceling'].includes(state.status)
+      ? 'warning'
+      : state.status === 'completed' ? 'success' : 'default';
+  document.getElementById('panel-job-title').textContent = labels[state.status] || state.status;
+  document.getElementById('panel-job-meta').textContent = [operation, state.jobId].filter(Boolean).join(' · ');
+  const error = document.getElementById('panel-job-error');
+  error.style.display = state.error ? 'block' : 'none';
+  error.textContent = state.error || '';
+
+  const cancel = document.getElementById('panel-cancel-job-btn');
+  const retry = document.getElementById('panel-retry-job-btn');
+  const retryRecovery = document.getElementById('panel-retry-recovery-btn');
+  cancel.style.display = ['queued', 'running', 'retrying'].includes(state.status) ? 'inline-flex' : 'none';
+  retry.style.display = ['failed', 'canceled'].includes(state.status) && state.retryable ? 'inline-flex' : 'none';
+  retryRecovery.style.display = state.status === 'recovery-error' ? 'inline-flex' : 'none';
+  cancel.onclick = () => jobLifecycle.cancel(articleId);
+  retry.onclick = () => jobLifecycle.retry(articleId);
+  retryRecovery.onclick = () => jobLifecycle.retryRecovery(articleId);
+  document.getElementById('panel-job-actions').style.display =
+    [cancel, retry, retryRecovery].some(button => button.style.display !== 'none') ? 'flex' : 'none';
 }
 
 // --- Interactions --------------------------------------------------
@@ -1315,34 +1414,10 @@ function selectCard(id) {
     return;
   }
   selectedId = id;
-  render();
   detailsPanelOpen = true;
-  syncDetailsPanel();
-  const a = ARTICLES.find(x => x.id === selectedId);
-  document.getElementById('panel-title').textContent = a.title;
-  document.getElementById('panel-destinations').innerHTML = ['medium','hashnode','devto'].map(p => {
-    const d = a.destinations[p];
-    return `<div style="display:flex;align-items:center;justify-content:space-between;">
-      <span style="color:#c9cfe0;font-size:12px;">${PLATFORM_LABEL[p]}</span>
-      <div style="display:flex;align-items:center;gap:6px;">
-        <span style="width:7px;height:7px;border-radius:50%;background:${DOT_COLOR[d.status]||'#252a38'};display:inline-block;"></span>
-        <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:${DOT_COLOR[d.status]||'#5a6080'}">${d.label}</span>
-      </div>
-    </div>`;
-  }).join('');
-  document.getElementById('panel-timeline').innerHTML = a.timeline.map(t =>
-    `<div style="display:flex;gap:8px;">
-      <span style="color:#5a6080;font-family:'JetBrains Mono',monospace;font-size:10px;width:48px;flex-shrink:0;padding-top:1px;">${t.time}</span>
-      <span style="color:#c9cfe0;font-size:12px;line-height:1.5;">${t.event}</span>
-    </div>`
-  ).join('');
-  const pb = document.getElementById('panel-primary-btn');
-  pb.textContent = a.action.label;
-  pb.style.background = a.action.bg;
-  pb.style.color = a.action.color;
-  pb.style.border = `1px solid ${a.action.border}`;
-  pb.onclick = async () => { await runArticleAction(a); };
-  document.getElementById('panel-inspect-btn').onclick = async () => { await runArticleAction(a, 'inspect'); };
+  sessionStorage.setItem(SELECTED_ARTICLE_KEY, id);
+  render();
+  void jobLifecycle.recover(id);
 }
 
 function toggleDetailsPanel() {
@@ -1353,6 +1428,7 @@ function toggleDetailsPanel() {
 
 function closePanel() {
   selectedId = null;
+  sessionStorage.removeItem(SELECTED_ARTICLE_KEY);
   detailsPanelOpen = true;
   render();
   syncDetailsPanel();
@@ -1432,13 +1508,31 @@ function closeMenus() {
   openMenuId = null;
 }
 
+jobLifecycle = new OverviewJobLifecycle({
+  request: fetchJson,
+  storage: sessionStorage,
+  onChange: () => render(),
+  onCompleted: async () => {
+    await loadOverview();
+    render();
+  },
+});
+
 showSkeleton = true;
 render();
 loadOverview()
+  .then(() => {
+    const restoredId = sessionStorage.getItem(SELECTED_ARTICLE_KEY);
+    if (restoredId && ARTICLES.some(article => article.id === restoredId)) {
+      selectedId = restoredId;
+      detailsPanelOpen = true;
+    }
+  })
   .catch(error => { alert(`Failed to load overview: ${error.message}`); })
   .finally(() => {
     showSkeleton = false;
     render();
+    if (selectedId) void jobLifecycle.recover(selectedId);
   });
 </script>
 </body>

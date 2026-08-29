@@ -63,6 +63,7 @@ class JobStatus(str, Enum):
     queued = "queued"
     running = "running"
     waiting = "waiting"
+    retrying = "retrying"
     completed = "completed"
     failed = "failed"
     canceled = "canceled"
@@ -168,6 +169,12 @@ class JobResponse(BaseModel):
     updated_at: Optional[datetime] = Field(default=None, alias="updatedAt")
     completed_at: Optional[datetime] = Field(default=None, alias="completedAt")
     checkpoint: Optional[dict] = None
+    operation: str
+    retryable: bool = False
+    poll_url: str = Field(alias="pollUrl")
+    poll_after_ms: int = Field(default=2000, alias="pollAfterMs")
+    timeout_seconds: int = Field(default=300, alias="timeoutSeconds")
+    cancel_requested: bool = Field(default=False, alias="cancelRequested")
 
     model_config = {"populate_by_name": True}
 
@@ -175,6 +182,7 @@ class JobResponse(BaseModel):
 class AsyncAccepted(BaseModel):
     job_id: str = Field(alias="jobId")
     status: JobStatus
+    poll_url: str = Field(alias="pollUrl")
 
     model_config = {"populate_by_name": True}
 

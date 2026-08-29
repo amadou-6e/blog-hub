@@ -19,6 +19,15 @@ class TestPushArticle:
         r = client.post("/api/articles/art_unknown/push", json={})
         assert r.status_code == 404
 
+    def test_repeated_idempotency_key_returns_the_same_job(self, client: TestClient):
+        headers = {"Idempotency-Key": "overview-push-art-001"}
+        first = client.post("/api/articles/art_001/push", json={}, headers=headers)
+        second = client.post("/api/articles/art_001/push", json={}, headers=headers)
+
+        assert first.status_code == second.status_code == 202
+        assert second.json()["jobId"] == first.json()["jobId"]
+        assert second.json()["pollUrl"] == f"/api/jobs/{first.json()['jobId']}"
+
     @pytest.mark.integration
     def test_destinations_updated_after_push(self, client: TestClient, run_jobs):
         client.post("/api/articles/art_001/push", json={})

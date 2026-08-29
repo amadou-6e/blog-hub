@@ -18,10 +18,11 @@ class SyncScheduleRequest(BaseModel):
 
 
 def _response(job: dict) -> JobResponse:
+    public_status = "retrying" if job["status"] == "waiting" else job["status"]
     return JobResponse(
         jobId=job["job_id"],
         type=job["type"],
-        status=job["status"],
+        status=public_status,
         articleId=job["article_id"],
         result=job["result"],
         error=job["error"],
@@ -36,16 +37,27 @@ def _response(job: dict) -> JobResponse:
         updatedAt=job["updated_at"],
         completedAt=job["completed_at"],
         checkpoint=job["checkpoint"],
+        operation=job["type"],
+        retryable=(
+            job["type"] in {"push", "inspect"}
+            and job["status"] in {"failed", "canceled", "expired"}
+        ),
+        pollUrl=f"/api/jobs/{job['job_id']}",
+        pollAfterMs=2000,
+        timeoutSeconds=job["timeout_seconds"],
+        cancelRequested=job["cancel_requested_at"] is not None,
     )
 
 
 @router.get("")
 def list_jobs(
     request: Request, status: str | None = None, queue: str | None = None,
+    article_id: str | None = None, active: bool | None = None,
     limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
 ):
     jobs = store.list_jobs(
-        request.state.user_id, status=status, queue=queue, limit=limit, offset=offset
+        request.state.user_id, status=status, queue=queue, article_id=article_id,
+        active=active, limit=limit, offset=offset
     )
     return {"jobs": [_response(job) for job in jobs], "count": len(jobs)}
 
@@ -95,10 +107,15 @@ def cancel_job(request: Request, job_id: str):
     return _response(job)
 
 
-@router.post("/{job_id}/retry", response_model=JobResponse)
+@router.post("/{job_id}/retry", response_model=JobResponse, status_code=202)
 def retry_job(request: Request, job_id: str):
+    idempotency_key = request.headers.get("Idempotency-Key")
+    if not idempotency_key:
+        raise HTTPException(status_code=400, detail="Idempotency-Key is required")
     try:
-        job = store.retry_job(request.state.user_id, job_id)
+        job = store.retry_job(
+            request.state.user_id, job_id, idempotency_key=idempotency_key
+        )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if job is None:

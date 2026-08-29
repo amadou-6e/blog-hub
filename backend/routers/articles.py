@@ -525,7 +525,10 @@ def push_article(request: Request, article_id: str, body: dict = {}):
     idempotency_key = request.headers.get("Idempotency-Key")
     existing = store.find_job_by_idempotency_key(user_id, "push", idempotency_key)
     if existing:
-        return AsyncAccepted(jobId=existing["job_id"], status=existing["status"])
+        return AsyncAccepted(
+            jobId=existing["job_id"], status=existing["status"],
+            pollUrl=f"/api/jobs/{existing['job_id']}",
+        )
     store.set_destinations_pending(user_id, article_id, platforms)
     job = store.create_job(
         user_id,
@@ -537,7 +540,10 @@ def push_article(request: Request, article_id: str, body: dict = {}):
         max_attempts=4,
         timeout_seconds=300,
     )
-    return AsyncAccepted(jobId=job["job_id"], status=JobStatus.queued)
+    return AsyncAccepted(
+        jobId=job["job_id"], status=JobStatus.queued,
+        pollUrl=f"/api/jobs/{job['job_id']}",
+    )
 
 
 class BrowserPublishRequest(BaseModel):
@@ -886,15 +892,28 @@ def inspect_article(request: Request, article_id: str):
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
 
+    idempotency_key = request.headers.get("Idempotency-Key")
+    existing = store.find_job_by_idempotency_key(
+        user_id, "inspect", idempotency_key
+    )
+    if existing:
+        return AsyncAccepted(
+            jobId=existing["job_id"], status=existing["status"],
+            pollUrl=f"/api/jobs/{existing['job_id']}",
+        )
     job = store.create_job(
         user_id,
         "inspect",
         article_id,
         payload={"article_id": article_id},
+        idempotency_key=idempotency_key,
         max_attempts=2,
         timeout_seconds=60,
     )
-    return AsyncAccepted(jobId=job["job_id"], status=JobStatus.queued)
+    return AsyncAccepted(
+        jobId=job["job_id"], status=JobStatus.queued,
+        pollUrl=f"/api/jobs/{job['job_id']}",
+    )
 
 
 # ── Regenerate ────────────────────────────────────────────────────────────────
@@ -917,7 +936,10 @@ def regenerate_patches(request: Request, article_id: str):
         user_id, "regenerate", idempotency_key
     )
     if existing:
-        return AsyncAccepted(jobId=existing["job_id"], status=existing["status"])
+        return AsyncAccepted(
+            jobId=existing["job_id"], status=existing["status"],
+            pollUrl=f"/api/jobs/{existing['job_id']}",
+        )
     job = store.create_job(
         user_id,
         "regenerate",
@@ -928,7 +950,10 @@ def regenerate_patches(request: Request, article_id: str):
         max_attempts=3,
         timeout_seconds=300,
     )
-    return AsyncAccepted(jobId=job["job_id"], status=JobStatus.queued)
+    return AsyncAccepted(
+        jobId=job["job_id"], status=JobStatus.queued,
+        pollUrl=f"/api/jobs/{job['job_id']}",
+    )
 
 
 # ── Chat ──────────────────────────────────────────────────────────────────────
