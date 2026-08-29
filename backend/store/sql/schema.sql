@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS articles (
     source          TEXT NOT NULL DEFAULT 'native',
     source_platform TEXT,
     canonical_url   TEXT,
+    archived_at     TEXT,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
     user_id         TEXT REFERENCES users(id) ON DELETE CASCADE
@@ -37,6 +38,18 @@ CREATE TABLE IF NOT EXISTS articles (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_articles_id_user
     ON articles(id, user_id);
+
+CREATE INDEX IF NOT EXISTS idx_articles_user_archived
+    ON articles(user_id, archived_at);
+
+CREATE TABLE IF NOT EXISTS article_duplicate_requests (
+    user_id             TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source_article_id   TEXT NOT NULL,
+    idempotency_key     TEXT NOT NULL,
+    duplicate_article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+    created_at          TEXT NOT NULL,
+    PRIMARY KEY (user_id, source_article_id, idempotency_key)
+);
 
 CREATE TABLE IF NOT EXISTS article_destinations (
     article_id  TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,

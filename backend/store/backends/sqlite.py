@@ -435,7 +435,7 @@ class SQLiteStore(
     ) -> tuple[list[dict], int]:
         params: list = []
         joins = ""
-        wheres: list[str] = ["a.user_id=?"]
+        wheres: list[str] = ["a.user_id=?", "a.archived_at IS NULL"]
         params.append(user_id)
 
         if status and platform:
@@ -777,6 +777,95 @@ class SQLiteStore(
                         shutil.rmtree(blob_dir)
             self._con.commit()
             return blocked
+
+    def duplicate_article(
+        self, user_id: str, article_id: str, idempotency_key: str,
+    ) -> tuple[dict | None, bool]:
+        with self._workspace_lock.acquire():
+            existing = self._con.execute(
+                """SELECT duplicate_article_id FROM article_duplicate_requests
+                   WHERE user_id=? AND source_article_id=? AND idempotency_key=?""",
+                (user_id, article_id, idempotency_key),
+            ).fetchone()
+            if existing is not None:
+                duplicate = self.get_article(user_id, existing["duplicate_article_id"])
+                return duplicate, False
+
+            source = self._con.execute(
+                "SELECT * FROM articles WHERE id=? AND user_id=? AND archived_at IS NULL",
+                (article_id, user_id),
+            ).fetchone()
+            if source is None:
+                return None, False
+
+            duplicate_id = f"art_{uuid.uuid4().hex[:8]}"
+            title = f"Copy of {source['title']}"
+            body = self._read_body(source)
+            now_s = _ts(_now())
+            body_path = self._write_body(duplicate_id, body)
+            self._con.execute(
+                """INSERT INTO articles
+                   (id, title, body, body_path, word_count, gate, source, source_platform,
+                    canonical_url, archived_at, created_at, updated_at, user_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (duplicate_id, title, "", body_path, source["word_count"], "pending", "native",
+                 None, None, None, now_s, now_s, user_id),
+            )
+            for platform in _PLATFORMS:
+                self._con.execute(
+                    """INSERT INTO article_destinations
+                       (article_id, platform, status, label) VALUES (?,?,?,?)""",
+                    (duplicate_id, platform, "none", "—"),
+                )
+            self._add_timeline(duplicate_id, f"Duplicated from {source['title']}")
+            self._insert_article_revision(
+                duplicate_id, 1, title, body, source="user",
+                description="Article duplicated", created_by=user_id, created_at=now_s,
+            )
+            self._con.execute(
+                """INSERT INTO article_duplicate_requests
+                   (user_id, source_article_id, idempotency_key, duplicate_article_id, created_at)
+                   VALUES (?,?,?,?,?)""",
+                (user_id, article_id, idempotency_key, duplicate_id, now_s),
+            )
+            self._con.commit()
+            return self.get_article(user_id, duplicate_id), True
+
+    def archive_article(self, user_id: str, article_id: str) -> bool:
+        with self._workspace_lock.acquire():
+            cursor = self._con.execute(
+                """UPDATE articles SET archived_at=?, updated_at=?
+                   WHERE id=? AND user_id=? AND archived_at IS NULL""",
+                (_ts(_now()), _ts(_now()), article_id, user_id),
+            )
+            if cursor.rowcount:
+                self._add_timeline(article_id, "Article archived")
+            self._con.commit()
+            return bool(cursor.rowcount)
+
+    def delete_article(self, user_id: str, article_id: str) -> str:
+        with self._workspace_lock.acquire():
+            article = self._con.execute(
+                "SELECT id FROM articles WHERE id=? AND user_id=?",
+                (article_id, user_id),
+            ).fetchone()
+            if article is None:
+                return "not_found"
+            published = self._con.execute(
+                """SELECT 1 FROM article_destinations
+                   WHERE article_id=? AND status='published'""",
+                (article_id,),
+            ).fetchone()
+            if published is not None:
+                return "published"
+            self._con.execute(
+                "DELETE FROM articles WHERE id=? AND user_id=?", (article_id, user_id),
+            )
+            self._con.commit()
+            blob_dir = self._blobs_dir / "articles" / article_id
+            if blob_dir.exists():
+                shutil.rmtree(blob_dir)
+            return "deleted"
 
     def find_article_by_canonical_url(self, user_id: str, canonical_url: str) -> dict | None:
         url = canonical_url.strip().lower()

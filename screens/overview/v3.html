@@ -28,6 +28,7 @@
     }
   </script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="./overview-card-actions.css" rel="stylesheet" />
   <style>
     * { box-sizing: border-box; }
     body { background: #0f1117; color: #c9cfe0; margin: 0; }
@@ -125,23 +126,6 @@
     ::-webkit-scrollbar { width: 5px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #252a38; border-radius: 3px; }
-
-    /* Context menu */
-    .ctx-menu {
-      position: absolute; top: 100%; right: 0;
-      background: #1e2335; border: 1px solid #3a3f52;
-      border-radius: 6px; padding: 4px; z-index: 50;
-      min-width: 140px; box-shadow: 0 8px 24px #00000060;
-    }
-    .ctx-item {
-      display: block; width: 100%; text-align: left;
-      padding: 6px 10px; font-size: 12px; border-radius: 4px;
-      color: #c9cfe0; background: transparent; border: none;
-      cursor: pointer; font-family: inherit;
-    }
-    .ctx-item:hover { background: #252a38; }
-    .ctx-item.danger { color: #f87171; }
-    .ctx-item.danger:hover { background: #2d1a1a; }
 
     /* Platform tab in preview pane */
     .plat-tab {
@@ -567,6 +551,7 @@
   </div>
 </div>
 
+<script src="./overview-card-actions.js"></script>
 <script>
 // --- Data ----------------------------------------------------------
 let ARTICLES = [];
@@ -620,7 +605,6 @@ let statusFilter   = 'all';
 let platformFilter = new Set();
 let showSkeleton   = false;
 let showEmpty      = false;
-let openMenuId     = null;
 let detailsPanelOpen = true;
 // Per-card active preview platform: Map<articleId, 'medium'|'hashnode'|'devto'>
 const activePreview = new Map();
@@ -723,6 +707,28 @@ async function fetchJson(url, options = {}) {
   }
   return response.json();
 }
+
+const cardActions = new OverviewCardActions({
+  onEdit(articleId) {
+    window.location.href = `../editor/v2.html?id=${encodeURIComponent(articleId)}`;
+  },
+  onInspect(articleId) {
+    window.location.href = `../inspection/v1.html?id=${encodeURIComponent(articleId)}`;
+  },
+  async onSuccess(action, articleId, payload) {
+    cardActions.clearErrors();
+    if (action === 'duplicate') {
+      await loadOverview();
+      selectedId = null;
+      render();
+      selectCard(payload.article.id);
+      return;
+    }
+    if (selectedId === articleId) selectedId = null;
+    await loadOverview();
+    render();
+  },
+});
 
 function articlesPageUrl(page) {
   return `/api/articles?sortBy=updatedAt&sortDir=desc&page=${page}&pageSize=${PAGE_SIZE}`;
@@ -1092,6 +1098,7 @@ function renderCard(a) {
     };
     tabs.appendChild(tab);
   });
+  cardActions.mount(card, a, tabs);
   card.appendChild(tabs);
 
   const media = document.createElement('div');
@@ -1308,7 +1315,7 @@ function syncDetailsPanel() {
 
 // --- Interactions --------------------------------------------------
 function selectCard(id) {
-  closeMenus();
+  cardActions.close(false);
   if (id === selectedId) {
     detailsPanelOpen = !detailsPanelOpen;
     syncDetailsPanel();
@@ -1410,26 +1417,6 @@ function setView(v) {
   });
   const el = document.getElementById('nav-' + v);
   if (el) { el.style.borderBottomColor = '#6366f1'; el.style.color = '#e8eaf2'; el.style.fontWeight = '500'; }
-}
-
-function toggleMenu(id, wrap) {
-  if (openMenuId === id) { closeMenus(); return; }
-  closeMenus();
-  openMenuId = id;
-  const menu = document.createElement('div');
-  menu.className = 'ctx-menu';
-  menu.innerHTML = `
-    <button class="ctx-item" onclick="alert('Edit ${id}');closeMenus()">Edit</button>
-    <button class="ctx-item" onclick="alert('Duplicate ${id}');closeMenus()">Duplicate</button>
-    <button class="ctx-item" onclick="alert('Archive ${id}');closeMenus()">Archive</button>
-    <button class="ctx-item danger" onclick="alert('Delete ${id}');closeMenus()">Delete</button>`;
-  wrap.appendChild(menu);
-  setTimeout(() => document.addEventListener('click', closeMenus, { once: true }), 0);
-}
-
-function closeMenus() {
-  document.querySelectorAll('.ctx-menu').forEach(m => m.remove());
-  openMenuId = null;
 }
 
 showSkeleton = true;

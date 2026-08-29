@@ -1,0 +1,84 @@
+.ctx-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 50;
+  min-width: 190px;
+  padding: 4px;
+  border: 1px solid #3a3f52;
+  border-radius: 6px;
+  background: #1e2335;
+  box-shadow: 0 8px 24px #00000060;
+}
+
+.ctx-item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 4px;
+  color: #c9cfe0;
+  background: transparent;
+  cursor: pointer;
+  font: 12px Inter, sans-serif;
+  text-align: left;
+}
+
+.ctx-item:hover { background: #252a38; }
+.ctx-item.danger { color: #f87171; }
+.ctx-item.danger:hover { background: #2d1a1a; }
+.ctx-item:disabled { cursor: default; opacity: 0.55; }
+.ctx-item:focus-visible,
+.card-context-trigger:focus-visible,
+.card-gate:focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }
+
+.card-state-controls { display: flex; align-items: center; gap: 7px; margin-left: auto; }
+.card-gate {
+  min-width: 66px;
+  height: 27px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  background: #181c27;
+  font: 600 10px/1 Inter, sans-serif;
+  letter-spacing: 0;
+}
+
+button.card-gate { cursor: pointer; }
+.card-gate[data-state="pass"] { color: #86efac; border: 1px solid #22c55e; background: #173127; }
+.card-gate[data-state="warn"] { color: #fde68a; border: 1px solid #fbbf24; background: #302a17; }
+.card-gate[data-state="fail"] { color: #fca5a5; border: 1px solid #ef4444; background: #302027; }
+.card-gate[data-state="pending"] { color: #8991aa; border: 1px solid #5a6080; background: #181c27; }
+
+.card-context { position: relative; }
+.card-context-trigger {
+  width: 34px;
+  height: 28px;
+  border: 1px solid #252a38;
+  border-radius: 5px;
+  color: #c9cfe0;
+  background: #181c27;
+  cursor: pointer;
+  font: 600 14px/1 Inter, sans-serif;
+}
+
+.card-context-trigger:hover { border-color: #3a3f52; color: #e8eaf2; }
+.card-delete-confirmation { width: 285px; padding: 12px; }
+.card-delete-confirmation strong,
+.card-mutation-message strong { display: block; color: #e8eaf2; font-size: 13px; }
+.card-delete-confirmation > span,
+.card-mutation-message > span {
+  display: block;
+  margin-top: 5px;
+  color: #8991aa;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.card-confirm-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
+.card-confirm-actions .ctx-item { width: auto; border: 1px solid #3a3f52; }
+.card-confirm-actions .danger { border-color: #ef4444; background: #ef4444; color: #fff; }
+.card-mutation-message { width: 285px; padding: 12px; color: #c9cfe0; font-size: 12px; }
+.card-mutation-message.error { border-color: #ef4444; background: #302027; }
+.card-mutation-message.error > span { color: #fca5a5; }
