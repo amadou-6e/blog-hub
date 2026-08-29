@@ -58,6 +58,26 @@ test.describe('Current overview screen', () => {
     await expect(page).toHaveURL(/\/screens\/settings\/v2\.html$/);
   });
 
+  test('ignores an invalid Settings section without breaking initialization', async ({ page }) => {
+    await page.goto('/screens/settings/v2.html?section=x%22%5D');
+
+    await expect(page.getByRole('heading', { name: 'Publishing Platforms' })).toBeVisible();
+    await expect(page.locator('.nav-btn[data-section="platforms"]')).toHaveClass(/active/);
+  });
+
+  test('shows unavailable queue actions as disabled controls', async ({ page }) => {
+    await expect(page.locator('#nav-queue')).toBeDisabled();
+    await expect(page.locator('#panel-schedule-btn')).toBeDisabled();
+
+    const scheduledArticleId = await page.evaluate(() =>
+      ARTICLES.find(article => article.action.kind === 'schedule')?.id || null
+    );
+    expect(scheduledArticleId).not.toBeNull();
+    await page.locator(`.article-card[data-id="${scheduledArticleId}"]`).click();
+    await expect(page.locator('#panel-primary-btn')).toBeDisabled();
+    await expect(page.locator('#panel-primary-btn')).toHaveText('Schedule →');
+  });
+
   test('panel Edit opens the selected article and preserves its identifier', async ({ page }) => {
     const card = page.locator('.article-card').first();
     const articleId = await card.getAttribute('data-id');

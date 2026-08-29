@@ -85,6 +85,13 @@
     .pill-platform:hover  { color: #c9cfe0; border-color: #3a3f52; }
     .pill-platform.active { color: #e8eaf2; background: #1e2230; border-color: #3a3f52; }
 
+    .nav-tab:disabled,
+    #panel-primary-btn:disabled,
+    #panel-schedule-btn:disabled {
+      cursor: not-allowed !important;
+      opacity: 0.45;
+    }
+
     /* Side panel */
     #side-panel {
       flex-shrink: 0;
@@ -425,7 +432,7 @@
   <!-- Nav tabs — center, no grow so logo and actions stay in their own lanes -->
   <div style="display:flex;align-items:stretch;height:48px;flex-shrink:0;">
     <button onclick="navigateOverview('articles')"  id="nav-articles"  class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid #6366f1;color:#e8eaf2;font-weight:500;">Articles</button>
-    <button id="nav-queue" class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid transparent;color:#5a6080;">Queue</button>
+    <button id="nav-queue" class="nav-tab" disabled title="Publishing queue is not available yet" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid transparent;color:#5a6080;">Queue</button>
     <button onclick="navigateOverview('platforms')" id="nav-platforms" class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid transparent;color:#5a6080;">Platforms</button>
     <button onclick="navigateOverview('settings')"  id="nav-settings"  class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid transparent;color:#5a6080;">Settings</button>
   </div>
@@ -560,7 +567,7 @@
         <div style="display:flex;gap:6px;">
           <button id="panel-edit-btn" style="flex:1;font-size:12px;padding:6px;border-radius:6px;background:transparent;color:#c9cfe0;border:1px solid #252a38;cursor:pointer;font-family:inherit;">Edit</button>
           <button id="panel-inspect-btn" style="flex:1;font-size:12px;padding:6px;border-radius:6px;background:transparent;color:#c9cfe0;border:1px solid #252a38;cursor:pointer;font-family:inherit;">Inspect</button>
-          <button id="panel-schedule-btn" style="flex:1;font-size:12px;padding:6px;border-radius:6px;background:transparent;color:#c9cfe0;border:1px solid #252a38;cursor:pointer;font-family:inherit;">Schedule</button>
+          <button id="panel-schedule-btn" disabled title="Publishing queue is not available yet" style="flex:1;font-size:12px;padding:6px;border-radius:6px;background:transparent;color:#c9cfe0;border:1px solid #252a38;cursor:pointer;font-family:inherit;">Schedule</button>
         </div>
       </div>
     </div>
@@ -1356,7 +1363,9 @@ function selectCard(id) {
   pb.style.background = a.action.bg;
   pb.style.color = a.action.color;
   pb.style.border = `1px solid ${a.action.border}`;
-  pb.onclick = async () => { await runArticleAction(a); };
+  pb.disabled = a.action.kind === 'schedule';
+  pb.title = pb.disabled ? 'Publishing queue is not available yet' : '';
+  pb.onclick = pb.disabled ? null : async () => { await runArticleAction(a); };
   document.getElementById('panel-edit-btn').onclick = () => {
     window.location.assign(articleEditorUrl(a.id));
   };

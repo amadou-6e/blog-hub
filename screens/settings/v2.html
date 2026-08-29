@@ -1081,8 +1081,11 @@ function redirectToLogin() {
 
 async function initSettings() {
   const requestedSection = new URLSearchParams(window.location.search).get('section');
-  const sectionButton = document.querySelector(`.nav-btn[data-section="${requestedSection}"]`);
-  if (sectionButton) showSection(requestedSection, sectionButton);
+  const allowedSections = ['platforms', 'ai', 'account'];
+  if (allowedSections.includes(requestedSection)) {
+    const sectionButton = document.querySelector(`.nav-btn[data-section="${requestedSection}"]`);
+    if (sectionButton) showSection(requestedSection, sectionButton);
+  }
 
   try {
     const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
