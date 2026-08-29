@@ -574,9 +574,11 @@
   </div>
 </div>
 
+<script src="./sidebar-state.js"></script>
 <script>
 // --- Data ----------------------------------------------------------
 let ARTICLES = [];
+const SidebarState = window.OverviewSidebarState;
 
 // --- Per-platform thumbnail palette --------------------------------
 // Each entry: { heading, para, codeBlock, codeLine1, codeLine2, codeLine3, codeLine4, imagePlaceholder, fade }
@@ -686,7 +688,7 @@ function formatTimelineTime(isoValue) {
 }
 
 function chooseAction(article) {
-  const destinations = Object.values(article.destinations);
+  const destinations = Object.values(article.destinations || {});
   const links = destinations.map(d => d.url).filter(Boolean);
   if (article.gate === 'fail' || destinations.some(d => d.status === 'error')) {
     return { kind: 'inspect', label: 'Inspect →', color: '#f87171', bg: '#2d1a1a', border: '#4d2a2a' };
@@ -715,27 +717,21 @@ function preferredLiveUrl(article, platform) {
 }
 
 function buildLiveArticle(raw, index) {
+  const destinations = SidebarState.normalizeDestinations(raw.destinations);
   return {
     id: raw.id,
     urgency: index + 1,
-    title: raw.title,
+    title: typeof raw.title === 'string' && raw.title.trim() ? raw.title : 'Untitled article',
     updatedAt: raw.updatedAt,
     updated: formatRelative(raw.updatedAt),
-    words: raw.wordCount,
+    words: Number.isFinite(raw.wordCount) ? raw.wordCount : 0,
     previewImageUrl: raw.previewImageUrl || null,
     source: raw.source || 'native',
     sourcePlatform: raw.sourcePlatform || null,
-    destinations: {
-      medium: raw.destinations.medium,
-      hashnode: raw.destinations.hashnode,
-      devto: raw.destinations.devto,
-    },
-    gate: raw.gate,
-    action: chooseAction(raw),
-    timeline: (raw.recentTimeline || []).map(item => ({
-      time: formatTimelineTime(item.timestamp),
-      event: item.event,
-    })),
+    destinations,
+    gate: raw.gate || 'pending',
+    action: chooseAction({ ...raw, destinations }),
+    timeline: SidebarState.normalizeTimeline(raw.recentTimeline, formatTimelineTime),
   };
 }
 
@@ -799,6 +795,11 @@ async function loadOverview() {
   `;
 
   if (hasActiveFilters()) await loadRemainingArticlesForFilters();
+}
+
+async function refreshOverview() {
+  await loadOverview();
+  render();
 }
 
 function hasMoreArticles() {
@@ -903,7 +904,7 @@ async function runArticleAction(article, overrideKind = null) {
       body: JSON.stringify({}),
     });
     await pollJob(accepted.jobId);
-    await loadOverview();
+    await refreshOverview();
   } catch (error) {
     alert(`Action failed: ${error.message}`);
   } finally {
@@ -1280,14 +1281,14 @@ function render() {
     emptyEl.style.display = 'flex';
     loadMoreRegion.innerHTML = '';
     document.getElementById('article-count').textContent = '0 articles';
-    syncDetailsPanel();
+    syncDetailsPanel([]);
     return;
   }
   if (showSkeleton) {
     for (let i = 0; i < 5; i++) grid.appendChild(renderSkeleton());
     loadMoreRegion.innerHTML = '';
     document.getElementById('article-count').textContent = '— articles';
-    syncDetailsPanel();
+    syncDetailsPanel([]);
     return;
   }
 
@@ -1297,24 +1298,15 @@ function render() {
   if (filtered.length === 0) {
     if (!isLoadingMore) noRes.style.display = 'flex';
     renderLoadMoreRegion();
-    syncDetailsPanel();
+    syncDetailsPanel(filtered);
     return;
   }
   filtered.forEach(a => grid.appendChild(renderCard(a)));
   renderLoadMoreRegion();
-  syncDetailsPanel();
+  syncDetailsPanel(filtered);
 }
 
-function syncDetailsPanel() {
-  const panel = document.getElementById('side-panel');
-  const content = document.getElementById('panel-content');
-  const arrow = document.getElementById('side-strip-arrow');
-  if (!selectedId) {
-    panel.classList.add('hidden');
-    return;
-  }
-
-  panel.classList.remove('hidden');
+function setPanelGeometry(panel, content, arrow) {
   if (detailsPanelOpen) {
     panel.style.width = '300px';
     panel.style.flexBasis = '300px';
@@ -1328,6 +1320,106 @@ function syncDetailsPanel() {
   }
 }
 
+function renderDestination(destination) {
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;';
+
+  const platform = document.createElement('span');
+  platform.style.cssText = 'color:#c9cfe0;font-size:12px;';
+  platform.textContent = PLATFORM_LABEL[destination.platform];
+
+  const statusWrap = document.createElement('div');
+  statusWrap.style.cssText = 'display:flex;align-items:center;gap:6px;';
+  const dot = document.createElement('span');
+  dot.style.cssText = 'width:7px;height:7px;border-radius:50%;display:inline-block;';
+  dot.style.background = DOT_COLOR[destination.status] || '#252a38';
+  const label = document.createElement('span');
+  label.style.cssText = "font-family:'JetBrains Mono',monospace;font-size:11px;";
+  label.style.color = DOT_COLOR[destination.status] || '#5a6080';
+  label.textContent = destination.label;
+
+  statusWrap.append(dot, label);
+  row.append(platform, statusWrap);
+  return row;
+}
+
+function renderTimelineEvent(item) {
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:8px;';
+  const time = document.createElement('span');
+  time.style.cssText = "color:#5a6080;font-family:'JetBrains Mono',monospace;font-size:10px;width:48px;flex-shrink:0;padding-top:1px;";
+  time.textContent = item.time;
+  const event = document.createElement('span');
+  event.style.cssText = 'color:#c9cfe0;font-size:12px;line-height:1.5;';
+  event.textContent = item.event || 'Activity details unavailable';
+  row.append(time, event);
+  return row;
+}
+
+function renderPanelEmpty(message) {
+  const empty = document.createElement('div');
+  empty.style.cssText = 'color:#5a6080;font-size:12px;line-height:1.5;';
+  empty.textContent = message;
+  return empty;
+}
+
+function syncDetailsPanel(visibleArticles = ARTICLES) {
+  const panel = document.getElementById('side-panel');
+  const content = document.getElementById('panel-content');
+  const arrow = document.getElementById('side-strip-arrow');
+  const article = SidebarState.selectedArticle(visibleArticles, selectedId);
+  if (!article) {
+    selectedId = null;
+    detailsPanelOpen = true;
+    panel.classList.add('hidden');
+    document.getElementById('panel-title').textContent = '';
+    document.getElementById('panel-destinations').replaceChildren();
+    document.getElementById('panel-timeline').replaceChildren();
+    return;
+  }
+
+  panel.classList.remove('hidden');
+  setPanelGeometry(panel, content, arrow);
+
+  const model = SidebarState.panelModel(article, activeJobs.get(article.id));
+  document.getElementById('panel-title').textContent = model.title;
+
+  const destinations = document.getElementById('panel-destinations');
+  destinations.replaceChildren(...model.destinations.map(renderDestination));
+
+  const timeline = document.getElementById('panel-timeline');
+  timeline.replaceChildren(...(
+    model.timeline.length
+      ? model.timeline.map(renderTimelineEvent)
+      : [renderPanelEmpty('No activity yet.')]
+  ));
+
+  const primary = document.getElementById('panel-primary-btn');
+  primary.textContent = model.primaryAction.label;
+  primary.style.background = model.primaryAction.bg;
+  primary.style.color = model.primaryAction.color;
+  primary.style.border = `1px solid ${model.primaryAction.border}`;
+  primary.disabled = Boolean(model.primaryAction.disabled);
+  primary.title = model.primaryAction.disabled && model.primaryAction.kind === 'schedule'
+    ? 'Publishing queue is not available yet'
+    : '';
+  primary.setAttribute('aria-busy', String(Boolean(model.primaryAction.disabled)));
+  primary.onclick = model.primaryAction.disabled ? null : async () => {
+    const current = SidebarState.selectedArticle(ARTICLES, selectedId);
+    if (current) await runArticleAction(current);
+  };
+
+  const inspect = document.getElementById('panel-inspect-btn');
+  inspect.disabled = model.inspectDisabled;
+  inspect.onclick = model.inspectDisabled ? null : async () => {
+    const current = SidebarState.selectedArticle(ARTICLES, selectedId);
+    if (current) await runArticleAction(current, 'inspect');
+  };
+  document.getElementById('panel-edit-btn').onclick = () => {
+    window.location.assign(articleEditorUrl(article.id));
+  };
+}
+
 // --- Interactions --------------------------------------------------
 function selectCard(id) {
   closeMenus();
@@ -1337,39 +1429,8 @@ function selectCard(id) {
     return;
   }
   selectedId = id;
-  render();
   detailsPanelOpen = true;
-  syncDetailsPanel();
-  const a = ARTICLES.find(x => x.id === selectedId);
-  document.getElementById('panel-title').textContent = a.title;
-  document.getElementById('panel-destinations').innerHTML = ['medium','hashnode','devto'].map(p => {
-    const d = a.destinations[p];
-    return `<div style="display:flex;align-items:center;justify-content:space-between;">
-      <span style="color:#c9cfe0;font-size:12px;">${PLATFORM_LABEL[p]}</span>
-      <div style="display:flex;align-items:center;gap:6px;">
-        <span style="width:7px;height:7px;border-radius:50%;background:${DOT_COLOR[d.status]||'#252a38'};display:inline-block;"></span>
-        <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:${DOT_COLOR[d.status]||'#5a6080'}">${d.label}</span>
-      </div>
-    </div>`;
-  }).join('');
-  document.getElementById('panel-timeline').innerHTML = a.timeline.map(t =>
-    `<div style="display:flex;gap:8px;">
-      <span style="color:#5a6080;font-family:'JetBrains Mono',monospace;font-size:10px;width:48px;flex-shrink:0;padding-top:1px;">${t.time}</span>
-      <span style="color:#c9cfe0;font-size:12px;line-height:1.5;">${t.event}</span>
-    </div>`
-  ).join('');
-  const pb = document.getElementById('panel-primary-btn');
-  pb.textContent = a.action.label;
-  pb.style.background = a.action.bg;
-  pb.style.color = a.action.color;
-  pb.style.border = `1px solid ${a.action.border}`;
-  pb.disabled = a.action.kind === 'schedule';
-  pb.title = pb.disabled ? 'Publishing queue is not available yet' : '';
-  pb.onclick = pb.disabled ? null : async () => { await runArticleAction(a); };
-  document.getElementById('panel-edit-btn').onclick = () => {
-    window.location.assign(articleEditorUrl(a.id));
-  };
-  document.getElementById('panel-inspect-btn').onclick = async () => { await runArticleAction(a, 'inspect'); };
+  render();
 }
 
 function toggleDetailsPanel() {
@@ -1382,7 +1443,6 @@ function closePanel() {
   selectedId = null;
   detailsPanelOpen = true;
   render();
-  syncDetailsPanel();
 }
 
 function setStatusFilter(val, el) {
@@ -1451,7 +1511,7 @@ function closeMenus() {
 
 showSkeleton = true;
 render();
-loadOverview()
+refreshOverview()
   .catch(error => { alert(`Failed to load overview: ${error.message}`); })
   .finally(() => {
     showSkeleton = false;
