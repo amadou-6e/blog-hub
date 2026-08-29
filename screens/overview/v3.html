@@ -1266,7 +1266,7 @@ function render() {
     for (let i = 0; i < 5; i++) grid.appendChild(renderSkeleton());
     loadMoreRegion.innerHTML = '';
     document.getElementById('article-count').textContent = '— articles';
-    syncDetailsPanel();
+    syncDetailsPanel([]);
     return;
   }
 
@@ -1415,7 +1415,6 @@ function closePanel() {
   selectedId = null;
   detailsPanelOpen = true;
   render();
-  syncDetailsPanel();
 }
 
 function setStatusFilter(val, el) {

@@ -49,7 +49,7 @@ test.describe('Current overview screen', () => {
     const reset = await page.request.post('/api/dev/reset');
     expect(reset.ok()).toBeTruthy();
     await page.goto(OVERVIEW_URL);
-    await page.locator('.article-card').first().waitFor();
+    await expect(page.locator('#article-count')).not.toHaveText('— articles');
   });
 
   test('renders article cards from the backend', async ({ page }) => {
@@ -164,6 +164,7 @@ test.describe('Current overview screen', () => {
     }));
 
     await page.reload();
+    await expect(page.locator('#article-count')).toHaveText('1 article');
     await page.locator('.article-card').click();
 
     await expect(page.locator('#panel-destinations')).toContainText('<img src=x');
