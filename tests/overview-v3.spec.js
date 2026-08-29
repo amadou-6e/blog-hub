@@ -33,4 +33,67 @@ test.describe('Current overview screen', () => {
     await page.locator('.article-card').first().locator('.card-edit').click();
     await expect(page).toHaveURL(/\/screens\/editor\/v2\.html\?id=/);
   });
+
+  test('keeps Articles active without faking another active tab', async ({ page }) => {
+    const originalUrl = page.url();
+
+    await page.locator('#nav-articles').press('Enter');
+
+    await expect(page).toHaveURL(originalUrl);
+    await expect(page.locator('#nav-articles')).toHaveCSS('border-bottom-color', 'rgb(99, 102, 241)');
+    await expect(page.locator('#nav-platforms')).toHaveCSS('border-bottom-color', 'rgba(0, 0, 0, 0)');
+  });
+
+  test('opens the Platforms section in Settings', async ({ page }) => {
+    await page.locator('#nav-platforms').click();
+
+    await expect(page).toHaveURL(/\/screens\/settings\/v2\.html\?section=platforms$/);
+    await expect(page.locator('#section-platforms')).toBeVisible();
+    await expect(page.locator('.nav-btn[data-section="platforms"]')).toHaveClass(/active/);
+  });
+
+  test('opens Settings with keyboard activation', async ({ page }) => {
+    await page.locator('#nav-settings').press('Enter');
+
+    await expect(page).toHaveURL(/\/screens\/settings\/v2\.html$/);
+  });
+
+  test('ignores an invalid Settings section without breaking initialization', async ({ page }) => {
+    await page.goto('/screens/settings/v2.html?section=x%22%5D');
+
+    await expect(page.getByRole('heading', { name: 'Publishing Platforms' })).toBeVisible();
+    await expect(page.locator('.nav-btn[data-section="platforms"]')).toHaveClass(/active/);
+  });
+
+  test('shows unavailable queue actions as disabled controls', async ({ page }) => {
+    await expect(page.locator('#nav-queue')).toBeDisabled();
+    await expect(page.locator('#panel-schedule-btn')).toBeDisabled();
+
+    const scheduledArticleId = await page.evaluate(() =>
+      ARTICLES.find(article => article.action.kind === 'schedule')?.id || null
+    );
+    expect(scheduledArticleId).not.toBeNull();
+    await page.locator(`.article-card[data-id="${scheduledArticleId}"]`).click();
+    await expect(page.locator('#panel-primary-btn')).toBeDisabled();
+    await expect(page.locator('#panel-primary-btn')).toHaveText('Schedule →');
+  });
+
+  test('panel Edit opens the selected article and preserves its identifier', async ({ page }) => {
+    const card = page.locator('.article-card').first();
+    const articleId = await card.getAttribute('data-id');
+    await card.click();
+
+    await page.locator('#panel-edit-btn').press('Enter');
+
+    await expect(page).toHaveURL(/\/screens\/editor\/v2\.html\?id=/);
+    expect(new URL(page.url()).searchParams.get('id')).toBe(articleId);
+  });
+
+  test('editor destinations encode article identifiers safely', async ({ page }) => {
+    const destination = await page.evaluate(() => articleEditorUrl('article / ? & value'));
+    const parsed = new URL(destination, page.url());
+
+    expect(parsed.pathname).toBe('/screens/editor/v2.html');
+    expect(parsed.searchParams.get('id')).toBe('article / ? & value');
+  });
 });

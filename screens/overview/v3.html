@@ -85,6 +85,13 @@
     .pill-platform:hover  { color: #c9cfe0; border-color: #3a3f52; }
     .pill-platform.active { color: #e8eaf2; background: #1e2230; border-color: #3a3f52; }
 
+    .nav-tab:disabled,
+    #panel-primary-btn:disabled,
+    #panel-schedule-btn:disabled {
+      cursor: not-allowed !important;
+      opacity: 0.45;
+    }
+
     /* Side panel */
     #side-panel {
       flex-shrink: 0;
@@ -424,10 +431,10 @@
   </div>
   <!-- Nav tabs — center, no grow so logo and actions stay in their own lanes -->
   <div style="display:flex;align-items:stretch;height:48px;flex-shrink:0;">
-    <button onclick="setView('articles')"  id="nav-articles"  class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid #6366f1;color:#e8eaf2;font-weight:500;">Articles</button>
-    <button onclick="setView('queue')"     id="nav-queue"     class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid transparent;color:#5a6080;">Queue</button>
-    <button onclick="setView('platforms')" id="nav-platforms" class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid transparent;color:#5a6080;">Platforms</button>
-    <button onclick="setView('settings')"  id="nav-settings"  class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid transparent;color:#5a6080;">Settings</button>
+    <button onclick="navigateOverview('articles')"  id="nav-articles"  class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid #6366f1;color:#e8eaf2;font-weight:500;">Articles</button>
+    <button id="nav-queue" class="nav-tab" disabled title="Publishing queue is not available yet" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid transparent;color:#5a6080;">Queue</button>
+    <button onclick="navigateOverview('platforms')" id="nav-platforms" class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid transparent;color:#5a6080;">Platforms</button>
+    <button onclick="navigateOverview('settings')"  id="nav-settings"  class="nav-tab" style="padding:0 14px;font-size:13px;border:none;cursor:pointer;font-family:inherit;background:transparent;border-bottom:2px solid transparent;color:#5a6080;">Settings</button>
   </div>
   <!-- Right actions — flex:1 justify-end keeps it in its own lane -->
   <div style="flex:1;display:flex;align-items:center;gap:14px;justify-content:flex-end;min-width:0;">
@@ -558,9 +565,9 @@
       <div style="padding:12px 16px;border-top:1px solid #252a38;display:flex;flex-direction:column;gap:6px;">
         <button id="panel-primary-btn" style="font-size:12px;font-weight:500;padding:8px;border-radius:6px;background:#6366f1;color:#fff;border:none;cursor:pointer;font-family:inherit;width:100%;">—</button>
         <div style="display:flex;gap:6px;">
-          <button style="flex:1;font-size:12px;padding:6px;border-radius:6px;background:transparent;color:#c9cfe0;border:1px solid #252a38;cursor:pointer;font-family:inherit;">Edit</button>
+          <button id="panel-edit-btn" style="flex:1;font-size:12px;padding:6px;border-radius:6px;background:transparent;color:#c9cfe0;border:1px solid #252a38;cursor:pointer;font-family:inherit;">Edit</button>
           <button id="panel-inspect-btn" style="flex:1;font-size:12px;padding:6px;border-radius:6px;background:transparent;color:#c9cfe0;border:1px solid #252a38;cursor:pointer;font-family:inherit;">Inspect</button>
-          <button style="flex:1;font-size:12px;padding:6px;border-radius:6px;background:transparent;color:#c9cfe0;border:1px solid #252a38;cursor:pointer;font-family:inherit;">Schedule</button>
+          <button id="panel-schedule-btn" disabled title="Publishing queue is not available yet" style="flex:1;font-size:12px;padding:6px;border-radius:6px;background:transparent;color:#c9cfe0;border:1px solid #252a38;cursor:pointer;font-family:inherit;">Schedule</button>
         </div>
       </div>
     </div>
@@ -643,6 +650,22 @@ const DOT_COLOR = {
 const GATE_COLOR = { pass: '#4ade80', warn: '#fbbf24', fail: '#f87171', pending: '#5a6080' };
 const GATE_LABEL = { pass: '✓ Pass', warn: '⚠ Warn', fail: '✗ Fail', pending: '—' };
 const activeJobs = new Map();
+const OVERVIEW_DESTINATIONS = Object.freeze({
+  platforms: '../settings/v2.html?section=platforms',
+  settings: '../settings/v2.html',
+});
+
+function articleEditorUrl(articleId) {
+  const url = new URL('../editor/v2.html', window.location.href);
+  url.searchParams.set('id', articleId);
+  return `${url.pathname}${url.search}`;
+}
+
+function navigateOverview(view) {
+  if (view === 'articles') return;
+  const destination = OVERVIEW_DESTINATIONS[view];
+  if (destination) window.location.assign(destination);
+}
 
 function formatRelative(isoValue) {
   const date = new Date(isoValue);
@@ -868,7 +891,6 @@ async function runArticleAction(article, overrideKind = null) {
     return;
   }
   if (action.kind === 'schedule') {
-    alert('Schedule is not wired yet.');
     return;
   }
   const endpoint = action.kind === 'inspect' ? 'inspect' : 'push';
@@ -1132,7 +1154,7 @@ function renderCard(a) {
   };
   copy.querySelector('.card-edit').onclick = event => {
     event.stopPropagation();
-    window.location.href = `../editor/v2.html?id=${encodeURIComponent(a.id)}`;
+    window.location.assign(articleEditorUrl(a.id));
   };
   card.appendChild(copy);
   return card;
@@ -1341,7 +1363,12 @@ function selectCard(id) {
   pb.style.background = a.action.bg;
   pb.style.color = a.action.color;
   pb.style.border = `1px solid ${a.action.border}`;
-  pb.onclick = async () => { await runArticleAction(a); };
+  pb.disabled = a.action.kind === 'schedule';
+  pb.title = pb.disabled ? 'Publishing queue is not available yet' : '';
+  pb.onclick = pb.disabled ? null : async () => { await runArticleAction(a); };
+  document.getElementById('panel-edit-btn').onclick = () => {
+    window.location.assign(articleEditorUrl(a.id));
+  };
   document.getElementById('panel-inspect-btn').onclick = async () => { await runArticleAction(a, 'inspect'); };
 }
 
@@ -1400,16 +1427,6 @@ function toggleImportMenu(e) {
     const close = () => { menu.style.display = 'none'; document.removeEventListener('click', close); };
     document.addEventListener('click', close);
   }
-}
-
-function setView(v) {
-  document.querySelectorAll('.nav-tab').forEach(t => {
-    t.style.borderBottomColor = 'transparent';
-    t.style.color = '#5a6080';
-    t.style.fontWeight = '400';
-  });
-  const el = document.getElementById('nav-' + v);
-  if (el) { el.style.borderBottomColor = '#6366f1'; el.style.color = '#e8eaf2'; el.style.fontWeight = '500'; }
 }
 
 function toggleMenu(id, wrap) {
