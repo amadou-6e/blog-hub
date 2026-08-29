@@ -5,7 +5,7 @@ import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from typing import Literal, Optional
 
@@ -109,6 +109,75 @@ def delete_articles(request: Request, body: DeleteArticleRequest):
             detail={
                 "message": "Some articles are published. Pass force=true to delete anyway.",
                 "blocked_ids": blocked,
+            },
+        )
+
+
+class DuplicateArticleSummary(BaseModel):
+    id: str
+    title: str
+
+
+class DuplicateArticleResponse(BaseModel):
+    article: DuplicateArticleSummary
+
+
+class ArchiveArticleResponse(BaseModel):
+    id: str
+    archived: bool
+
+
+def _article_not_found() -> HTTPException:
+    return HTTPException(
+        status_code=404,
+        detail={"error": "not_found", "message": "Article not found."},
+    )
+
+
+@router.post(
+    "/{article_id}/duplicate", response_model=DuplicateArticleResponse, status_code=201,
+)
+def duplicate_article(
+    request: Request,
+    article_id: str,
+    idempotency_key: str = Header(min_length=1, max_length=200),
+):
+    duplicate, _created = store.duplicate_article(
+        request.state.user_id, article_id, idempotency_key,
+    )
+    if duplicate is None:
+        raise _article_not_found()
+    return DuplicateArticleResponse(
+        article=DuplicateArticleSummary(id=duplicate["id"], title=duplicate["title"]),
+    )
+
+
+@router.post("/{article_id}/archive", response_model=ArchiveArticleResponse)
+def archive_article(
+    request: Request,
+    article_id: str,
+    idempotency_key: str | None = Header(default=None, min_length=1, max_length=200),
+):
+    if not store.archive_article(request.state.user_id, article_id, idempotency_key):
+        raise _article_not_found()
+    return ArchiveArticleResponse(id=article_id, archived=True)
+
+
+@router.delete("/{article_id}", status_code=204)
+def delete_article(
+    request: Request,
+    article_id: str,
+    idempotency_key: str | None = Header(default=None, min_length=1, max_length=200),
+):
+    result = store.delete_article(request.state.user_id, article_id, idempotency_key)
+    if result == "not_found":
+        raise _article_not_found()
+    if result == "published":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "has_published_destinations",
+                "message": "Cannot delete published article. Remove its live destinations first.",
             },
         )
 
