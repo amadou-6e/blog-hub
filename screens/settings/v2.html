@@ -222,6 +222,7 @@ const _platformSync = {
 };
 let _browserLoginTabs = {};
 let _browserLoginTabTimers = {};
+let _browserLoginPolls = {};
 const _authTimers = new Map();
 
 const AUTH_STATES = {
@@ -408,12 +409,14 @@ function browserPlatformCard(conn) {
   const apiConnected = conn.status === 'connected';
   const browserConnection = _browserConnections[id] || { platform: id, status: 'disconnected' };
   const browserStatus = browserConnection.status || 'disconnected';
+  const loginPhase = browserConnection.loginPhase || browserStatus;
   const browserConnected = browserStatus === 'connected';
   const connected = apiConnected || browserConnected;
   const waiting = ['waiting_for_login', 'verifying'].includes(browserStatus) && !apiConnected;
+  const signedInPendingSave = loginPhase === 'signed_in_pending_save' && !apiConnected;
   const failed = browserStatus === 'failed' && !apiConnected;
-  const statusColor = connected ? '#4ade80' : waiting ? '#fbbf24' : failed ? '#f87171' : '#5a6080';
-  const statusLabel = connected ? 'Connected' : waiting
+  const statusColor = connected || signedInPendingSave ? '#4ade80' : waiting ? '#fbbf24' : failed ? '#f87171' : '#5a6080';
+  const statusLabel = connected ? 'Connected' : signedInPendingSave ? 'Signed in · close tab' : waiting
     ? (browserStatus === 'verifying' ? 'Verifying login' : 'Finish signing in')
     : failed ? 'Login failed' : 'Not connected';
   const tokenMethod = id === 'hashnode' ? 'API token · Hashnode Plus' : 'Integration token';
@@ -421,6 +424,7 @@ function browserPlatformCard(conn) {
     ? tokenMethod : browserConnected
     ? 'Browser login · Persistent profile' : '';
   const helper = connected ? (browserConnected ? 'Browser session verified' : 'Token stored securely')
+    : signedInPendingSave ? `Close the ${conn.label} login tab to save and verify this connection.`
     : waiting ? `Close the login tab after ${conn.label} confirms sign-in.`
     : failed ? esc(browserConnection.error || `${conn.label} sign-in was not completed.`)
     : 'Choose API token or browser login.';
@@ -546,22 +550,60 @@ function createBrowserLoginTab(url='about:blank') {
 function browserLoginUrl(id, url) {
   const target = new URL(url, window.location.href);
   target.searchParams.set('purpose', `${id}-login`);
+  target.searchParams.set('returnOrigin', window.location.origin);
   return target.href;
+}
+
+function browserLoginOrigin(id) {
+  const url = _browserConnections[id]?.authorizationUrl;
+  if (!url) return null;
+  try { return new URL(url, window.location.href).origin; }
+  catch { return null; }
+}
+
+function notifyBrowserLoginTab(id, tab) {
+  const origin = browserLoginOrigin(id);
+  if (!tab || tab.closed || !origin) return;
+  tab.postMessage({
+    type: 'bloghub-browser-login-state',
+    platform: id,
+    loginPhase: _browserConnections[id]?.loginPhase || _browserConnections[id]?.status || 'unknown',
+  }, origin);
+}
+
+async function refreshBrowserLoginState(id, tab) {
+  if (_browserLoginPolls[id]) return;
+  _browserLoginPolls[id] = true;
+  try {
+    const res = await fetch(`/api/connections/${id}/browser-connection`);
+    if (res.ok) {
+      _browserConnections[id] = await res.json();
+      renderPlatforms(_connections.filter(c => c.type === 'blog'));
+      notifyBrowserLoginTab(id, tab);
+    }
+  } catch { /* Keep the browser available while a transient probe fails. */ }
+  finally { _browserLoginPolls[id] = false; }
 }
 
 function watchBrowserLoginTab(id, tab) {
   if (_browserLoginTabTimers[id]) clearInterval(_browserLoginTabTimers[id]);
   _browserLoginTabs[id] = tab;
   if (!tab) return;
-  _browserLoginTabTimers[id] = setInterval(() => {
-    if (!tab.closed) return;
+  notifyBrowserLoginTab(id, tab);
+  _browserLoginTabTimers[id] = setInterval(async () => {
+    if (!tab.closed) {
+      await refreshBrowserLoginState(id, tab);
+      return;
+    }
     clearInterval(_browserLoginTabTimers[id]);
     _browserLoginTabTimers[id] = null;
     _browserLoginTabs[id] = null;
-    if (_browserConnections[id]?.status === 'waiting_for_login') {
+    if (['waiting_for_login', 'signed_in_pending_save'].includes(
+      _browserConnections[id]?.loginPhase || _browserConnections[id]?.status
+    )) {
       completeBrowserLogin(id);
     }
-  }, 500);
+  }, 750);
 }
 
 async function startBrowserLogin(id) {
@@ -601,10 +643,11 @@ function openBrowserLogin(id) {
 }
 
 async function completeBrowserLogin(id) {
-  _browserConnections[id] = { ..._browserConnections[id], status: 'verifying' };
+  _browserConnections[id] = {
+    ..._browserConnections[id], status: 'verifying', loginPhase: 'verifying',
+  };
   if (_browserLoginTabTimers[id]) clearInterval(_browserLoginTabTimers[id]);
   _browserLoginTabTimers[id] = null;
-  _browserLoginTabs[id]?.close();
   _browserLoginTabs[id] = null;
   renderPlatforms(_connections.filter(c => c.type === 'blog'));
   try {
@@ -647,6 +690,14 @@ async function disconnectBrowserPlatformConnection(id, method) {
   if (method === 'browser' || method === 'both') await disconnectBrowserPlatform(id);
   if (method === 'api' || method === 'both') await doDisconnect(id);
 }
+
+window.addEventListener('message', (event) => {
+  const id = event.data?.platform;
+  if (event.data?.type !== 'bloghub-browser-login-ready' || !BROWSER_LOGIN_PLATFORMS.has(id)) return;
+  if (event.origin !== browserLoginOrigin(id)) return;
+  _browserLoginTabs[id] = event.source;
+  watchBrowserLoginTab(id, event.source);
+});
 
 // ─── CliProviderCard C ─────────────────────────────────────────────────────────
 function renderAI(conns) {

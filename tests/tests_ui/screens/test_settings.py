@@ -34,14 +34,19 @@ def _hashnode_browser_payload(status="disconnected", authorization_url=None):
     }
 
 
-def _browser_payload(platform, status="disconnected", authorization_url=None):
-    return {
+def _browser_payload(
+    platform, status="disconnected", authorization_url=None, login_phase=None,
+):
+    payload = {
         "platform": platform,
         "status": status,
         "authorizationUrl": authorization_url,
         "verifiedAt": None,
         "error": None,
     }
+    if login_phase is not None:
+        payload["loginPhase"] = login_phase
+    return payload
 
 
 def _show_disconnected_hashnode(page):
@@ -119,7 +124,9 @@ def test_hashnode_browser_login_opens_normal_tab(settings_page, context):
                 ),
             )
         else:
-            route.fulfill(json=_hashnode_browser_payload())
+            route.fulfill(json=_hashnode_browser_payload(
+                "waiting_for_login", f"{BASE_URL}/health",
+            ))
 
     page.route(
         f"{BASE_URL}/api/connections/hashnode/browser-connection",
@@ -141,7 +148,12 @@ def test_hashnode_browser_login_opens_normal_tab(settings_page, context):
         card.get_by_role("button", name=re.compile(r"Browser login")).click()
 
     login_tab = login_tab_info.value
-    login_tab.wait_for_url(f"{BASE_URL}/health?purpose=hashnode-login")
+    login_tab.wait_for_url(f"{BASE_URL}/health?*")
+    login_query = parse_qs(urlparse(login_tab.url).query)
+    assert login_query == {
+        "purpose": ["hashnode-login"],
+        "returnOrigin": [BASE_URL],
+    }
     open_call = page.evaluate("window.__hashnodeOpenCalls[0]")
     assert open_call == ["about:blank", "_blank"]
     assert page.get_by_role("button", name="I've signed in").count() == 0
@@ -164,6 +176,77 @@ def test_hashnode_browser_login_opens_normal_tab(settings_page, context):
     card.get_by_text("Connected", exact=True).wait_for(timeout=5000)
     card.get_by_text("Browser login · Persistent profile", exact=True).wait_for()
     assert login_tab.is_closed()
+
+
+def test_live_medium_login_waits_for_user_close_and_recovers_after_reload(
+    settings_page, context,
+):
+    page = settings_page
+    authorization_url = f"{BASE_URL}/health"
+    requests_seen = {"complete": 0, "started": False}
+
+    def browser_connection(route):
+        if route.request.method == "GET" and not requests_seen["started"]:
+            route.fulfill(json=_browser_payload(
+                "medium", "disconnected", login_phase="disconnected",
+            ))
+            return
+        if route.request.method == "POST":
+            requests_seen["started"] = True
+            route.fulfill(
+                status=201,
+                json=_browser_payload(
+                    "medium", "waiting_for_login", authorization_url,
+                    "waiting_for_login",
+                ),
+            )
+            return
+        route.fulfill(json=_browser_payload(
+            "medium", "waiting_for_login", authorization_url,
+            "signed_in_pending_save",
+        ))
+
+    def complete_connection(route):
+        requests_seen["complete"] += 1
+        route.fulfill(json=_browser_payload("medium", "connected"))
+
+    page.route(
+        f"{BASE_URL}/api/connections/medium/browser-connection/complete",
+        complete_connection,
+    )
+    page.route(
+        f"{BASE_URL}/api/connections/medium/browser-connection",
+        browser_connection,
+    )
+    page.reload()
+
+    with context.expect_page() as login_tab_info:
+        card = page.locator("#plat-card-medium")
+        card.get_by_role("button", name="Connect").click()
+        card.get_by_role("button", name=re.compile(r"Browser login")).click()
+
+    login_tab = login_tab_info.value
+    login_tab.wait_for_url(f"{BASE_URL}/health?*")
+    card.get_by_text("Signed in · close tab", exact=True).wait_for(timeout=5000)
+    assert not login_tab.is_closed()
+    assert requests_seen["complete"] == 0
+
+    page.reload()
+    page.locator("#plat-card-medium").get_by_text(
+        "Signed in · close tab", exact=True,
+    ).wait_for(timeout=5000)
+    login_tab.evaluate(
+        """origin => window.opener.postMessage({
+          type: 'bloghub-browser-login-ready', platform: 'medium'
+        }, origin)""",
+        BASE_URL,
+    )
+    login_tab.close()
+
+    page.locator("#plat-card-medium").get_by_text(
+        "Connected", exact=True,
+    ).wait_for(timeout=5000)
+    assert requests_seen["complete"] == 1
 
 
 def test_hashnode_connected_card_offers_sync_and_disconnect(page):

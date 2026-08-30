@@ -107,8 +107,6 @@ def set_viewer_device_scale(entity_id: str, scale: float) -> None:
 '''
     state_replacement = state_anchor + '''    hidpi_capture_in_flight = False
     last_hidpi_capture_at = 0.0
-    hashnode_login_streak = 0
-    hashnode_login_complete = False
 '''
     if source.count(state_anchor) != 1:
         raise RuntimeError("Pinned screencast state anchor changed")
@@ -229,59 +227,17 @@ def set_viewer_device_scale(entity_id: str, scale: float) -> None:
 
     forwarding_anchor = '''    async def _frame_forwarding_loop() -> None:
 '''
-    capture_loop = '''    async def _refresh_hashnode_login_state() -> None:
-        nonlocal hashnode_login_streak, hashnode_login_complete
-        page = attached_page
-        if entity_type != "browser_session" or page is None:
-            hashnode_login_streak = 0
-            hashnode_login_complete = False
-            return
-        try:
-            cookies = await page.context.cookies(["https://hashnode.com/"])
-            authenticated = any(
-                bool(cookie.get("value"))
-                and (
-                    cookie.get("name") in {"authjs.session-token", "hashnode-session"}
-                    or str(cookie.get("name", "")).startswith("__Secure-authjs.session-token")
-                )
-                for cookie in cookies
-            )
-        except Exception:
-            authenticated = False
-        hashnode_login_streak = hashnode_login_streak + 1 if authenticated else 0
-        # OAuth callbacks can briefly expose a session cookie before the app
-        # rejects it. Require a sustained authenticated state before replacing
-        # the browser with BlogHub's success message.
-        current_url = str(getattr(page, "url", "") or "").lower()
-        outside_login = not any(part in current_url for part in ("/login", "/signin", "/onboard"))
-        hashnode_login_complete = hashnode_login_streak >= 20 and outside_login
-
-    async def _capture_polling_loop() -> None:
+    capture_loop = '''    async def _capture_polling_loop() -> None:
         while True:
             session = cdp_session
             if session is not None:
                 await _capture_hidpi_frame(session)
-            await _refresh_hashnode_login_state()
             await asyncio.sleep(0.5)
 
 '''
     if source.count(forwarding_anchor) != 1:
         raise RuntimeError("Pinned frame forwarding loop changed")
     source = source.replace(forwarding_anchor, capture_loop + forwarding_anchor)
-
-    url_anchor = '''                try:
-                    current_url = getattr(attached_page, "url", "") or ""
-                except Exception:
-                    pass
-'''
-    url_replacement = url_anchor + '''            if hashnode_login_complete and current_url.startswith(
-                ("https://hashnode.com/", "https://www.hashnode.com/")
-            ):
-                current_url = current_url.split("#", 1)[0] + "#bloghub-authenticated"
-'''
-    if source.count(url_anchor) != 1:
-        raise RuntimeError("Pinned screencast URL forwarding changed")
-    source = source.replace(url_anchor, url_replacement)
 
     task_anchor = '''        forward_task = asyncio.create_task(_frame_forwarding_loop())
         poll_task = asyncio.create_task(_completion_polling_loop())

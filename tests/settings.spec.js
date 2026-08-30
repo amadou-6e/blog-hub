@@ -180,6 +180,99 @@ test.describe('Settings screen', () => {
     );
   });
 
+  test('Medium live login waits for user close and survives Settings reload', async ({ page, context }) => {
+    let completeRequests = 0;
+    let started = false;
+    const authorizationUrl = 'http://localhost:8000/health';
+    await page.route('**/api/connections/medium/browser-connection/complete', route => {
+      completeRequests += 1;
+      return route.fulfill({ json: {
+        platform: 'medium', status: 'connected', authorizationUrl: null,
+      }});
+    });
+    await page.route('**/api/connections/medium/browser-connection', route => {
+      if (route.request().method() === 'GET' && !started) {
+        return route.fulfill({ json: {
+          platform: 'medium', status: 'disconnected', loginPhase: 'disconnected',
+          authorizationUrl: null, verifiedAt: null, error: null,
+        }});
+      }
+      if (route.request().method() === 'POST') started = true;
+      const loginPhase = route.request().method() === 'POST'
+        ? 'waiting_for_login' : 'signed_in_pending_save';
+      return route.fulfill({
+        status: route.request().method() === 'POST' ? 201 : 200,
+        json: {
+          platform: 'medium', status: 'waiting_for_login', loginPhase,
+          authorizationUrl, verifiedAt: null, error: null,
+        },
+      });
+    });
+    await page.reload();
+
+    const loginTabPromise = context.waitForEvent('page');
+    const card = page.locator('#plat-card-medium');
+    await card.getByRole('button', { name: 'Connect' }).click();
+    await card.getByRole('button', { name: /Browser login/ }).click();
+    const loginTab = await loginTabPromise;
+    await loginTab.waitForURL('**/health?*');
+
+    await expect(card.getByText('Signed in · close tab', { exact: true })).toBeVisible();
+    expect(loginTab.isClosed()).toBe(false);
+    expect(completeRequests).toBe(0);
+
+    await page.reload();
+    await expect(page.locator('#plat-card-medium').getByText(
+      'Signed in · close tab', { exact: true },
+    )).toBeVisible();
+    await loginTab.evaluate(origin => window.opener.postMessage({
+      type: 'bloghub-browser-login-ready', platform: 'medium',
+    }, origin), 'http://localhost:8000');
+    await loginTab.close();
+
+    await expect(page.locator('#plat-card-medium').getByText(
+      'Connected', { exact: true },
+    )).toBeVisible();
+    expect(completeRequests).toBe(1);
+  });
+
+  test('Skyvern shows the provider-neutral handoff until the user closes it', async ({ page }) => {
+    test.skip(!process.env.BLOGHUB_SKYVERN_UI_URL, 'Patched Skyvern UI is opt-in.');
+    await page.goto('http://localhost:8000/health');
+    await page.evaluate(() => {
+      window.addEventListener('message', event => {
+        if (event.data?.type !== 'bloghub-browser-login-ready') return;
+        event.source.postMessage({
+          type: 'bloghub-browser-login-state',
+          platform: event.data.platform,
+          loginPhase: 'signed_in_pending_save',
+        }, event.origin);
+      });
+    });
+    const skyvernUrl = new URL(
+      '/browser-session/pbs_test/stream', process.env.BLOGHUB_SKYVERN_UI_URL,
+    );
+    skyvernUrl.searchParams.set('purpose', 'medium-login');
+    skyvernUrl.searchParams.set('returnOrigin', 'http://localhost:8000');
+
+    const popupPromise = page.waitForEvent('popup');
+    await page.evaluate(url => window.open(url, '_blank'), skyvernUrl.href);
+    const popup = await popupPromise;
+    await expect(popup.getByRole('heading', {
+      name: 'Medium login successful',
+    })).toBeVisible();
+    await expect(popup.getByText(
+      'Close this tab to save and verify the browser profile, then return to BlogHub.',
+      { exact: true },
+    )).toBeVisible();
+    expect(popup.isClosed()).toBe(false);
+
+    const closed = popup.waitForEvent('close');
+    await popup.getByRole('button', { name: 'Close tab' }).click();
+    await closed;
+    expect(popup.isClosed()).toBe(true);
+  });
+
   // ── 3. Browser login flow ────────────────────────────────────────────────────
 
   /**
