@@ -112,6 +112,10 @@ class BrowserLoginAdapter(ABC):
     def verify_profile(self, profile_dir: Path) -> dict[str, Any]:
         """Return an authentication result without exposing session material."""
 
+    def verify_live_session(self, probe: dict[str, Any]) -> dict[str, Any]:
+        """Interpret sanitized evidence from a running browser session."""
+        return {"authenticated": False, "status": "login_required"}
+
 
 class BlogOperationsAdapter(ABC):
     """Deterministic Playwright operations against an authenticated page."""

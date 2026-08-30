@@ -9,6 +9,8 @@ SCREENCAST = SKYVERN_ROOT / "forge/sdk/routes/streaming/screencast.py"
 CDP_INPUT = SKYVERN_ROOT / "forge/sdk/routes/streaming/cdp_input.py"
 REAL_BROWSER_STATE = SKYVERN_ROOT / "webeye/real_browser_state.py"
 PERSISTENT_SESSIONS_MANAGER = SKYVERN_ROOT / "webeye/default_persistent_sessions_manager.py"
+MESSAGE_CHANNEL = SKYVERN_ROOT / "forge/sdk/routes/streaming/channels/message.py"
+EXECUTION_CHANNEL = SKYVERN_ROOT / "forge/sdk/routes/streaming/channels/execution.py"
 
 
 def rewrite_imports() -> int:
@@ -550,6 +552,143 @@ def preserve_reused_browser_profile() -> None:
     PERSISTENT_SESSIONS_MANAGER.write_text(source, encoding="utf-8")
 
 
+def add_live_login_probe() -> None:
+    execution = EXECUTION_CHANNEL.read_text(encoding="utf-8")
+    url_import = "from urllib.parse import urlparse\n"
+    if execution.count(url_import) != 1:
+        raise RuntimeError("Pinned execution URL import changed")
+    execution = execution.replace(
+        url_import,
+        "from urllib.parse import urlparse, urlsplit, urlunsplit\n",
+    )
+    method_anchor = '''    async def paste_text(self, text: str) -> None:
+'''
+    method = '''    async def get_login_state(self) -> dict:
+        """Return current-origin credential metadata without credential values."""
+        if not self.page or not self.browser_context:
+            raise RuntimeError(f"{self.class_name} get_login_state: not connected.")
+
+        parsed = urlsplit(self.page.url or "")
+        host = parsed.hostname or ""
+        if parsed.port is not None:
+            host = f"{host}:{parsed.port}"
+        sanitized_url = urlunsplit((parsed.scheme, host, parsed.path, "", ""))
+        origin = self._origin_of(sanitized_url)
+        cookies = await self.browser_context.cookies([origin]) if origin else []
+        return {
+            "url": sanitized_url,
+            "cookies": [
+                {
+                    "name": str(cookie.get("name") or "")[:256],
+                    "domain": str(cookie.get("domain") or "")[:256],
+                    "expires": cookie.get("expires"),
+                    "present": bool(cookie.get("value")),
+                }
+                for cookie in cookies[:256]
+                if cookie.get("name") and cookie.get("domain")
+            ],
+        }
+
+'''
+    if execution.count(method_anchor) != 1:
+        raise RuntimeError("Pinned execution paste method changed")
+    execution = execution.replace(method_anchor, method + method_anchor)
+    EXECUTION_CHANNEL.write_text(execution, encoding="utf-8")
+
+    message = MESSAGE_CHANNEL.read_text(encoding="utf-8")
+    replacements = [
+        (
+            '    GET_BROWSER_URL = "get-browser-url"\n',
+            '    GET_BROWSER_URL = "get-browser-url"\n'
+            '    GET_LOGIN_STATE = "get-login-state"\n'
+            '    LOGIN_STATE = "login-state"\n',
+            "message kind",
+        ),
+        (
+            '    MessageKind.GET_BROWSER_URL,\n',
+            '    MessageKind.GET_BROWSER_URL,\n'
+            '    MessageKind.GET_LOGIN_STATE,\n'
+            '    MessageKind.LOGIN_STATE,\n',
+            "message kind literal",
+        ),
+        (
+            '''@dataclasses.dataclass
+class MessageInNavigate(Message):
+''',
+            '''@dataclasses.dataclass
+class MessageInGetLoginState(Message):
+    kind: t.Literal[MessageKind.GET_LOGIN_STATE] = MessageKind.GET_LOGIN_STATE
+
+
+@dataclasses.dataclass
+class MessageInNavigate(Message):
+''',
+            "login-state input model",
+        ),
+        (
+            '''@dataclasses.dataclass
+class MessageOutScreenshot(Message):
+''',
+            '''@dataclasses.dataclass
+class MessageOutLoginState(Message):
+    kind: t.Literal[MessageKind.LOGIN_STATE] = MessageKind.LOGIN_STATE
+    url: str = ""
+    cookies: list[dict] = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass
+class MessageOutScreenshot(Message):
+''',
+            "login-state output model",
+        ),
+        (
+            '    | MessageInGetBrowserUrl\n',
+            '    | MessageInGetBrowserUrl\n    | MessageInGetLoginState\n',
+            "login-state input union",
+        ),
+        (
+            '    MessageOutBrowserUrl\n',
+            '    MessageOutBrowserUrl\n    | MessageOutLoginState\n',
+            "login-state output union",
+        ),
+        (
+            '''        case MessageKind.GET_BROWSER_URL:
+            return MessageInGetBrowserUrl()
+''',
+            '''        case MessageKind.GET_BROWSER_URL:
+            return MessageInGetBrowserUrl()
+        case MessageKind.GET_LOGIN_STATE:
+            return MessageInGetLoginState()
+''',
+            "login-state message parser",
+        ),
+        (
+            '''            case MessageKind.GO_BACK:
+''',
+            '''            case MessageKind.GET_LOGIN_STATE:
+                try:
+                    async with execution_for_message_channel(message_channel) as execute:
+                        state = await execute.get_login_state()
+                        await send(MessageOutLoginState(**state))
+                except Exception:
+                    LOG.exception(
+                        f"{class_name} failed to inspect browser login state.",
+                        **message_channel.identity,
+                    )
+                    await send_error(message.kind, "Failed to inspect browser login state.")
+
+            case MessageKind.GO_BACK:
+''',
+            "login-state message handler",
+        ),
+    ]
+    for anchor, replacement, label in replacements:
+        if message.count(anchor) != 1:
+            raise RuntimeError(f"Pinned {label} anchor changed")
+        message = message.replace(anchor, replacement)
+    MESSAGE_CHANNEL.write_text(message, encoding="utf-8")
+
+
 def main() -> None:
     changed = rewrite_imports()
     if changed < 50:
@@ -559,6 +698,7 @@ def main() -> None:
     add_viewport_sync()
     recover_streaming_page()
     preserve_reused_browser_profile()
+    add_live_login_probe()
     print(f"Rewrote Playwright imports in {changed} Skyvern files")
 
 

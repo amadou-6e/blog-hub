@@ -509,12 +509,31 @@ class SubmitCodeRequest(BaseModel):
     code: str
 
 
-def _browser_connection_response(platform: str, connection: dict | None) -> dict:
+def _browser_connection_response(
+    platform: str,
+    connection: dict | None,
+    live_session: dict | None = None,
+) -> dict:
     if connection is None:
-        return {"platform": platform, "status": "disconnected"}
+        return {
+            "platform": platform,
+            "status": "disconnected",
+            "loginPhase": "disconnected",
+            "browserSession": None,
+            "durableConnection": {
+                "status": "disconnected", "profileSaved": False,
+            },
+        }
+    live_authentication = (live_session or {}).get("live_authentication") or {}
+    live_authenticated = live_authentication.get("authenticated")
+    if connection["status"] == "waiting_for_login" and live_authenticated is True:
+        login_phase = "signed_in_pending_save"
+    else:
+        login_phase = connection["status"]
     return {
         "platform": connection["platform"],
         "status": connection["status"],
+        "loginPhase": login_phase,
         "authorizationUrl": (
             connection.get("app_url")
             if connection["status"] == "waiting_for_login"
@@ -522,6 +541,16 @@ def _browser_connection_response(platform: str, connection: dict | None) -> dict
         ),
         "verifiedAt": connection.get("verified_at"),
         "error": connection.get("error"),
+        "browserSession": ({
+            "status": (live_session or {}).get("status", "unknown"),
+            "authenticationStatus": live_authentication.get("status", "unknown"),
+            "authenticated": live_authenticated,
+            "currentUrl": live_authentication.get("url"),
+        } if connection.get("skyvern_session_id") else None),
+        "durableConnection": {
+            "status": connection["status"],
+            "profileSaved": bool(connection.get("skyvern_profile_id")),
+        },
     }
 
 
@@ -533,9 +562,26 @@ def get_hashnode_browser_connection(request: Request):
 @router.get("/{conn_id}/browser-connection")
 def get_browser_connection(request: Request, conn_id: str):
     _require_browser_extension_id(conn_id)
+    connection = store.get_browser_connection(request.state.user_id, conn_id)
+    live_session = None
+    if (
+        connection
+        and connection["status"] == "waiting_for_login"
+        and connection.get("skyvern_session_id")
+    ):
+        try:
+            live_session = runner.get_browser_login(
+                conn_id, connection["skyvern_session_id"]
+            )
+        except runner.RunnerUnavailable:
+            live_session = {
+                "status": "unknown",
+                "live_authentication": {
+                    "status": "unknown", "authenticated": None, "url": None,
+                },
+            }
     return _browser_connection_response(
-        conn_id,
-        store.get_browser_connection(request.state.user_id, conn_id)
+        conn_id, connection, live_session,
     )
 
 

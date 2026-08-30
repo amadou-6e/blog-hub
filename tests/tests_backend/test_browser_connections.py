@@ -23,6 +23,67 @@ def test_browser_extension_capabilities_are_exposed_to_the_ui(client, monkeypatc
     assert "publish" in response.json()["extensions"][0]["capabilities"]
 
 
+def test_browser_connection_distinguishes_live_login_from_saved_profile(
+    client, monkeypatch,
+):
+    store.start_browser_connection(
+        "user_seed", "medium", session_id="pbs_medium",
+        organization_id="o_org", app_url="http://localhost/login",
+    )
+    monkeypatch.setattr(
+        connections_router.runner,
+        "get_browser_login",
+        lambda platform, session_id: {
+            "status": "running",
+            "live_authentication": {
+                "status": "authenticated",
+                "authenticated": True,
+                "url": "https://medium.com/",
+            },
+        },
+    )
+
+    response = client.get("/api/connections/medium/browser-connection")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "waiting_for_login"
+    assert payload["loginPhase"] == "signed_in_pending_save"
+    assert payload["browserSession"] == {
+        "status": "running",
+        "authenticationStatus": "authenticated",
+        "authenticated": True,
+        "currentUrl": "https://medium.com/",
+    }
+    assert payload["durableConnection"] == {
+        "status": "waiting_for_login", "profileSaved": False,
+    }
+
+
+def test_browser_connection_reports_unknown_when_live_probe_is_unavailable(
+    client, monkeypatch,
+):
+    store.start_browser_connection(
+        "user_seed", "medium", session_id="pbs_medium",
+        organization_id="o_org", app_url="http://localhost/login",
+    )
+    monkeypatch.setattr(
+        connections_router.runner,
+        "get_browser_login",
+        lambda *_args: (_ for _ in ()).throw(
+            runner.RunnerUnavailable("probe unavailable")
+        ),
+    )
+
+    payload = client.get(
+        "/api/connections/medium/browser-connection"
+    ).json()
+
+    assert payload["loginPhase"] == "waiting_for_login"
+    assert payload["browserSession"]["authenticationStatus"] == "unknown"
+    assert payload["browserSession"]["authenticated"] is None
+
+
 def test_hashnode_browser_login_persists_only_profile_references(client, monkeypatch):
     monkeypatch.setattr(
         connections_router.runner,

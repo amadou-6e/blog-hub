@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 import sys
+import time
 
 import pytest
 
@@ -42,6 +43,36 @@ def test_builtin_extensions_satisfy_the_versioned_contract():
     assert [item["platform"] for item in registry.descriptors()] == [
         "hashnode", "medium",
     ]
+
+
+def test_medium_live_session_requires_unexpired_uid_and_sid():
+    login = ExtensionRegistry().get("medium").login
+    expires = time.time() + 3600
+
+    connected = login.verify_live_session({"cookies": [
+        {"name": "uid", "domain": ".medium.com", "expires": expires, "present": True},
+        {"name": "sid", "domain": ".medium.com", "expires": expires, "present": True},
+    ]})
+    expired = login.verify_live_session({"cookies": [
+        {"name": "uid", "domain": ".medium.com", "expires": expires, "present": True},
+        {"name": "sid", "domain": ".medium.com", "expires": time.time() - 1, "present": True},
+    ]})
+
+    assert connected["authenticated"] is True
+    assert expired["authenticated"] is False
+
+
+def test_hashnode_live_session_recognizes_secure_authjs_cookie():
+    login = ExtensionRegistry().get("hashnode").login
+
+    result = login.verify_live_session({"cookies": [{
+        "name": "__Secure-authjs.session-token.0",
+        "domain": ".hashnode.com",
+        "expires": -1,
+        "present": True,
+    }]})
+
+    assert result["authenticated"] is True
 
 
 def test_fixture_loader_builds_normalized_article_input():

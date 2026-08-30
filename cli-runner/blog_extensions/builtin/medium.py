@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import time
 
 from medium_browser import (
     check_medium_profile,
@@ -24,6 +25,28 @@ class MediumLoginAdapter(BrowserLoginAdapter):
 
     def verify_profile(self, profile_dir: Path) -> dict:
         return check_medium_profile(profile_dir=str(profile_dir))
+
+    def verify_live_session(self, probe: dict) -> dict:
+        cookies = {
+            cookie.get("name")
+            for cookie in probe.get("cookies", [])
+            if cookie.get("present")
+            and str(cookie.get("domain") or "").lstrip(".") == "medium.com"
+            and _cookie_is_live(cookie.get("expires"))
+        }
+        authenticated = {"uid", "sid"}.issubset(cookies)
+        return {
+            "authenticated": authenticated,
+            "status": "connected" if authenticated else "login_required",
+        }
+
+
+def _cookie_is_live(expires: object) -> bool:
+    try:
+        value = float(expires)
+    except (TypeError, ValueError):
+        return False
+    return value < 0 or value > time.time()
 
 
 class MediumOperationsAdapter(BlogOperationsAdapter):
