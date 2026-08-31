@@ -46,7 +46,7 @@ _SECRET_REDACTIONS = (
 )
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from blog_extensions import (
@@ -60,6 +60,7 @@ from blog_extensions import (
 from blog_extensions.runtime import execute_operation
 from skyvern_browser import (
     SkyvernUnavailable,
+    capture_browser_screenshot,
     close_browser_login,
     delete_browser_profile,
     finish_browser_login,
@@ -437,6 +438,22 @@ def browser_login_status(platform: str, session_id: str):
         raise HTTPException(422, str(exc)) from exc
     except SkyvernUnavailable as exc:
         raise HTTPException(503, _safe_reason(str(exc))) from exc
+
+
+@app.get("/browser/{platform}/login/{session_id}/screenshot")
+def browser_login_screenshot(platform: str, session_id: str):
+    _browser_extension(platform)
+    try:
+        screenshot = capture_browser_screenshot(session_id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except SkyvernUnavailable as exc:
+        raise HTTPException(503, _safe_reason(str(exc))) from exc
+    return Response(
+        content=screenshot,
+        media_type="image/png",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.delete("/browser/hashnode/login/{session_id}")

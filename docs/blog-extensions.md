@@ -88,6 +88,19 @@ Use `GET /browser/extensions` on the runner or
 `GET /api/connections/browser-extensions` on the backend to discover installed
 platforms and capabilities. Clients should hide actions that are not declared.
 
+## Active-session diagnostics
+
+An authenticated BlogHub user can export the current rendered frame of their
+active platform login with
+`GET /api/connections/{platform}/browser-connection/screenshot`. The response is
+a bounded PNG attachment with `Cache-Control: no-store`. Capture is
+provider-neutral and does not close or finalize the Skyvern session.
+
+The image is a point-in-time diagnostic artifact. It contains only visible page
+pixels and is not a durable browser profile, login credential, or replacement
+for completing the browser handoff. The endpoint is unavailable after the
+active login session has been finalized or disconnected.
+
 ## Test contract
 
 Extensions can import `assert_extension_contract` and `article_from_fixture`

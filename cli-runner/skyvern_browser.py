@@ -1,11 +1,14 @@
 """Small privileged adapter around Skyvern's browser-session API."""
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
 from pathlib import Path
 import re
 import secrets
+import struct
 import tomllib
 from urllib.parse import quote, urlsplit, urlunsplit
 
@@ -32,6 +35,12 @@ _ORG_ID = re.compile(r"^o_[A-Za-z0-9]+$")
 
 class SkyvernUnavailable(RuntimeError):
     pass
+
+
+_SCREENSHOT_MAX_BYTES = 12 * 1024 * 1024
+_SCREENSHOT_MAX_DIMENSION = 4096
+_SCREENSHOT_MAX_PIXELS = 16_000_000
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 def _api_key() -> str:
@@ -182,6 +191,71 @@ def get_live_browser_probe(session_id: str) -> dict:
         raise
     except (OSError, TimeoutError, ValueError, WebSocketException) as exc:
         raise SkyvernUnavailable("Skyvern live session probe failed") from exc
+
+
+def capture_browser_screenshot(session_id: str) -> bytes:
+    """Capture one bounded PNG frame without mutating or closing the session."""
+    if not _SESSION_ID.fullmatch(session_id):
+        raise ValueError("Invalid Skyvern session id")
+    session = get_browser_login(session_id)
+    if session.get("status") != "running":
+        raise SkyvernUnavailable("Skyvern browser session is not running")
+    base = urlsplit(SKYVERN_URL)
+    scheme = "wss" if base.scheme == "https" else "ws"
+    socket_url = urlunsplit((
+        scheme,
+        base.netloc,
+        f"/v1/stream/browser_sessions/{session_id}",
+        f"apikey={quote(_api_key(), safe='')}",
+        "",
+    ))
+    try:
+        with websocket_connect(
+            socket_url,
+            open_timeout=5,
+            close_timeout=2,
+            max_size=(_SCREENSHOT_MAX_BYTES * 2),
+        ) as websocket:
+            for _ in range(10):
+                payload = json.loads(websocket.recv(timeout=15))
+                if not isinstance(payload, dict):
+                    raise SkyvernUnavailable("Skyvern returned an invalid screenshot")
+                encoded = payload.get("screenshot")
+                if not encoded:
+                    continue
+                if payload.get("format") != "png" or not isinstance(encoded, str):
+                    raise SkyvernUnavailable("Skyvern returned an invalid screenshot")
+                if len(encoded) > ((_SCREENSHOT_MAX_BYTES + 2) // 3) * 4:
+                    raise SkyvernUnavailable("Skyvern screenshot exceeds the size limit")
+                try:
+                    screenshot = base64.b64decode(encoded, validate=True)
+                except (ValueError, binascii.Error) as exc:
+                    raise SkyvernUnavailable("Skyvern returned an invalid screenshot") from exc
+                _validate_screenshot_png(screenshot)
+                return screenshot
+        raise SkyvernUnavailable("Skyvern screenshot stream returned no frame")
+    except SkyvernUnavailable:
+        raise
+    except (OSError, TimeoutError, ValueError, WebSocketException) as exc:
+        raise SkyvernUnavailable("Skyvern screenshot capture failed") from exc
+
+
+def _validate_screenshot_png(screenshot: bytes) -> None:
+    if len(screenshot) > _SCREENSHOT_MAX_BYTES:
+        raise SkyvernUnavailable("Skyvern screenshot exceeds the size limit")
+    if len(screenshot) < 24 or not screenshot.startswith(_PNG_SIGNATURE):
+        raise SkyvernUnavailable("Skyvern returned an invalid screenshot")
+    if screenshot[12:16] != b"IHDR":
+        raise SkyvernUnavailable("Skyvern returned an invalid screenshot")
+    width, height = struct.unpack(">II", screenshot[16:24])
+    if (
+        not width
+        or not height
+        or width > _SCREENSHOT_MAX_DIMENSION
+        or height > _SCREENSHOT_MAX_DIMENSION
+        or width * height > _SCREENSHOT_MAX_PIXELS
+    ):
+        raise SkyvernUnavailable("Skyvern screenshot dimensions exceed the limit")
 
 
 def _sanitize_live_probe(payload: dict) -> dict:

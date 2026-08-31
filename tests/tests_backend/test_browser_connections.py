@@ -84,6 +84,54 @@ def test_browser_connection_reports_unknown_when_live_probe_is_unavailable(
     assert payload["browserSession"]["authenticated"] is None
 
 
+def test_active_browser_connection_exports_screenshot(client, monkeypatch):
+    screenshot = b"\x89PNG\r\n\x1a\ncurrent-frame"
+    store.start_browser_connection(
+        "user_seed", "medium", session_id="pbs_medium",
+        organization_id="o_org", app_url="http://localhost/login",
+    )
+    seen = []
+    monkeypatch.setattr(
+        connections_router.runner,
+        "capture_browser_screenshot",
+        lambda platform, session_id: seen.append((platform, session_id)) or screenshot,
+    )
+
+    response = client.get(
+        "/api/connections/medium/browser-connection/screenshot"
+    )
+
+    assert response.status_code == 200
+    assert response.content == screenshot
+    assert response.headers["content-type"] == "image/png"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["content-disposition"] == (
+        'attachment; filename="bloghub-medium-browser.png"'
+    )
+    assert seen == [("medium", "pbs_medium")]
+
+
+def test_browser_screenshot_requires_owned_active_session(client, monkeypatch):
+    other = store.create_user("other@example.com", "password-hash")
+    store.start_browser_connection(
+        other["id"], "medium", session_id="pbs_foreign",
+        organization_id="o_other", app_url="http://localhost/foreign",
+    )
+    called = []
+    monkeypatch.setattr(
+        connections_router.runner,
+        "capture_browser_screenshot",
+        lambda *_args: called.append(True) or b"unexpected",
+    )
+
+    response = client.get(
+        "/api/connections/medium/browser-connection/screenshot"
+    )
+
+    assert response.status_code == 409
+    assert called == []
+
+
 def test_hashnode_browser_login_persists_only_profile_references(client, monkeypatch):
     monkeypatch.setattr(
         connections_router.runner,

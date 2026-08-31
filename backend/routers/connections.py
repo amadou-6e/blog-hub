@@ -28,7 +28,7 @@ import re
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 
 import backend.services.cli_runner as runner
 import backend.services.connection_auth as agent_auth
@@ -582,6 +582,37 @@ def get_browser_connection(request: Request, conn_id: str):
             }
     return _browser_connection_response(
         conn_id, connection, live_session,
+    )
+
+
+@router.get("/{conn_id}/browser-connection/screenshot")
+def export_browser_connection_screenshot(request: Request, conn_id: str):
+    _require_browser_extension_id(conn_id)
+    connection = store.get_browser_connection(request.state.user_id, conn_id)
+    if (
+        not connection
+        or connection["status"] != "waiting_for_login"
+        or not connection.get("skyvern_session_id")
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"No active {conn_id.title()} browser login is available",
+        )
+    try:
+        screenshot = runner.capture_browser_screenshot(
+            conn_id, connection["skyvern_session_id"]
+        )
+    except runner.RunnerUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return Response(
+        content=screenshot,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": (
+                f'attachment; filename="bloghub-{conn_id}-browser.png"'
+            ),
+        },
     )
 
 
