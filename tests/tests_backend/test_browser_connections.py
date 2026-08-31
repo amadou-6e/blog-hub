@@ -238,7 +238,9 @@ def test_verifying_browser_login_can_be_canceled_immediately(client, monkeypatch
 
     assert response.status_code == 200
     assert response.json()["status"] == "disconnected"
-    assert store.get_browser_connection("user_seed", "medium") is None
+    persisted = store.get_browser_connection("user_seed", "medium")
+    assert persisted["status"] == "disconnected"
+    assert persisted["skyvern_session_id"] is None
     assert canceled == []
 
 
@@ -300,7 +302,7 @@ def test_hashnode_browser_retry_reuses_provider_session_profile(client, monkeypa
     assert persisted["skyvern_profile_id"] == "bp_identity"
 
 
-def test_hashnode_browser_disconnect_deletes_remote_profile(client, monkeypatch):
+def test_hashnode_browser_disconnect_preserves_shared_profile(client, monkeypatch):
     store.start_browser_connection(
         "user_seed", "hashnode", session_id="pbs_session",
         organization_id="o_org", app_url="http://localhost/login",
@@ -309,16 +311,21 @@ def test_hashnode_browser_disconnect_deletes_remote_profile(client, monkeypatch)
         "user_seed", "hashnode", "connected", profile_id="bp_profile"
     )
     store.upsert_sync_schedule("user_seed", "hashnode", 900)
-    deleted = []
+    logged_out = []
     monkeypatch.setattr(
         connections_router.runner,
-        "delete_browser_profile",
-        lambda platform, profile_id: deleted.append((platform, profile_id)),
+        "logout_browser_profile",
+        lambda platform, organization_id, profile_id: logged_out.append(
+            (platform, organization_id, profile_id)
+        ),
     )
     response = client.delete("/api/connections/hashnode/browser-connection")
     assert response.status_code == 200
-    assert deleted == [("hashnode", "bp_profile")]
-    assert store.get_browser_connection("user_seed", "hashnode") is None
+    assert logged_out == [("hashnode", "o_org", "bp_profile")]
+    persisted = store.get_browser_connection("user_seed", "hashnode")
+    assert persisted["status"] == "disconnected"
+    assert persisted["skyvern_profile_id"] == "bp_profile"
+    assert persisted["skyvern_session_id"] is None
     assert store.list_sync_schedules("user_seed") == []
 
 
@@ -333,11 +340,11 @@ def test_hashnode_browser_disconnect_retains_profile_when_remote_cleanup_fails(
         "user_seed", "hashnode", "connected", profile_id="bp_profile"
     )
 
-    def unavailable(_platform, _profile_id):
+    def unavailable(_platform, _organization_id, _profile_id):
         raise runner.RunnerUnavailable("Skyvern unavailable")
 
     monkeypatch.setattr(
-        connections_router.runner, "delete_browser_profile", unavailable,
+        connections_router.runner, "logout_browser_profile", unavailable,
     )
 
     response = client.delete("/api/connections/hashnode/browser-connection")
@@ -346,6 +353,80 @@ def test_hashnode_browser_disconnect_retains_profile_when_remote_cleanup_fails(
     assert response.json()["detail"] == "Skyvern unavailable"
     persisted = store.get_browser_connection("user_seed", "hashnode")
     assert persisted["skyvern_profile_id"] == "bp_profile"
+
+
+def test_medium_login_reuses_hashnode_identity_profile(client, monkeypatch):
+    store.start_browser_connection(
+        "user_seed", "hashnode", session_id="pbs_hashnode",
+        organization_id="o_org", app_url="http://localhost/hashnode",
+        profile_id="bp_shared",
+    )
+    store.update_browser_connection("user_seed", "hashnode", "connected")
+    reused = []
+    monkeypatch.setattr(
+        connections_router.runner,
+        "start_browser_login",
+        lambda platform, profile_id: reused.append((platform, profile_id)) or {
+            "session_id": "pbs_medium",
+            "organization_id": "o_org",
+            "app_url": "http://localhost:8083/browser-session/pbs_medium",
+        },
+    )
+
+    response = client.post("/api/connections/medium/browser-connection")
+
+    assert response.status_code == 201
+    assert reused == [("medium", "bp_shared")]
+    medium = store.get_browser_connection("user_seed", "medium")
+    assert medium["skyvern_profile_id"] == "bp_shared"
+
+
+def test_reusable_identity_profile_is_scoped_to_its_user():
+    other = store.create_user("profile-owner@example.com", "password-hash")
+    store.start_browser_connection(
+        other["id"], "hashnode", session_id="pbs_other",
+        organization_id="o_other", app_url="http://localhost/hashnode",
+        profile_id="bp_other",
+    )
+    store.update_browser_connection(other["id"], "hashnode", "connected")
+
+    assert store.get_reusable_browser_profile("user_seed", "medium") is None
+    assert store.get_reusable_browser_profile(other["id"], "medium") == {
+        "organization_id": "o_other",
+        "profile_id": "bp_other",
+    }
+
+
+def test_late_completion_does_not_delete_a_reused_profile(client, monkeypatch):
+    store.start_browser_connection(
+        "user_seed", "medium", session_id="pbs_late",
+        organization_id="o_org", app_url="http://localhost/login",
+        profile_id="bp_shared",
+    )
+    deleted_profiles = []
+
+    def complete_after_cancel(*_args, **_kwargs):
+        store.delete_browser_connection("user_seed", "medium")
+        return {
+            "authenticated": True,
+            "profile_id": "bp_shared",
+            "organization_id": "o_org",
+        }
+
+    monkeypatch.setattr(
+        connections_router.runner, "complete_browser_login", complete_after_cancel,
+    )
+    monkeypatch.setattr(
+        connections_router.runner,
+        "delete_browser_profile",
+        lambda platform, profile_id: deleted_profiles.append((platform, profile_id)),
+    )
+
+    response = client.post("/api/connections/medium/browser-connection/complete")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "disconnected"
+    assert deleted_profiles == []
 
 
 def test_medium_browser_login_uses_same_profile_reference_flow(client, monkeypatch):

@@ -35,6 +35,26 @@ class BrowserConnectionStoreMixin:
         ).fetchone()
         return _browser_connection_row(row) if row else None
 
+    def get_reusable_browser_profile(
+        self, user_id: str, platform: str,
+    ) -> dict | None:
+        row = self._con.execute(
+            """SELECT skyvern_organization_id, skyvern_profile_id
+               FROM browser_connections
+               WHERE user_id=? AND skyvern_profile_id IS NOT NULL
+               ORDER BY CASE WHEN platform=? THEN 0 ELSE 1 END,
+                        CASE WHEN status='connected' THEN 0 ELSE 1 END,
+                        updated_at DESC
+               LIMIT 1""",
+            (user_id, platform),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "organization_id": row["skyvern_organization_id"],
+            "profile_id": row["skyvern_profile_id"],
+        }
+
     def start_browser_connection(
         self,
         user_id: str,
@@ -148,3 +168,20 @@ class BrowserConnectionStoreMixin:
                     (user_id, platform),
                 )
         return cursor.rowcount > 0
+
+    def disconnect_browser_connection(
+        self, user_id: str, platform: str,
+    ) -> dict | None:
+        now = _now()
+        with self._workspace_lock.acquire():
+            with self._con:
+                cursor = self._con.execute(
+                    """UPDATE browser_connections
+                       SET status='disconnected', skyvern_session_id=NULL,
+                           app_url=NULL, error=NULL, verified_at=NULL, updated_at=?
+                       WHERE user_id=? AND platform=?""",
+                    (now, user_id, platform),
+                )
+        if cursor.rowcount == 0:
+            return None
+        return self.get_browser_connection(user_id, platform)

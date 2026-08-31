@@ -110,6 +110,27 @@ def test_browser_login_screenshot_returns_non_cacheable_png(monkeypatch):
     assert response.headers["cache-control"] == "no-store"
 
 
+def test_profile_logout_uses_extension_session_domains(tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(runner_main, "profile_directory", lambda *_args: tmp_path)
+    monkeypatch.setattr(
+        runner_main,
+        "clear_profile_session",
+        lambda profile_dir, domains: seen.update(
+            profile_dir=profile_dir, domains=domains
+        ) or 2,
+    )
+
+    result = runner_main.browser_profile_logout(
+        "medium",
+        "bp_profile",
+        runner_main.BrowserProfileSessionRequest(organization_id="o_org"),
+    )
+
+    assert result == {"status": "disconnected", "cookies_removed": 2}
+    assert seen == {"profile_dir": tmp_path, "domains": ("medium.com",)}
+
+
 def test_public_operation_requires_explicit_approval():
     request = runner_main.BrowserOperationRequest(
         organization_id="o_test",

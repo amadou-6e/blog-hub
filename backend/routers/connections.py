@@ -69,6 +69,18 @@ def _require_browser_extension_id(platform: str) -> None:
         raise HTTPException(status_code=400, detail="Invalid browser extension id")
 
 
+def _delete_generated_profile(
+    platform: str, connection: dict, result: dict,
+) -> None:
+    profile_id = result.get("profile_id")
+    if not profile_id or profile_id == connection.get("skyvern_profile_id"):
+        return
+    try:
+        runner.delete_browser_profile(platform, profile_id)
+    except runner.RunnerUnavailable:
+        pass
+
+
 def _ensure_browser_sync(user_id: str, platform: str, session_id: str) -> None:
     schedules = store.list_sync_schedules(user_id)
     schedule = next(
@@ -650,19 +662,34 @@ def start_hashnode_browser_connection(request: Request):
 @router.post("/{conn_id}/browser-connection", status_code=201)
 def start_browser_connection(request: Request, conn_id: str):
     _require_browser_extension_id(conn_id)
-    previous = store.get_browser_connection(request.state.user_id, conn_id)
+    user_id = request.state.user_id
+    previous = store.get_browser_connection(user_id, conn_id)
     if previous and previous.get("skyvern_session_id") and previous["status"] == "waiting_for_login":
         try:
             runner.cancel_browser_login(conn_id, previous["skyvern_session_id"])
         except runner.RunnerUnavailable:
             pass
-    reusable_profile_id = previous.get("skyvern_profile_id") if previous else None
+    reusable_profile = store.get_reusable_browser_profile(user_id, conn_id)
+    reusable_profile_id = (
+        reusable_profile.get("profile_id") if reusable_profile else None
+    )
     try:
         session = runner.start_browser_login(conn_id, reusable_profile_id)
     except runner.RunnerUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if (
+        reusable_profile
+        and session["organization_id"] != reusable_profile["organization_id"]
+    ):
+        try:
+            runner.cancel_browser_login(conn_id, session["session_id"])
+        except runner.RunnerUnavailable:
+            pass
+        raise HTTPException(
+            status_code=502, detail="Browser profile ownership could not be verified"
+        )
     connection = store.start_browser_connection(
-        request.state.user_id,
+        user_id,
         conn_id,
         session_id=session["session_id"],
         organization_id=session["organization_id"],
@@ -714,11 +741,7 @@ def complete_browser_connection(request: Request, conn_id: str):
         or current.get("skyvern_session_id") != connection["skyvern_session_id"]
         or current["status"] != "verifying"
     ):
-        if result.get("profile_id"):
-            try:
-                runner.delete_browser_profile(conn_id, result["profile_id"])
-            except runner.RunnerUnavailable:
-                pass
+        _delete_generated_profile(conn_id, connection, result)
         return _browser_connection_response(conn_id, None)
     if not result.get("authenticated"):
         failed = store.update_browser_connection(
@@ -728,11 +751,7 @@ def complete_browser_connection(request: Request, conn_id: str):
         )
         return _browser_connection_response(conn_id, failed)
     if result.get("organization_id") != connection["skyvern_organization_id"]:
-        if result.get("profile_id"):
-            try:
-                runner.delete_browser_profile(conn_id, result["profile_id"])
-            except runner.RunnerUnavailable:
-                pass
+        _delete_generated_profile(conn_id, connection, result)
         failed = store.update_browser_connection(
             user_id, conn_id, "failed",
             error="Browser profile ownership could not be verified",
@@ -765,11 +784,15 @@ def disconnect_browser_connection(request: Request, conn_id: str):
             raise HTTPException(status_code=503, detail=str(exc)) from exc
     if connection and connection.get("skyvern_profile_id"):
         try:
-            runner.delete_browser_profile(conn_id, connection["skyvern_profile_id"])
+            runner.logout_browser_profile(
+                conn_id,
+                connection["skyvern_organization_id"],
+                connection["skyvern_profile_id"],
+            )
         except runner.RunnerUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
     user_id = request.state.user_id
-    store.delete_browser_connection(user_id, conn_id)
+    store.disconnect_browser_connection(user_id, conn_id)
     store.delete_sync_schedule(user_id, conn_id)
     return {"platform": conn_id, "status": "disconnected"}
 

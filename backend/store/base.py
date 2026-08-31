@@ -353,6 +353,11 @@ class ArticleStore(Protocol):
     def get_browser_connection(self, user_id: str, platform: str) -> dict | None:
         ...
 
+    def get_reusable_browser_profile(
+        self, user_id: str, platform: str,
+    ) -> dict | None:
+        ...
+
     def start_browser_connection(self, user_id: str, platform: str, **kwargs: Any) -> dict:
         ...
 
@@ -362,6 +367,11 @@ class ArticleStore(Protocol):
         ...
 
     def delete_browser_connection(self, user_id: str, platform: str) -> bool:
+        ...
+
+    def disconnect_browser_connection(
+        self, user_id: str, platform: str,
+    ) -> dict | None:
         ...
 
     def complete_job(self, user_id: str, job_id: str, result: dict | None = None, error: str | None = None) -> None:

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Mapping, NotRequired, TypedDict
+from urllib.parse import urlsplit
 
 
 PROTOCOL_VERSION = 1
@@ -107,6 +108,11 @@ class BrowserLoginAdapter(ABC):
 
     platform: str
     login_url: str
+
+    def session_domains(self) -> tuple[str, ...]:
+        """Domains whose cookies represent this platform's own login."""
+        hostname = urlsplit(self.login_url).hostname
+        return (hostname,) if hostname else ()
 
     @abstractmethod
     def verify_profile(self, profile_dir: Path) -> dict[str, Any]:

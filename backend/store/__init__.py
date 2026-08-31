@@ -311,6 +311,10 @@ def get_browser_connection(user_id: str, *a, **kw):
     return _backend.get_browser_connection(user_id, *a, **kw)
 
 
+def get_reusable_browser_profile(user_id: str, *a, **kw):
+    return _backend.get_reusable_browser_profile(user_id, *a, **kw)
+
+
 def start_browser_connection(user_id: str, *a, **kw):
     return _backend.start_browser_connection(user_id, *a, **kw)
 
@@ -321,6 +325,10 @@ def update_browser_connection(user_id: str, *a, **kw):
 
 def delete_browser_connection(user_id: str, *a, **kw):
     return _backend.delete_browser_connection(user_id, *a, **kw)
+
+
+def disconnect_browser_connection(user_id: str, *a, **kw):
+    return _backend.disconnect_browser_connection(user_id, *a, **kw)
 
 
 # ── Agent sessions ───────────────────────────────────────────────────────────

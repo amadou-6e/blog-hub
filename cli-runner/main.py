@@ -58,6 +58,7 @@ from blog_extensions import (
     get_registry,
 )
 from blog_extensions.runtime import execute_operation
+from blog_extensions.profile_sessions import clear_profile_session
 from skyvern_browser import (
     SkyvernUnavailable,
     capture_browser_screenshot,
@@ -299,6 +300,10 @@ class HashnodeBrowserProfileRequest(BaseModel):
     profile_id: str
 
 
+class BrowserProfileSessionRequest(BaseModel):
+    organization_id: str
+
+
 _chat_processes: dict[str, subprocess.Popen] = {}
 
 def _browser_extension(platform: str):
@@ -518,6 +523,23 @@ def browser_profile_delete(platform: str, profile_id: str):
         raise HTTPException(422, str(exc)) from exc
     except SkyvernUnavailable as exc:
         raise HTTPException(503, _safe_reason(str(exc))) from exc
+
+
+@app.post("/browser/{platform}/profiles/{profile_id}/logout")
+def browser_profile_logout(
+    platform: str, profile_id: str, req: BrowserProfileSessionRequest,
+):
+    extension = _browser_extension(platform)
+    try:
+        profile_dir = profile_directory(req.organization_id, profile_id)
+        removed = clear_profile_session(
+            profile_dir, extension.login.session_domains()
+        )
+        return {"status": "disconnected", "cookies_removed": removed}
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, _safe_reason(str(exc))) from exc
 
 
 # ── Health ─────────────────────────────────────────────────────────────────────
