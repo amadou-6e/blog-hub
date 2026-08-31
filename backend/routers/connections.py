@@ -61,11 +61,37 @@ _BLOG_IDS = {"medium", "hashnode", "devto"}
 _CLI_IDS = {"anthropic", "openai"}
 _PROVIDER_MAP = {"anthropic": "anthropic", "openai": "openai"}
 _BROWSER_EXTENSION_ID = re.compile(r"^[a-z][a-z0-9_.-]{1,79}$")
+_BROWSER_SYNC_INTERVAL_SECONDS = 15 * 60
 
 
 def _require_browser_extension_id(platform: str) -> None:
     if not _BROWSER_EXTENSION_ID.fullmatch(platform):
         raise HTTPException(status_code=400, detail="Invalid browser extension id")
+
+
+def _ensure_browser_sync(user_id: str, platform: str, session_id: str) -> None:
+    schedules = store.list_sync_schedules(user_id)
+    schedule = next(
+        (item for item in schedules if item["platform"] == platform), None
+    )
+    if (
+        schedule is None
+        or not schedule["enabled"]
+        or schedule["interval_seconds"] != _BROWSER_SYNC_INTERVAL_SECONDS
+    ):
+        store.upsert_sync_schedule(
+            user_id, platform, _BROWSER_SYNC_INTERVAL_SECONDS, enabled=True
+        )
+    store.create_job(
+        user_id,
+        "sync",
+        None,
+        {"platform": platform, "scheduled": False, "trigger": "browser_connection"},
+        queue="sync",
+        idempotency_key=f"browser-connection:{platform}:{session_id}",
+        max_attempts=4,
+        timeout_seconds=900,
+    )
 
 # ── Mock draft data ───────────────────────────────────────────────────────────
 # Real implementation would call each platform's API with the stored token.
@@ -656,6 +682,11 @@ def complete_browser_connection(request: Request, conn_id: str):
     _require_browser_extension_id(conn_id)
     user_id = request.state.user_id
     connection = store.get_browser_connection(user_id, conn_id)
+    if connection and connection["status"] == "connected":
+        _ensure_browser_sync(
+            user_id, conn_id, connection["skyvern_session_id"]
+        )
+        return _browser_connection_response(conn_id, connection)
     if not connection or connection["status"] != "waiting_for_login":
         raise HTTPException(status_code=409, detail=f"No {conn_id.title()} browser login is active")
     store.update_browser_connection(user_id, conn_id, "verifying")
@@ -710,6 +741,7 @@ def complete_browser_connection(request: Request, conn_id: str):
     connected = store.update_browser_connection(
         user_id, conn_id, "connected", profile_id=result["profile_id"]
     )
+    _ensure_browser_sync(user_id, conn_id, connection["skyvern_session_id"])
     return _browser_connection_response(conn_id, connected)
 
 
@@ -736,7 +768,9 @@ def disconnect_browser_connection(request: Request, conn_id: str):
             runner.delete_browser_profile(conn_id, connection["skyvern_profile_id"])
         except runner.RunnerUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-    store.delete_browser_connection(request.state.user_id, conn_id)
+    user_id = request.state.user_id
+    store.delete_browser_connection(user_id, conn_id)
+    store.delete_sync_schedule(user_id, conn_id)
     return {"platform": conn_id, "status": "disconnected"}
 
 
