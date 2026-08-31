@@ -484,11 +484,12 @@ class SQLiteStore(
         return [self._load_article(r) for r in rows], total
 
     def get_article(self, user_id: str, article_id: str) -> dict | None:
-        row = self._con.execute(
-            "SELECT * FROM articles WHERE id=? AND user_id=? AND archived_at IS NULL",
-            (article_id, user_id),
-        ).fetchone()
-        return self._load_article(row) if row else None
+        with self._workspace_lock.acquire():
+            row = self._con.execute(
+                "SELECT * FROM articles WHERE id=? AND user_id=? AND archived_at IS NULL",
+                (article_id, user_id),
+            ).fetchone()
+            return self._load_article(row) if row else None
 
     def create_article(
         self,
