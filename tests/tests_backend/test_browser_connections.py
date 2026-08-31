@@ -202,6 +202,59 @@ def test_hashnode_browser_login_rejects_unverified_profile(client, monkeypatch):
     assert persisted["skyvern_profile_id"] == "bp_failed"
 
 
+def test_verifying_browser_login_can_be_canceled_immediately(client, monkeypatch):
+    store.start_browser_connection(
+        "user_seed", "medium", session_id="pbs_verifying",
+        organization_id="o_org", app_url="http://localhost/login",
+    )
+    store.update_browser_connection("user_seed", "medium", "verifying")
+    canceled = []
+    monkeypatch.setattr(
+        connections_router.runner,
+        "cancel_browser_login",
+        lambda *args: canceled.append(args),
+    )
+
+    response = client.delete("/api/connections/medium/browser-connection")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "disconnected"
+    assert store.get_browser_connection("user_seed", "medium") is None
+    assert canceled == []
+
+
+def test_canceled_login_discards_a_late_completion_result(client, monkeypatch):
+    store.start_browser_connection(
+        "user_seed", "medium", session_id="pbs_late",
+        organization_id="o_org", app_url="http://localhost/login",
+    )
+    deleted_profiles = []
+
+    def complete_after_cancel(*_args, **_kwargs):
+        store.delete_browser_connection("user_seed", "medium")
+        return {
+            "authenticated": True,
+            "profile_id": "bp_late",
+            "organization_id": "o_org",
+        }
+
+    monkeypatch.setattr(
+        connections_router.runner, "complete_browser_login", complete_after_cancel,
+    )
+    monkeypatch.setattr(
+        connections_router.runner,
+        "delete_browser_profile",
+        lambda platform, profile_id: deleted_profiles.append((platform, profile_id)),
+    )
+
+    response = client.post("/api/connections/medium/browser-connection/complete")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "disconnected"
+    assert deleted_profiles == [("medium", "bp_late")]
+    assert store.get_browser_connection("user_seed", "medium") is None
+
+
 def test_hashnode_browser_retry_reuses_provider_session_profile(client, monkeypatch):
     store.start_browser_connection(
         "user_seed", "hashnode", session_id="pbs_previous",

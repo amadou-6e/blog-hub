@@ -178,14 +178,19 @@ def test_hashnode_browser_login_opens_normal_tab(settings_page, context):
     assert login_tab.is_closed()
 
 
-def test_live_medium_login_waits_for_user_close_and_recovers_after_reload(
+def test_live_medium_login_finalizes_automatically_and_survives_reload(
     settings_page, context,
 ):
     page = settings_page
     authorization_url = f"{BASE_URL}/health"
-    requests_seen = {"complete": 0, "started": False}
+    requests_seen = {"complete": 0, "started": False, "completed": False}
 
     def browser_connection(route):
+        if route.request.method == "GET" and requests_seen["completed"]:
+            route.fulfill(json=_browser_payload(
+                "medium", "connected", login_phase="connected",
+            ))
+            return
         if route.request.method == "GET" and not requests_seen["started"]:
             route.fulfill(json=_browser_payload(
                 "medium", "disconnected", login_phase="disconnected",
@@ -208,6 +213,7 @@ def test_live_medium_login_waits_for_user_close_and_recovers_after_reload(
 
     def complete_connection(route):
         requests_seen["complete"] += 1
+        requests_seen["completed"] = True
         route.fulfill(json=_browser_payload("medium", "connected"))
 
     page.route(
@@ -227,26 +233,45 @@ def test_live_medium_login_waits_for_user_close_and_recovers_after_reload(
 
     login_tab = login_tab_info.value
     login_tab.wait_for_url(f"{BASE_URL}/health?*")
-    card.get_by_text("Signed in · close tab", exact=True).wait_for(timeout=5000)
+    card.get_by_text("Connected", exact=True).wait_for(timeout=5000)
     assert not login_tab.is_closed()
-    assert requests_seen["complete"] == 0
+    assert requests_seen["complete"] == 1
 
     page.reload()
     page.locator("#plat-card-medium").get_by_text(
-        "Signed in · close tab", exact=True,
-    ).wait_for(timeout=5000)
-    login_tab.evaluate(
-        """origin => window.opener.postMessage({
-          type: 'bloghub-browser-login-ready', platform: 'medium'
-        }, origin)""",
-        BASE_URL,
-    )
-    login_tab.close()
-
-    page.locator("#plat-card-medium").get_by_text(
         "Connected", exact=True,
     ).wait_for(timeout=5000)
+    login_tab.close()
     assert requests_seen["complete"] == 1
+
+
+def test_stuck_verifying_login_can_be_canceled(settings_page):
+    page = settings_page
+    canceled = {"value": False}
+
+    def browser_connection(route):
+        if route.request.method == "DELETE":
+            canceled["value"] = True
+            route.fulfill(json=_browser_payload(
+                "medium", "disconnected", login_phase="disconnected",
+            ))
+            return
+        route.fulfill(json=_browser_payload(
+            "medium", "verifying", login_phase="verifying",
+        ))
+
+    page.route(
+        f"{BASE_URL}/api/connections/medium/browser-connection",
+        browser_connection,
+    )
+    page.reload()
+
+    card = page.locator("#plat-card-medium")
+    card.get_by_text("Verifying login", exact=True).wait_for(timeout=5000)
+    card.get_by_role("button", name="Cancel").click()
+
+    assert canceled["value"] is True
+    card.get_by_text("Not connected", exact=True).wait_for(timeout=5000)
 
 
 def test_hashnode_connected_card_offers_sync_and_disconnect(page):
