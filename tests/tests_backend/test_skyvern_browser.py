@@ -91,18 +91,20 @@ def test_start_medium_login_uses_medium_signin_url(monkeypatch):
 
 
 def test_live_browser_probe_returns_only_sanitized_evidence(monkeypatch):
+    seen = {}
     socket = FakeWebSocket([
         '{"kind":"login-state","url":"https://user:password@medium.com/?secret=1#fragment",'
         '"cookies":[{"name":"sid","domain":".medium.com","expires":1999999999,'
         '"present":true,"value":"must-not-escape"}]}'
     ])
+    monkeypatch.setattr(skyvern_browser, "_api_key", lambda: "local-api-key")
+
+    def connect(url, **kwargs):
+        seen.update(url=url, kwargs=kwargs)
+        return socket
+
     monkeypatch.setattr(
-        skyvern_browser,
-        "_request",
-        lambda method, path: {"token": "temporary-ui-token"},
-    )
-    monkeypatch.setattr(
-        skyvern_browser, "websocket_connect", lambda *_args, **_kwargs: socket,
+        skyvern_browser, "websocket_connect", connect,
     )
 
     probe = skyvern_browser.get_live_browser_probe("pbs_session123")
@@ -115,7 +117,9 @@ def test_live_browser_probe_returns_only_sanitized_evidence(monkeypatch):
         }],
     }
     assert socket.sent == ['{"kind":"get-login-state"}']
-    assert "temporary-ui-token" not in repr(probe)
+    assert "apikey=local-api-key" in seen["url"]
+    assert "token=" not in seen["url"]
+    assert "local-api-key" not in repr(probe)
     assert "must-not-escape" not in repr(probe)
 
 

@@ -155,15 +155,11 @@ def get_live_browser_probe(session_id: str) -> dict:
     if not _SESSION_ID.fullmatch(session_id):
         raise ValueError("Invalid Skyvern session id")
     try:
-        ui_session = _request("POST", "/api/v1/ui-session")
-        token = ui_session.get("token")
-        if not isinstance(token, str) or not token:
-            raise SkyvernUnavailable("Skyvern UI session token is unavailable")
         base = urlsplit(SKYVERN_URL)
         scheme = "wss" if base.scheme == "https" else "ws"
         client_id = secrets.token_urlsafe(18)
         query = (
-            f"token={quote('Bearer ' + token, safe='')}"
+            f"apikey={quote(_api_key(), safe='')}"
             f"&client_id={quote(client_id, safe='')}"
         )
         socket_url = urlunsplit((
