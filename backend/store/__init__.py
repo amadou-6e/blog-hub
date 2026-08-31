@@ -277,6 +277,10 @@ def list_sync_schedules(user_id: str, *a, **kw):
     return _backend.list_sync_schedules(user_id, *a, **kw)
 
 
+def ensure_connected_sync_schedules(*a, **kw):
+    return _backend.ensure_connected_sync_schedules(*a, **kw)
+
+
 def delete_sync_schedule(user_id: str, *a, **kw):
     return _backend.delete_sync_schedule(user_id, *a, **kw)
 

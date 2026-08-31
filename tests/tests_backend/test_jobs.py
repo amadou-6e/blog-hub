@@ -138,8 +138,13 @@ class TestSyncSchedules:
     ):
         now = job_queue._now().replace(second=15, microsecond=0)
         monkeypatch.setattr(job_queue, "_now", lambda: now)
-        store.upsert_sync_schedule("user_seed", "hashnode", 900)
-        store.upsert_sync_schedule("user_seed", "medium", 900)
+        for platform in ("hashnode", "medium"):
+            store.start_browser_connection(
+                "user_seed", platform, session_id=f"pbs_{platform}",
+                organization_id="o_org", app_url="http://localhost/login",
+                profile_id="bp_shared",
+            )
+            store.update_browser_connection("user_seed", platform, "connected")
 
         first = client.post("/api/jobs/sync-refresh")
         second = client.post("/api/jobs/sync-refresh")
@@ -162,7 +167,12 @@ class TestSyncSchedules:
     def test_overview_refresh_reuses_an_active_connection_sync(
         self, client: TestClient,
     ):
-        store.upsert_sync_schedule("user_seed", "hashnode", 60)
+        store.start_browser_connection(
+            "user_seed", "hashnode", session_id="pbs_hashnode",
+            organization_id="o_org", app_url="http://localhost/login",
+            profile_id="bp_shared",
+        )
+        store.update_browser_connection("user_seed", "hashnode", "connected")
         existing = store.create_job(
             "user_seed",
             "sync",
@@ -176,3 +186,14 @@ class TestSyncSchedules:
         assert response.status_code == 202
         assert response.json()["jobs"][0]["jobId"] == existing["job_id"]
         assert len(store.list_jobs("user_seed", queue="sync")) == 1
+
+    def test_overview_refresh_ignores_a_schedule_without_a_connection(
+        self, client: TestClient,
+    ):
+        store.upsert_sync_schedule("user_seed", "hashnode", 60)
+
+        response = client.post("/api/jobs/sync-refresh")
+
+        assert response.status_code == 202
+        assert response.json() == {"jobs": [], "count": 0}
+        assert store.list_jobs("user_seed", queue="sync") == []
