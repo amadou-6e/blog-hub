@@ -596,6 +596,55 @@ class DurableJobStoreMixin:
         ).fetchone()
         return _schedule_row(row)
 
+    def ensure_connected_sync_schedules(
+        self, user_id: str | None = None, *, interval_seconds: int = 60,
+    ) -> list[dict]:
+        """Repair the internal schedule for every connected sync-capable blog."""
+        interval = max(60, int(interval_seconds))
+        user_clause = " AND user_id=?" if user_id is not None else ""
+        parameters = (user_id,) if user_id is not None else ()
+        now = _now()
+        now_s = _ts(now)
+        with self._workspace_lock.acquire():
+            connected = self._con.execute(
+                f"""SELECT user_id, platform FROM browser_connections
+                    WHERE status='connected' AND platform IN ('hashnode','medium')
+                    {user_clause}
+                    UNION
+                    SELECT user_id, platform FROM connections
+                    WHERE status='connected' AND platform IN ('hashnode','medium')
+                    {user_clause}
+                    ORDER BY user_id, platform""",
+                parameters + parameters,
+            ).fetchall()
+            with self._con:
+                for row in connected:
+                    self._con.execute(
+                        """INSERT INTO sync_schedules
+                           (id, user_id, platform, interval_seconds, enabled,
+                            next_run_at, created_at, updated_at)
+                           VALUES (?,?,?,?,1,?,?,?)
+                           ON CONFLICT(user_id, platform) DO UPDATE SET
+                             interval_seconds=excluded.interval_seconds,
+                             enabled=1,
+                             updated_at=excluded.updated_at""",
+                        (
+                            f"sync_{row['user_id']}_{row['platform']}",
+                            row["user_id"], row["platform"], interval,
+                            now_s, now_s, now_s,
+                        ),
+                    )
+            connected_keys = {
+                (row["user_id"], row["platform"]) for row in connected
+            }
+            schedule_rows = self._con.execute(
+                "SELECT * FROM sync_schedules ORDER BY user_id, platform"
+            ).fetchall()
+        return [
+            _schedule_row(row) for row in schedule_rows
+            if (row["user_id"], row["platform"]) in connected_keys
+        ]
+
     def list_sync_schedules(self, user_id: str) -> list[dict]:
         rows = self._con.execute(
             "SELECT * FROM sync_schedules WHERE user_id=? ORDER BY platform",

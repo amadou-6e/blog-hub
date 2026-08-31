@@ -322,6 +322,11 @@ class ArticleStore(Protocol):
     def list_sync_schedules(self, user_id: str) -> list[dict]:
         ...
 
+    def ensure_connected_sync_schedules(
+        self, user_id: str | None = None, *, interval_seconds: int = 60,
+    ) -> list[dict]:
+        ...
+
     def delete_sync_schedule(self, user_id: str, platform: str) -> bool:
         ...
 
