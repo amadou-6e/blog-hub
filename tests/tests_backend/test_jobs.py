@@ -5,6 +5,7 @@ Tests for /api/jobs — backend/routers/jobs.py
 import pytest
 from fastapi.testclient import TestClient
 import backend.store as store
+import backend.store.job_queue as job_queue
 
 # ─── GET /api/jobs/:jobId ─────────────────────────────────────────────────────
 
@@ -124,9 +125,54 @@ class TestSyncSchedules:
         )
         assert response.status_code == 422
 
-    def test_schedule_enforces_minimum_interval(self, client: TestClient):
+    def test_schedule_accepts_one_minute_interval(self, client: TestClient):
         response = client.put(
             "/api/jobs/sync-schedules",
             json={"platform": "hashnode", "intervalSeconds": 60},
         )
-        assert response.status_code == 422
+        assert response.status_code == 200
+        assert response.json()["interval_seconds"] == 60
+
+    def test_overview_refresh_enqueues_each_enabled_schedule_once(
+        self, client: TestClient, monkeypatch,
+    ):
+        now = job_queue._now().replace(second=15, microsecond=0)
+        monkeypatch.setattr(job_queue, "_now", lambda: now)
+        store.upsert_sync_schedule("user_seed", "hashnode", 900)
+        store.upsert_sync_schedule("user_seed", "medium", 900)
+
+        first = client.post("/api/jobs/sync-refresh")
+        second = client.post("/api/jobs/sync-refresh")
+
+        assert first.status_code == 202
+        assert first.json()["count"] == 2
+        assert [job["jobId"] for job in second.json()["jobs"]] == [
+            job["jobId"] for job in first.json()["jobs"]
+        ]
+        assert len(store.list_jobs("user_seed", queue="sync")) == 2
+        assert {
+            item["interval_seconds"]
+            for item in store.list_sync_schedules("user_seed")
+        } == {60}
+        assert {
+            job["payload"]["trigger"]
+            for job in store.list_jobs("user_seed", queue="sync")
+        } == {"overview"}
+
+    def test_overview_refresh_reuses_an_active_connection_sync(
+        self, client: TestClient,
+    ):
+        store.upsert_sync_schedule("user_seed", "hashnode", 60)
+        existing = store.create_job(
+            "user_seed",
+            "sync",
+            None,
+            {"platform": "hashnode", "trigger": "browser_connection"},
+            queue="sync",
+        )
+
+        response = client.post("/api/jobs/sync-refresh")
+
+        assert response.status_code == 202
+        assert response.json()["jobs"][0]["jobId"] == existing["job_id"]
+        assert len(store.list_jobs("user_seed", queue="sync")) == 1

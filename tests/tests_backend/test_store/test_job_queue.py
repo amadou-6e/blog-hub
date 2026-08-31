@@ -237,11 +237,11 @@ def test_due_sync_schedule_enqueues_once_and_advances(store, monkeypatch):
     start = datetime(2026, 8, 24, 8, 0, tzinfo=timezone.utc)
     monkeypatch.setattr(job_queue, "_now", lambda: start)
     schedule = store.upsert_sync_schedule(
-        store.SEED_USER_ID, "medium", 300
+        store.SEED_USER_ID, "medium", 60
     )
-    assert schedule["next_run_at"] == (start + timedelta(seconds=300)).isoformat()
+    assert schedule["next_run_at"] == (start + timedelta(seconds=60)).isoformat()
 
-    due = start + timedelta(seconds=301)
+    due = start + timedelta(seconds=61)
     monkeypatch.setattr(job_queue, "_now", lambda: due)
     assert store.enqueue_due_sync_jobs() == 1
     assert store.enqueue_due_sync_jobs() == 0
@@ -251,6 +251,28 @@ def test_due_sync_schedule_enqueues_once_and_advances(store, monkeypatch):
     assert job["payload"] == {"platform": "medium", "scheduled": True}
     advanced = store.list_sync_schedules(store.SEED_USER_ID)[0]
     assert advanced["next_run_at"] > due.isoformat()
+
+
+def test_due_schedule_reuses_an_overview_sync_in_the_same_minute(store, monkeypatch):
+    start = datetime(2026, 8, 24, 8, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(job_queue, "_now", lambda: start)
+    store.upsert_sync_schedule(store.SEED_USER_ID, "hashnode", 60)
+    due = start + timedelta(seconds=61)
+    monkeypatch.setattr(job_queue, "_now", lambda: due)
+    existing = store.create_job(
+        store.SEED_USER_ID,
+        "sync",
+        None,
+        {"platform": "hashnode", "trigger": "overview"},
+        queue="sync",
+        idempotency_key=job_queue.sync_job_idempotency_key("hashnode"),
+    )
+
+    assert store.enqueue_due_sync_jobs() == 0
+    assert [
+        item["job_id"] for item in store.list_jobs(store.SEED_USER_ID, queue="sync")
+    ] == [existing["job_id"]]
+    assert store.list_sync_schedules(store.SEED_USER_ID)[0]["next_run_at"] > due.isoformat()
 
 
 def test_sync_schedule_is_user_scoped_and_deletable(store):

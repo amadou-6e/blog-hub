@@ -61,7 +61,7 @@ _BLOG_IDS = {"medium", "hashnode", "devto"}
 _CLI_IDS = {"anthropic", "openai"}
 _PROVIDER_MAP = {"anthropic": "anthropic", "openai": "openai"}
 _BROWSER_EXTENSION_ID = re.compile(r"^[a-z][a-z0-9_.-]{1,79}$")
-_BROWSER_SYNC_INTERVAL_SECONDS = 15 * 60
+_BROWSER_SYNC_INTERVAL_SECONDS = 60
 
 
 def _require_browser_extension_id(platform: str) -> None:

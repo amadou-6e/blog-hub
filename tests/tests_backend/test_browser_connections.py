@@ -169,7 +169,7 @@ def test_hashnode_browser_login_persists_only_profile_references(client, monkeyp
     assert [
         (item["platform"], item["interval_seconds"], item["enabled"])
         for item in schedules
-    ] == [("hashnode", 900, True)]
+    ] == [("hashnode", 60, True)]
     jobs = store.list_jobs("user_seed", queue="sync")
     assert len(jobs) == 1
     assert jobs[0]["payload"] == {

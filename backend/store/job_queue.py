@@ -33,6 +33,14 @@ def _json(value: Any) -> str:
     return json.dumps(_sanitize(value), separators=(",", ":"), sort_keys=True)
 
 
+def sync_job_idempotency_key(
+    platform: str, when: datetime | None = None,
+) -> str:
+    when = when or _now()
+    minute = when.astimezone(timezone.utc).replace(second=0, microsecond=0)
+    return f"sync:{platform}:{minute.isoformat()}"
+
+
 def _loads(value: str | None) -> Any:
     return json.loads(value) if value else None
 
@@ -562,7 +570,7 @@ class DurableJobStoreMixin:
     ) -> dict:
         if platform not in {"hashnode", "medium"}:
             raise ValueError("Scheduled sync supports Hashnode and Medium")
-        interval = max(300, int(interval_seconds))
+        interval = max(60, int(interval_seconds))
         now = _now()
         now_s = _ts(now)
         schedule_id = f"sync_{user_id}_{platform}"
@@ -618,7 +626,7 @@ class DurableJobStoreMixin:
                 ).fetchall()
                 for row in rows:
                     due_at = datetime.fromisoformat(row["next_run_at"])
-                    key = f"schedule:{row['id']}:{row['next_run_at']}"
+                    key = sync_job_idempotency_key(row["platform"], now)
                     cursor = self._con.execute(
                         """INSERT OR IGNORE INTO jobs
                            (job_id, kind, status, payload_json, queue, priority,

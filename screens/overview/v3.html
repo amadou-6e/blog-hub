@@ -867,6 +867,33 @@ async function refreshOverview() {
   render();
 }
 
+const TERMINAL_SYNC_STATES = new Set(['completed', 'failed', 'canceled', 'expired', 'parked']);
+
+async function waitForSyncJob(job) {
+  let current = job;
+  const deadline = Date.now() + ((current.timeoutSeconds || 900) + 30) * 1000;
+  while (!TERMINAL_SYNC_STATES.has(current.status) && Date.now() < deadline) {
+    const delay = Math.max(current.pollAfterMs || 2000, 5000);
+    await new Promise(resolve => setTimeout(resolve, delay));
+    current = await fetchJson(current.pollUrl);
+  }
+  return current;
+}
+
+async function syncOverviewFromRemotes() {
+  try {
+    const payload = await fetchJson('/api/jobs/sync-refresh', { method: 'POST' });
+    if (!payload.jobs?.length) return;
+    const results = await Promise.all(payload.jobs.map(waitForSyncJob));
+    if (results.some(job => job.status === 'completed')) {
+      await loadOverview();
+      render();
+    }
+  } catch (error) {
+    console.warn('Overview remote refresh failed', error);
+  }
+}
+
 function hasMoreArticles() {
   return ARTICLES.length < totalArticleCount;
 }
@@ -1625,6 +1652,7 @@ loadOverview()
       selectedId = restoredId;
       detailsPanelOpen = true;
     }
+    void syncOverviewFromRemotes();
   })
   .catch(error => { alert(`Failed to load overview: ${error.message}`); })
   .finally(() => {
