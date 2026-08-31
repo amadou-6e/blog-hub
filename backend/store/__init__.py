@@ -281,6 +281,10 @@ def ensure_connected_sync_schedules(*a, **kw):
     return _backend.ensure_connected_sync_schedules(*a, **kw)
 
 
+def enqueue_due_sync_jobs(*a, **kw):
+    return _backend.enqueue_due_sync_jobs(*a, **kw)
+
+
 def delete_sync_schedule(user_id: str, *a, **kw):
     return _backend.delete_sync_schedule(user_id, *a, **kw)
 
