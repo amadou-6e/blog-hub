@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 import backend.store as store
 import backend.store.job_queue as job_queue
+from backend.main import startup_cleanup
 
 # ─── GET /api/jobs/:jobId ─────────────────────────────────────────────────────
 
@@ -102,6 +103,24 @@ class TestJobs:
 
 
 class TestSyncSchedules:
+
+    def test_startup_repairs_and_enqueues_connected_blog_sync(self):
+        store.start_browser_connection(
+            "user_seed", "medium", session_id="pbs_medium",
+            organization_id="o_org", app_url="http://localhost/login",
+            profile_id="bp_shared",
+        )
+        store.update_browser_connection("user_seed", "medium", "connected")
+
+        startup_cleanup()
+
+        schedules = store.list_sync_schedules("user_seed")
+        assert [(item["platform"], item["interval_seconds"]) for item in schedules] == [
+            ("medium", 60),
+        ]
+        jobs = store.list_jobs("user_seed", queue="sync")
+        assert len(jobs) == 1
+        assert jobs[0]["payload"] == {"platform": "medium", "scheduled": True}
 
     def test_create_list_and_delete_schedule(self, client: TestClient):
         created = client.put(

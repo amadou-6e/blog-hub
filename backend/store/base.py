@@ -327,6 +327,9 @@ class ArticleStore(Protocol):
     ) -> list[dict]:
         ...
 
+    def enqueue_due_sync_jobs(self) -> int:
+        ...
+
     def delete_sync_schedule(self, user_id: str, platform: str) -> bool:
         ...
 
