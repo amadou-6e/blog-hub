@@ -48,6 +48,55 @@ def test_login_dispatch_uses_extension_login_url(monkeypatch):
     assert seen["login_url"] == "https://medium.com/m/signin"
 
 
+def test_login_status_includes_live_authentication_without_finalizing(monkeypatch):
+    monkeypatch.setattr(
+        runner_main,
+        "get_browser_login",
+        lambda *_args: {"session_id": "pbs_test", "status": "running"},
+    )
+    monkeypatch.setattr(
+        runner_main,
+        "get_live_browser_probe",
+        lambda *_args: {
+            "url": "https://medium.com/",
+            "cookies": [
+                {"name": "uid", "domain": ".medium.com", "expires": -1, "present": True},
+                {"name": "sid", "domain": ".medium.com", "expires": -1, "present": True},
+            ],
+        },
+    )
+
+    result = runner_main.browser_login_status("medium", "pbs_test")
+
+    assert result["status"] == "running"
+    assert result["live_authentication"] == {
+        "status": "authenticated",
+        "authenticated": True,
+        "url": "https://medium.com/",
+    }
+
+
+def test_login_status_preserves_unknown_probe_state(monkeypatch):
+    monkeypatch.setattr(
+        runner_main,
+        "get_browser_login",
+        lambda *_args: {"session_id": "pbs_test", "status": "running"},
+    )
+    monkeypatch.setattr(
+        runner_main,
+        "get_live_browser_probe",
+        lambda *_args: (_ for _ in ()).throw(
+            runner_main.SkyvernUnavailable("probe failed")
+        ),
+    )
+
+    result = runner_main.browser_login_status("medium", "pbs_test")
+
+    assert result["live_authentication"] == {
+        "status": "unknown", "authenticated": None, "url": None,
+    }
+
+
 def test_public_operation_requires_explicit_approval():
     request = runner_main.BrowserOperationRequest(
         organization_id="o_test",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import time
 
 from hashnode_browser import (
     check_hashnode_profile,
@@ -23,6 +24,32 @@ class HashnodeLoginAdapter(BrowserLoginAdapter):
 
     def verify_profile(self, profile_dir: Path) -> dict:
         return check_hashnode_profile(profile_dir=str(profile_dir))
+
+    def verify_live_session(self, probe: dict) -> dict:
+        authenticated = any(
+            cookie.get("present")
+            and str(cookie.get("domain") or "").lstrip(".") == "hashnode.com"
+            and _cookie_is_live(cookie.get("expires"))
+            and (
+                cookie.get("name") in {"authjs.session-token", "hashnode-session"}
+                or str(cookie.get("name") or "").startswith(
+                    "__Secure-authjs.session-token"
+                )
+            )
+            for cookie in probe.get("cookies", [])
+        )
+        return {
+            "authenticated": authenticated,
+            "status": "connected" if authenticated else "login_required",
+        }
+
+
+def _cookie_is_live(expires: object) -> bool:
+    try:
+        value = float(expires)
+    except (TypeError, ValueError):
+        return False
+    return value < 0 or value > time.time()
 
 
 class HashnodeOperationsAdapter(BlogOperationsAdapter):

@@ -64,6 +64,7 @@ from skyvern_browser import (
     delete_browser_profile,
     finish_browser_login,
     get_browser_login,
+    get_live_browser_probe,
     profile_directory,
     start_browser_login,
 )
@@ -411,9 +412,27 @@ def hashnode_browser_login_status(session_id: str):
 
 @app.get("/browser/{platform}/login/{session_id}")
 def browser_login_status(platform: str, session_id: str):
-    _browser_extension(platform)
+    extension = _browser_extension(platform)
     try:
-        return get_browser_login(session_id, platform)
+        result = get_browser_login(session_id, platform)
+        if result.get("status") == "running":
+            try:
+                probe = get_live_browser_probe(session_id)
+                verification = extension.login.verify_live_session(probe)
+                result["live_authentication"] = {
+                    "status": (
+                        "authenticated"
+                        if verification.get("authenticated")
+                        else "unauthenticated"
+                    ),
+                    "authenticated": bool(verification.get("authenticated")),
+                    "url": probe.get("url"),
+                }
+            except SkyvernUnavailable:
+                result["live_authentication"] = {
+                    "status": "unknown", "authenticated": None, "url": None,
+                }
+        return result
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except SkyvernUnavailable as exc:

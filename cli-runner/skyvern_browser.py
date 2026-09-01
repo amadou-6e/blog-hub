@@ -1,13 +1,17 @@
 """Small privileged adapter around Skyvern's browser-session API."""
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import re
+import secrets
 import tomllib
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
+from websockets.exceptions import WebSocketException
+from websockets.sync.client import connect as websocket_connect
 
 
 SKYVERN_URL = os.environ.get("SKYVERN_URL", "http://skyvern:8000").rstrip("/")
@@ -144,6 +148,64 @@ def get_browser_login(session_id: str, platform: str = "hashnode") -> dict:
         "app_url": _public_app_url(session.get("app_url"), session_id, f"{platform}-login"),
         "completed_at": session.get("completed_at"),
     }
+
+
+def get_live_browser_probe(session_id: str) -> dict:
+    """Read sanitized authentication evidence without finalizing the browser."""
+    if not _SESSION_ID.fullmatch(session_id):
+        raise ValueError("Invalid Skyvern session id")
+    try:
+        base = urlsplit(SKYVERN_URL)
+        scheme = "wss" if base.scheme == "https" else "ws"
+        client_id = secrets.token_urlsafe(18)
+        query = (
+            f"apikey={quote(_api_key(), safe='')}"
+            f"&client_id={quote(client_id, safe='')}"
+        )
+        socket_url = urlunsplit((
+            scheme,
+            base.netloc,
+            f"/v1/stream/messages/browser_session/{session_id}",
+            query,
+            "",
+        ))
+        with websocket_connect(
+            socket_url, open_timeout=5, close_timeout=2,
+        ) as websocket:
+            websocket.send('{"kind":"get-login-state"}')
+            for _ in range(5):
+                payload = json.loads(websocket.recv(timeout=10))
+                if payload.get("kind") == "login-state":
+                    return _sanitize_live_probe(payload)
+        raise SkyvernUnavailable("Skyvern live session probe returned no state")
+    except SkyvernUnavailable:
+        raise
+    except (OSError, TimeoutError, ValueError, WebSocketException) as exc:
+        raise SkyvernUnavailable("Skyvern live session probe failed") from exc
+
+
+def _sanitize_live_probe(payload: dict) -> dict:
+    raw_url = str(payload.get("url") or "")
+    parsed = urlsplit(raw_url)
+    host = parsed.hostname or ""
+    if parsed.port is not None:
+        host = f"{host}:{parsed.port}"
+    url = urlunsplit((parsed.scheme, host, parsed.path, "", ""))
+    cookies = []
+    for raw in payload.get("cookies", [])[:256]:
+        if not isinstance(raw, dict):
+            continue
+        name = raw.get("name")
+        domain = raw.get("domain")
+        if not isinstance(name, str) or not isinstance(domain, str):
+            continue
+        cookies.append({
+            "name": name[:256],
+            "domain": domain[:256],
+            "expires": raw.get("expires"),
+            "present": bool(raw.get("present")),
+        })
+    return {"url": url, "cookies": cookies}
 
 
 def get_hashnode_login(session_id: str) -> dict:
