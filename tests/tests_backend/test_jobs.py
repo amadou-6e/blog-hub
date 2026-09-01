@@ -220,7 +220,7 @@ class TestSyncSchedules:
         parked = store.create_job(
             "user_seed", "sync", None, {"platform": "hashnode"}, queue="sync",
         )
-        store.claim_job("test-worker", queues=("sync",))
+        store._backend.claim_job("test-worker", queues=("sync",))
         store.defer_job(
             parked["job_id"], "test-worker", "operator action required",
         )
