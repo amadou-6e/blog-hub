@@ -216,10 +216,6 @@ let _browserConnections = {
   hashnode: { platform: 'hashnode', status: 'disconnected' },
 };
 let _browserMethodMenus = { medium: false, hashnode: false };
-const _platformSync = {
-  hashnode: { status: 'idle', message: '' },
-  medium: { status: 'idle', message: '' },
-};
 let _browserLoginTabs = {};
 let _browserLoginTabTimers = {};
 let _browserLoginPolls = {};
@@ -434,11 +430,7 @@ function browserPlatformCard(conn) {
   let actions = '';
   if (connected) {
     const connectedMethod = apiConnected && browserConnected ? 'both' : apiConnected ? 'api' : 'browser';
-    const canSync = id === 'hashnode' ? connected : browserConnected;
-    const syncState = canSync ? _platformSync[id] : null;
-    const syncAction = syncState ? `<button id="${id}-sync" onclick="syncBrowserArticles('${id}')" ${syncState.status === 'running' ? 'disabled' : ''}
-      style="font-size:11px;padding:4px 10px;border-radius:4px;border:1px solid #252a38;background:transparent;color:#c9cfe0;cursor:${syncState.status === 'running' ? 'wait' : 'pointer'};font-family:inherit;">${syncState.status === 'running' ? 'Syncing…' : 'Sync articles'}</button>` : '';
-    actions = `${syncAction}<button onclick="disconnectBrowserPlatformConnection('${id}', '${connectedMethod}')"
+    actions = `<button onclick="disconnectBrowserPlatformConnection('${id}', '${connectedMethod}')"
       style="font-size:11px;color:#f87171;background:transparent;border:none;cursor:pointer;font-family:inherit;">Disconnect</button>`;
   } else if (finalizing) {
     actions = `<button onclick="disconnectBrowserPlatform('${id}')"
@@ -487,7 +479,6 @@ function browserPlatformCard(conn) {
             </div>
             ${method ? `<div style="font-size:11px;color:#c9cfe0;margin-top:3px;">${method}</div>` : ''}
             <div style="font-size:10px;color:#5a6080;margin-top:3px;">${helper}</div>
-            ${_platformSync[id]?.message ? `<div role="status" style="font-size:10px;color:${_platformSync[id].status === 'failed' ? '#f87171' : _platformSync[id].status === 'partial' ? '#fbbf24' : '#71d892'};margin-top:3px;">${esc(_platformSync[id].message)}</div>` : ''}
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">${actions}</div>
@@ -521,29 +512,6 @@ function chooseBrowserPlatformApiToken(id) {
 function chooseBrowserPlatformLogin(id) {
   _browserMethodMenus[id] = false;
   startBrowserLogin(id);
-}
-
-async function syncBrowserArticles(id) {
-  const syncState = _platformSync[id];
-  if (!syncState || syncState.status === 'running') return;
-  _platformSync[id] = { status: 'running', message: '' };
-  renderPlatforms(_connections.filter(c => c.type === 'blog'));
-  try {
-    const res = await fetch(`/api/connections/${id}/sync`, { method: 'POST' });
-    const data = await res.json();
-    if (!res.ok) {
-      const detail = data.detail;
-      throw new Error(typeof detail === 'string' ? detail : detail?.message || detail?.error || `HTTP ${res.status}`);
-    }
-    const status = data.status === 'partial' ? 'partial' : 'succeeded';
-    _platformSync[id] = {
-      status,
-      message: `${data.fetched} articles synced · ${data.imported} new · ${data.updated} updated`,
-    };
-  } catch (error) {
-    _platformSync[id] = { status: 'failed', message: error.message || 'Article sync failed' };
-  }
-  renderPlatforms(_connections.filter(c => c.type === 'blog'));
 }
 
 function createBrowserLoginTab(url='about:blank') {

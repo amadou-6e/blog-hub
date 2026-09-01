@@ -274,7 +274,7 @@ def test_stuck_verifying_login_can_be_canceled(settings_page):
     card.get_by_text("Not connected", exact=True).wait_for(timeout=5000)
 
 
-def test_hashnode_connected_card_offers_sync_and_disconnect(page):
+def test_hashnode_connected_card_only_offers_disconnect(page):
     page.request.post(
         f"{BASE_URL}/api/auth/login",
         data={"email": "seed@example.com", "password": "seed1234", "remember_me": False},
@@ -292,48 +292,13 @@ def test_hashnode_connected_card_offers_sync_and_disconnect(page):
 
     page.goto(SETTINGS_URL)
     card = page.locator("#plat-card-hashnode")
-    card.get_by_text("Browser login · Persistent profile", exact=True).wait_for()
+    card.get_by_text("Connected", exact=True).wait_for()
 
     actions = card.get_by_role("button")
-    assert actions.count() == 2
-    assert actions.nth(0).inner_text() == "Sync articles"
-    assert actions.nth(1).inner_text() == "Disconnect"
+    assert actions.count() == 1
+    assert actions.nth(0).inner_text() == "Disconnect"
     assert card.get_by_text("Test", exact=True).count() == 0
     assert card.get_by_text("Refresh login", exact=True).count() == 0
-
-
-def test_hashnode_sync_action_reports_import_result(page):
-    page.request.post(
-        f"{BASE_URL}/api/auth/login",
-        data={"email": "seed@example.com", "password": "seed1234", "remember_me": False},
-    )
-    page.route(
-        f"{BASE_URL}/api/connections/hashnode/browser-connection",
-        lambda route: route.fulfill(json={
-            "platform": "hashnode",
-            "status": "connected",
-            "authorizationUrl": None,
-            "verifiedAt": "2026-08-19T00:00:00Z",
-            "error": None,
-        }),
-    )
-    page.route(
-        f"{BASE_URL}/api/connections/hashnode/sync",
-        lambda route: route.fulfill(json={
-            "status": "succeeded",
-            "fetched": 104,
-            "imported": 103,
-            "updated": 1,
-        }),
-    )
-
-    page.goto(SETTINGS_URL)
-    card = page.locator("#plat-card-hashnode")
-    card.get_by_role("button", name="Sync articles").click()
-
-    card.get_by_role("status").get_by_text(
-        "104 articles synced · 103 new · 1 updated",
-    ).wait_for()
 
 
 @pytest.mark.parametrize(

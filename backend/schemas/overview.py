@@ -156,7 +156,7 @@ class JobResponse(BaseModel):
     job_id: str = Field(alias="jobId")
     type: JobType
     status: JobStatus
-    article_id: str = Field(alias="articleId")
+    article_id: Optional[str] = Field(default=None, alias="articleId")
     result: Optional[dict] = None
     error: Optional[str] = None
     queue: str = "default"

@@ -69,6 +69,17 @@ test.describe('Current overview screen', () => {
     await expect(page.locator('.article-card-title').first()).not.toBeEmpty();
   });
 
+  test('requests a remote sync when Overview reloads', async ({ page }) => {
+    let refreshRequests = 0;
+    await page.route('**/api/jobs/sync-refresh', async route => {
+      refreshRequests += 1;
+      await route.fulfill({ json: { jobs: [], count: 0 } });
+    });
+
+    await page.reload();
+    await expect.poll(() => refreshRequests).toBe(1);
+  });
+
   test('shows all platform preview tabs on each card', async ({ page }) => {
     const firstCard = page.locator('.article-card').first();
     await expect(firstCard.locator('.plat-tab')).toHaveCount(3);

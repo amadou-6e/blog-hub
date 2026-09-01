@@ -237,11 +237,11 @@ def test_due_sync_schedule_enqueues_once_and_advances(store, monkeypatch):
     start = datetime(2026, 8, 24, 8, 0, tzinfo=timezone.utc)
     monkeypatch.setattr(job_queue, "_now", lambda: start)
     schedule = store.upsert_sync_schedule(
-        store.SEED_USER_ID, "medium", 300
+        store.SEED_USER_ID, "medium", 60
     )
-    assert schedule["next_run_at"] == (start + timedelta(seconds=300)).isoformat()
+    assert schedule["next_run_at"] == (start + timedelta(seconds=60)).isoformat()
 
-    due = start + timedelta(seconds=301)
+    due = start + timedelta(seconds=61)
     monkeypatch.setattr(job_queue, "_now", lambda: due)
     assert store.enqueue_due_sync_jobs() == 1
     assert store.enqueue_due_sync_jobs() == 0
@@ -251,6 +251,98 @@ def test_due_sync_schedule_enqueues_once_and_advances(store, monkeypatch):
     assert job["payload"] == {"platform": "medium", "scheduled": True}
     advanced = store.list_sync_schedules(store.SEED_USER_ID)[0]
     assert advanced["next_run_at"] > due.isoformat()
+
+
+def test_connected_blogs_repair_missing_schedules_and_are_immediately_due(
+    store, monkeypatch,
+):
+    start = datetime(2026, 8, 24, 8, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(job_queue, "_now", lambda: start)
+    now_s = start.isoformat()
+    store._con.execute(
+        """INSERT INTO browser_connections
+           (user_id, platform, status, skyvern_session_id,
+            skyvern_organization_id, skyvern_profile_id, app_url,
+            created_at, updated_at)
+           VALUES (?, 'medium', 'connected', 'pbs_medium', 'o_org',
+                   'bp_shared', NULL, ?, ?)""",
+        (store.SEED_USER_ID, now_s, now_s),
+    )
+    store._con.execute(
+        """INSERT INTO connections
+           (platform, token, status, username, connected_at, user_id)
+           VALUES ('hashnode', 'encrypted-token', 'connected', NULL, ?, ?)""",
+        (now_s, store.SEED_USER_ID),
+    )
+    store._con.commit()
+
+    repaired = store.ensure_connected_sync_schedules(interval_seconds=60)
+
+    assert [(item["platform"], item["interval_seconds"]) for item in repaired] == [
+        ("hashnode", 60), ("medium", 60),
+    ]
+    assert {item["next_run_at"] for item in repaired} == {now_s}
+    assert store.enqueue_due_sync_jobs() == 2
+    assert store.enqueue_due_sync_jobs() == 0
+
+
+def test_schedule_repair_preserves_user_interval_and_paused_state(store):
+    now_s = datetime(2026, 8, 24, 8, 0, tzinfo=timezone.utc).isoformat()
+    store._con.execute(
+        """INSERT INTO connections
+           (platform, token, status, username, connected_at, user_id)
+           VALUES ('hashnode', 'encrypted-token', 'connected', NULL, ?, ?)""",
+        (now_s, store.SEED_USER_ID),
+    )
+    store._con.commit()
+    original = store.upsert_sync_schedule(
+        store.SEED_USER_ID, "hashnode", 86_400, enabled=False,
+    )
+
+    repaired = store.ensure_connected_sync_schedules(interval_seconds=60)
+
+    assert repaired == [original]
+    assert repaired[0]["interval_seconds"] == 86_400
+    assert repaired[0]["enabled"] is False
+
+
+def test_schedule_repair_ignores_disconnected_blogs(store):
+    now_s = datetime(2026, 8, 24, 8, 0, tzinfo=timezone.utc).isoformat()
+    store._con.execute(
+        """INSERT INTO browser_connections
+           (user_id, platform, status, skyvern_session_id,
+            skyvern_organization_id, skyvern_profile_id, app_url,
+            created_at, updated_at)
+           VALUES (?, 'medium', 'disconnected', NULL, 'o_org',
+                   'bp_shared', NULL, ?, ?)""",
+        (store.SEED_USER_ID, now_s, now_s),
+    )
+    store._con.commit()
+
+    assert store.ensure_connected_sync_schedules(interval_seconds=60) == []
+    assert store.list_sync_schedules(store.SEED_USER_ID) == []
+
+
+def test_due_schedule_reuses_an_overview_sync_in_the_same_minute(store, monkeypatch):
+    start = datetime(2026, 8, 24, 8, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(job_queue, "_now", lambda: start)
+    store.upsert_sync_schedule(store.SEED_USER_ID, "hashnode", 60)
+    due = start + timedelta(seconds=61)
+    monkeypatch.setattr(job_queue, "_now", lambda: due)
+    existing = store.create_job(
+        store.SEED_USER_ID,
+        "sync",
+        None,
+        {"platform": "hashnode", "trigger": "overview"},
+        queue="sync",
+        idempotency_key=job_queue.sync_job_idempotency_key("hashnode"),
+    )
+
+    assert store.enqueue_due_sync_jobs() == 0
+    assert [
+        item["job_id"] for item in store.list_jobs(store.SEED_USER_ID, queue="sync")
+    ] == [existing["job_id"]]
+    assert store.list_sync_schedules(store.SEED_USER_ID)[0]["next_run_at"] > due.isoformat()
 
 
 def test_sync_schedule_is_user_scoped_and_deletable(store):

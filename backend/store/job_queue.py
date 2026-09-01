@@ -33,6 +33,14 @@ def _json(value: Any) -> str:
     return json.dumps(_sanitize(value), separators=(",", ":"), sort_keys=True)
 
 
+def sync_job_idempotency_key(
+    platform: str, when: datetime | None = None,
+) -> str:
+    when = when or _now()
+    minute = when.astimezone(timezone.utc).replace(second=0, microsecond=0)
+    return f"sync:{platform}:{minute.isoformat()}"
+
+
 def _loads(value: str | None) -> Any:
     return json.loads(value) if value else None
 
@@ -562,7 +570,7 @@ class DurableJobStoreMixin:
     ) -> dict:
         if platform not in {"hashnode", "medium"}:
             raise ValueError("Scheduled sync supports Hashnode and Medium")
-        interval = max(300, int(interval_seconds))
+        interval = max(60, int(interval_seconds))
         now = _now()
         now_s = _ts(now)
         schedule_id = f"sync_{user_id}_{platform}"
@@ -587,6 +595,67 @@ class DurableJobStoreMixin:
             (user_id, platform),
         ).fetchone()
         return _schedule_row(row)
+
+    def ensure_connected_sync_schedules(
+        self, user_id: str | None = None, *, interval_seconds: int = 60,
+    ) -> list[dict]:
+        """Create missing schedules without changing user schedule preferences."""
+        interval = max(60, int(interval_seconds))
+        user_clause = " AND user_id=?" if user_id is not None else ""
+        parameters = (user_id,) if user_id is not None else ()
+        now = _now()
+        now_s = _ts(now)
+        with self._workspace_lock.acquire():
+            connected = self._con.execute(
+                f"""SELECT user_id, platform FROM browser_connections
+                    WHERE status='connected' AND platform IN ('hashnode','medium')
+                    {user_clause}
+                    UNION
+                    SELECT user_id, platform FROM connections
+                    WHERE status='connected' AND platform IN ('hashnode','medium')
+                    {user_clause}
+                    ORDER BY user_id, platform""",
+                parameters + parameters,
+            ).fetchall()
+            with self._con:
+                for row in connected:
+                    self._con.execute(
+                        """INSERT INTO sync_schedules
+                           (id, user_id, platform, interval_seconds, enabled,
+                            next_run_at, created_at, updated_at)
+                           VALUES (?,?,?,?,1,?,?,?)
+                           ON CONFLICT(user_id, platform) DO NOTHING""",
+                        (
+                            f"sync_{row['user_id']}_{row['platform']}",
+                            row["user_id"], row["platform"], interval,
+                            now_s, now_s, now_s,
+                        ),
+                    )
+            connected_keys = {
+                (row["user_id"], row["platform"]) for row in connected
+            }
+            schedule_rows = self._con.execute(
+                "SELECT * FROM sync_schedules ORDER BY user_id, platform"
+            ).fetchall()
+        return [
+            _schedule_row(row) for row in schedule_rows
+            if (row["user_id"], row["platform"]) in connected_keys
+        ]
+
+    def has_connected_sync_connection(self, user_id: str, platform: str) -> bool:
+        if platform not in {"hashnode", "medium"}:
+            return False
+        with self._workspace_lock.acquire():
+            row = self._con.execute(
+                """SELECT 1 FROM browser_connections
+                   WHERE user_id=? AND platform=? AND status='connected'
+                   UNION ALL
+                   SELECT 1 FROM connections
+                   WHERE user_id=? AND platform=? AND status='connected'
+                   LIMIT 1""",
+                (user_id, platform, user_id, platform),
+            ).fetchone()
+        return row is not None
 
     def list_sync_schedules(self, user_id: str) -> list[dict]:
         rows = self._con.execute(
@@ -618,7 +687,7 @@ class DurableJobStoreMixin:
                 ).fetchall()
                 for row in rows:
                     due_at = datetime.fromisoformat(row["next_run_at"])
-                    key = f"schedule:{row['id']}:{row['next_run_at']}"
+                    key = sync_job_idempotency_key(row["platform"], now)
                     cursor = self._con.execute(
                         """INSERT OR IGNORE INTO jobs
                            (job_id, kind, status, payload_json, queue, priority,

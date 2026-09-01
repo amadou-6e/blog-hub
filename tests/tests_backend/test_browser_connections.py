@@ -165,6 +165,25 @@ def test_hashnode_browser_login_persists_only_profile_references(client, monkeyp
     assert "profile_id" not in completed.json()
     persisted = store.get_browser_connection("user_seed", "hashnode")
     assert persisted["skyvern_profile_id"] == "bp_profile"
+    schedules = store.list_sync_schedules("user_seed")
+    assert [
+        (item["platform"], item["interval_seconds"], item["enabled"])
+        for item in schedules
+    ] == [("hashnode", 60, True)]
+    jobs = store.list_jobs("user_seed", queue="sync")
+    assert len(jobs) == 1
+    assert jobs[0]["payload"] == {
+        "platform": "hashnode",
+        "scheduled": False,
+        "trigger": "browser_connection",
+    }
+
+    retried = client.post(
+        "/api/connections/hashnode/browser-connection/complete"
+    )
+    assert retried.status_code == 200
+    assert len(store.list_sync_schedules("user_seed")) == 1
+    assert len(store.list_jobs("user_seed", queue="sync")) == 1
     raw_url = store._backend._con.execute(
         """SELECT app_url FROM browser_connections
            WHERE user_id='user_seed' AND platform='hashnode'"""
@@ -289,6 +308,7 @@ def test_hashnode_browser_disconnect_deletes_remote_profile(client, monkeypatch)
     store.update_browser_connection(
         "user_seed", "hashnode", "connected", profile_id="bp_profile"
     )
+    store.upsert_sync_schedule("user_seed", "hashnode", 900)
     deleted = []
     monkeypatch.setattr(
         connections_router.runner,
@@ -299,6 +319,36 @@ def test_hashnode_browser_disconnect_deletes_remote_profile(client, monkeypatch)
     assert response.status_code == 200
     assert deleted == [("hashnode", "bp_profile")]
     assert store.get_browser_connection("user_seed", "hashnode") is None
+    assert store.list_sync_schedules("user_seed") == []
+
+
+def test_browser_disconnect_keeps_schedule_for_connected_api(client, monkeypatch):
+    store.save_connection(
+        "user_seed", "hashnode", "api-token", status="connected",
+    )
+    store.start_browser_connection(
+        "user_seed", "hashnode", session_id="pbs_session",
+        organization_id="o_org", app_url="http://localhost/login",
+    )
+    store.update_browser_connection(
+        "user_seed", "hashnode", "connected", profile_id="bp_profile",
+    )
+    store.upsert_sync_schedule("user_seed", "hashnode", 900)
+    monkeypatch.setattr(
+        connections_router.runner, "delete_browser_profile", lambda *_args: None,
+    )
+
+    response = client.delete("/api/connections/hashnode/browser-connection")
+
+    assert response.status_code == 200
+    assert store.list_sync_schedules("user_seed")[0]["platform"] == "hashnode"
+
+
+def test_browser_sync_ignores_extensions_without_scheduled_sync():
+    connections_router._ensure_browser_sync("user_seed", "ghost", "pbs_ghost")
+
+    assert store.list_sync_schedules("user_seed") == []
+    assert store.list_jobs("user_seed", queue="sync") == []
 
 
 def test_hashnode_browser_disconnect_retains_profile_when_remote_cleanup_fails(
@@ -361,3 +411,7 @@ def test_medium_browser_login_uses_same_profile_reference_flow(client, monkeypat
     assert completed_platforms == ["medium"]
     persisted = store.get_browser_connection("user_seed", "medium")
     assert persisted["skyvern_profile_id"] == "bp_medium"
+    assert store.list_sync_schedules("user_seed")[0]["platform"] == "medium"
+    jobs = store.list_jobs("user_seed", queue="sync")
+    assert len(jobs) == 1
+    assert jobs[0]["payload"]["platform"] == "medium"

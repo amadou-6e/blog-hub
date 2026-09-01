@@ -5,13 +5,14 @@ from pydantic import BaseModel, Field
 
 from backend.schemas.overview import JobResponse
 import backend.store as store
+from backend.store.job_queue import sync_job_idempotency_key
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
 
 class SyncScheduleRequest(BaseModel):
     platform: str
-    interval_seconds: int = Field(alias="intervalSeconds", ge=300, le=2_592_000)
+    interval_seconds: int = Field(alias="intervalSeconds", ge=60, le=2_592_000)
     enabled: bool = True
 
     model_config = {"populate_by_name": True}
@@ -88,6 +89,39 @@ def upsert_sync_schedule(request: Request, body: SyncScheduleRequest):
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/sync-refresh", status_code=202)
+def refresh_connected_platforms(request: Request):
+    user_id = request.state.user_id
+    schedules = [
+        schedule for schedule in store.list_sync_schedules(user_id)
+        if schedule["enabled"]
+        and store.has_connected_sync_connection(user_id, schedule["platform"])
+    ]
+    active_by_platform = {
+        job["payload"].get("platform"): job
+        for job in store.list_jobs(user_id, queue="sync", active=True, limit=200)
+        if job["payload"].get("platform")
+        and not (job["status"] == "waiting" and job["available_at"] is None)
+    }
+    jobs = []
+    for schedule in schedules:
+        platform = schedule["platform"]
+        job = active_by_platform.get(platform)
+        if job is None:
+            job = store.create_job(
+                user_id,
+                "sync",
+                None,
+                {"platform": platform, "scheduled": False, "trigger": "overview"},
+                queue="sync",
+                idempotency_key=sync_job_idempotency_key(platform),
+                max_attempts=4,
+                timeout_seconds=900,
+            )
+        jobs.append(_response(job))
+    return {"jobs": jobs, "count": len(jobs)}
 
 
 @router.delete("/sync-schedules/{platform}", status_code=204)
