@@ -99,18 +99,11 @@ def _delete_generated_profile(
 
 
 def _ensure_browser_sync(user_id: str, platform: str, session_id: str) -> None:
-    schedules = store.list_sync_schedules(user_id)
-    schedule = next(
-        (item for item in schedules if item["platform"] == platform), None
+    if platform not in {"hashnode", "medium"}:
+        return
+    store.ensure_connected_sync_schedules(
+        user_id, interval_seconds=_BROWSER_SYNC_INTERVAL_SECONDS,
     )
-    if (
-        schedule is None
-        or not schedule["enabled"]
-        or schedule["interval_seconds"] != _BROWSER_SYNC_INTERVAL_SECONDS
-    ):
-        store.upsert_sync_schedule(
-            user_id, platform, _BROWSER_SYNC_INTERVAL_SECONDS, enabled=True
-        )
     store.create_job(
         user_id,
         "sync",
@@ -774,7 +767,17 @@ def start_browser_connection(request: Request, conn_id: str):
     try:
         session = runner.start_browser_login(conn_id, reusable_profile_id)
     except runner.RunnerUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        if reusable_profile is None:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        store.clear_browser_profile_reference(
+            user_id, reusable_profile["platform"],
+        )
+        reusable_profile = None
+        reusable_profile_id = None
+        try:
+            session = runner.start_browser_login(conn_id, None)
+        except runner.RunnerUnavailable as retry_exc:
+            raise HTTPException(status_code=503, detail=str(retry_exc)) from retry_exc
     if (
         reusable_profile
         and session["organization_id"] != reusable_profile["organization_id"]
@@ -783,9 +786,14 @@ def start_browser_connection(request: Request, conn_id: str):
             runner.cancel_browser_login(conn_id, session["session_id"])
         except runner.RunnerUnavailable:
             pass
-        raise HTTPException(
-            status_code=502, detail="Browser profile ownership could not be verified"
+        store.clear_browser_profile_reference(
+            user_id, reusable_profile["platform"],
         )
+        reusable_profile_id = None
+        try:
+            session = runner.start_browser_login(conn_id, None)
+        except runner.RunnerUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
     connection = store.start_browser_connection(
         user_id,
         conn_id,
@@ -911,8 +919,9 @@ def disconnect_browser_connection(request: Request, conn_id: str):
         except runner.RunnerUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
     store.disconnect_browser_connection(user_id, conn_id)
-    store.delete_connection_health(user_id, conn_id)
-    store.delete_sync_schedule(user_id, conn_id)
+    if not store.has_connected_sync_connection(user_id, conn_id):
+        store.delete_connection_health(user_id, conn_id)
+        store.delete_sync_schedule(user_id, conn_id)
     return {"platform": conn_id, "status": "disconnected"}
 
 

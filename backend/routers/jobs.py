@@ -95,13 +95,16 @@ def upsert_sync_schedule(request: Request, body: SyncScheduleRequest):
 @router.post("/sync-refresh", status_code=202)
 def refresh_connected_platforms(request: Request):
     user_id = request.state.user_id
-    schedules = store.ensure_connected_sync_schedules(
-        user_id, interval_seconds=60,
-    )
+    schedules = [
+        schedule for schedule in store.list_sync_schedules(user_id)
+        if schedule["enabled"]
+        and store.has_connected_sync_connection(user_id, schedule["platform"])
+    ]
     active_by_platform = {
         job["payload"].get("platform"): job
         for job in store.list_jobs(user_id, queue="sync", active=True, limit=200)
         if job["payload"].get("platform")
+        and not (job["status"] == "waiting" and job["available_at"] is None)
     }
     jobs = []
     for schedule in schedules:

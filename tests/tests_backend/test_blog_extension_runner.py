@@ -11,6 +11,8 @@ from fastapi import HTTPException
 RUNNER = Path(__file__).resolve().parents[2] / "cli-runner"
 if str(RUNNER) not in sys.path:
     sys.path.insert(0, str(RUNNER))
+from blog_extensions.profile_sessions import clear_profile_session
+
 spec = importlib.util.spec_from_file_location(
     "blog_extension_runner_under_test", RUNNER / "main.py"
 )
@@ -136,6 +138,14 @@ def test_profile_logout_uses_extension_session_domains(tmp_path, monkeypatch):
 
     assert result == {"status": "disconnected", "cookies_removed": 2}
     assert seen == {"profile_dir": tmp_path, "domains": ("medium.com",)}
+
+
+def test_profile_logout_treats_missing_local_profile_as_already_logged_out(
+    tmp_path,
+):
+    assert clear_profile_session(
+        tmp_path / "missing-profile", ("medium.com",),
+    ) == 0
 
 
 def test_public_operation_requires_explicit_approval():

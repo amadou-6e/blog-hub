@@ -39,21 +39,34 @@ class BrowserConnectionStoreMixin:
         self, user_id: str, platform: str,
     ) -> dict | None:
         row = self._con.execute(
-            """SELECT skyvern_organization_id, skyvern_profile_id
+            """SELECT platform, skyvern_organization_id, skyvern_profile_id
                FROM browser_connections
                WHERE user_id=? AND skyvern_profile_id IS NOT NULL
+                 AND (status='connected' OR (platform=? AND status='disconnected'))
                ORDER BY CASE WHEN platform=? THEN 0 ELSE 1 END,
-                        CASE WHEN status='connected' THEN 0 ELSE 1 END,
                         updated_at DESC
                LIMIT 1""",
-            (user_id, platform),
+            (user_id, platform, platform),
         ).fetchone()
         if row is None:
             return None
         return {
+            "platform": row["platform"],
             "organization_id": row["skyvern_organization_id"],
             "profile_id": row["skyvern_profile_id"],
         }
+
+    def clear_browser_profile_reference(
+        self, user_id: str, platform: str,
+    ) -> None:
+        with self._workspace_lock.acquire():
+            with self._con:
+                self._con.execute(
+                    """UPDATE browser_connections
+                       SET skyvern_profile_id=NULL, updated_at=?
+                       WHERE user_id=? AND platform=?""",
+                    (_now(), user_id, platform),
+                )
 
     def start_browser_connection(
         self,

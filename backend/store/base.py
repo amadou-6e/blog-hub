@@ -327,6 +327,9 @@ class ArticleStore(Protocol):
     ) -> list[dict]:
         ...
 
+    def has_connected_sync_connection(self, user_id: str, platform: str) -> bool:
+        ...
+
     def enqueue_due_sync_jobs(self) -> int:
         ...
 
@@ -364,6 +367,11 @@ class ArticleStore(Protocol):
     def get_reusable_browser_profile(
         self, user_id: str, platform: str,
     ) -> dict | None:
+        ...
+
+    def clear_browser_profile_reference(
+        self, user_id: str, platform: str,
+    ) -> None:
         ...
 
     def start_browser_connection(self, user_id: str, platform: str, **kwargs: Any) -> dict:

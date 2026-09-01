@@ -281,6 +281,10 @@ def ensure_connected_sync_schedules(*a, **kw):
     return _backend.ensure_connected_sync_schedules(*a, **kw)
 
 
+def has_connected_sync_connection(user_id: str, *a, **kw):
+    return _backend.has_connected_sync_connection(user_id, *a, **kw)
+
+
 def enqueue_due_sync_jobs(*a, **kw):
     return _backend.enqueue_due_sync_jobs(*a, **kw)
 
@@ -321,6 +325,10 @@ def get_browser_connection(user_id: str, *a, **kw):
 
 def get_reusable_browser_profile(user_id: str, *a, **kw):
     return _backend.get_reusable_browser_profile(user_id, *a, **kw)
+
+
+def clear_browser_profile_reference(user_id: str, *a, **kw):
+    return _backend.clear_browser_profile_reference(user_id, *a, **kw)
 
 
 def start_browser_connection(user_id: str, *a, **kw):

@@ -36,8 +36,8 @@ def _post(path: str, **json_kwargs) -> dict:
             resp = c.post(path, json=json_kwargs or None)
             resp.raise_for_status()
             return resp.json()
-    except httpx.ConnectError:
-        raise RunnerUnavailable("CLI runner not reachable at " + CLI_RUNNER_URL)
+    except httpx.TransportError as exc:
+        raise RunnerUnavailable(f"CLI runner transport failed: {exc}") from exc
     except httpx.HTTPStatusError as exc:
         raise RunnerUnavailable(f"Runner error {exc.response.status_code}: {exc.response.text}")
 
@@ -48,8 +48,8 @@ def _get(path: str) -> dict:
             resp = c.get(path)
             resp.raise_for_status()
             return resp.json()
-    except httpx.ConnectError:
-        raise RunnerUnavailable("CLI runner not reachable at " + CLI_RUNNER_URL)
+    except httpx.TransportError as exc:
+        raise RunnerUnavailable(f"CLI runner transport failed: {exc}") from exc
     except httpx.HTTPStatusError as exc:
         raise RunnerUnavailable(f"Runner error {exc.response.status_code}: {exc.response.text}")
 
