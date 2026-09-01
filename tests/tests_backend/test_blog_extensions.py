@@ -81,6 +81,38 @@ def test_hashnode_live_session_recognizes_secure_authjs_cookie():
     assert result["authenticated"] is True
 
 
+def test_operation_health_classifies_success_and_authentication_failure():
+    operations = ExtensionRegistry().get("medium").operations
+
+    connected = operations.operation_health(
+        Capability.LIST_ARTICLES, {"success": True, "articles": []},
+    )
+    expired = operations.operation_health(Capability.LIST_ARTICLES, {
+        "success": False,
+        "error": "Medium browser session is not authenticated",
+        "diagnostics": {"errors": [{"error": "medium_login_required"}]},
+    })
+
+    assert connected["status"] == "connected"
+    assert connected["authoritative"] is True
+    assert expired["status"] == "reauthentication_required"
+    assert expired["reason"] == "remote_authentication_required"
+
+
+def test_operation_health_preserves_bounded_retry_evidence():
+    operations = ExtensionRegistry().get("hashnode").operations
+
+    evidence = operations.operation_health(Capability.LIST_ARTICLES, {
+        "success": False,
+        "error": "Too many requests",
+        "diagnostics": {"http_status": 429, "retry_after_seconds": 120},
+    })
+
+    assert evidence["status"] == "rate_limited"
+    assert evidence["retry_after_seconds"] == 120
+    assert evidence["diagnostics"]["http_status"] == 429
+
+
 def test_targeted_logout_preserves_secondary_identity_cookies():
     class Context:
         def __init__(self):

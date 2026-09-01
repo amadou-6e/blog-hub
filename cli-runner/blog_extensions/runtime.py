@@ -27,6 +27,10 @@ def execute_operation(
         )
         page = context.pages[0] if context.pages else context.new_page()
         try:
-            return extension.operations.execute(page, operation, request)
+            result = extension.operations.execute(page, operation, request)
+            result["connection_health"] = extension.operations.operation_health(
+                operation, result,
+            )
+            return result
         finally:
             context.close()

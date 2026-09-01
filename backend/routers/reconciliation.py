@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 import backend.services.cli_runner as runner
+import backend.services.connection_health as connection_health
 import backend.store as store
 from backend.schemas.reconciliation import (
     ReconciliationListResponse,
@@ -49,11 +50,17 @@ def _refresh(user_id: str, article_id: str, platform: str) -> dict:
                 organization_id=browser["skyvern_organization_id"],
                 profile_id=browser["skyvern_profile_id"],
             )
+            connection_health.record_operation_result(
+                store, user_id, platform, retrieval,
+            )
             result = sync_medium_browser_records(user_id, retrieval)
         elif platform == "hashnode" and browser and browser["status"] == "connected":
             retrieval = runner.hashnode_browser_articles(
                 organization_id=browser["skyvern_organization_id"],
                 profile_id=browser["skyvern_profile_id"],
+            )
+            connection_health.record_operation_result(
+                store, user_id, platform, retrieval,
             )
             result = sync_hashnode_browser_records(user_id, retrieval)
         elif platform == "hashnode":
@@ -88,6 +95,7 @@ def _refresh(user_id: str, article_id: str, platform: str) -> dict:
         else:
             raise HTTPException(422, f"Reconciliation is not supported for {platform}")
     except runner.RunnerUnavailable:
+        connection_health.record_unavailable(store, user_id, platform)
         reconciliation.record_unavailable(
             store,
             user_id,

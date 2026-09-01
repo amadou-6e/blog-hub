@@ -406,6 +406,24 @@ CREATE TABLE IF NOT EXISTS browser_connections (
     PRIMARY KEY (user_id, platform)
 );
 
+CREATE TABLE IF NOT EXISTS connection_health (
+    user_id                  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    platform                 TEXT NOT NULL,
+    status                   TEXT NOT NULL,
+    reason                   TEXT NOT NULL,
+    source                   TEXT NOT NULL,
+    authoritative            INTEGER NOT NULL DEFAULT 0,
+    verified_at              TEXT,
+    stale_at                 TEXT,
+    next_check_at            TEXT,
+    retry_at                 TEXT,
+    diagnostics_json         TEXT NOT NULL DEFAULT '{}',
+    verification_lease_until TEXT,
+    created_at               TEXT NOT NULL,
+    updated_at               TEXT NOT NULL,
+    PRIMARY KEY (user_id, platform)
+);
+
 CREATE INDEX IF NOT EXISTS idx_articles_user_updated
     ON articles(user_id, updated_at DESC);
 
@@ -500,3 +518,6 @@ CREATE INDEX IF NOT EXISTS idx_browser_publish_user_article
 
 CREATE INDEX IF NOT EXISTS idx_browser_connections_status
     ON browser_connections(status, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_connection_health_due
+    ON connection_health(status, next_check_at, retry_at);

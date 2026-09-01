@@ -374,7 +374,11 @@ def browser_operation(platform: str, operation: str, req: BrowserOperationReques
     except OperationNotSupported as exc:
         raise HTTPException(409, str(exc)) from exc
     except Exception as exc:
-        return {"success": False, "error": _safe_reason(str(exc))}
+        result = {"success": False, "error": _safe_reason(str(exc))}
+        result["connection_health"] = extension.operations.operation_health(
+            capability, result,
+        )
+        return result
 
 
 @app.post("/browser/hashnode/upload")
@@ -425,6 +429,7 @@ def browser_login_status(platform: str, session_id: str):
             try:
                 probe = get_live_browser_probe(session_id)
                 verification = extension.login.verify_live_session(probe)
+                result["connection_health"] = extension.login.live_health(probe)
                 result["live_authentication"] = {
                     "status": (
                         "authenticated"
@@ -435,6 +440,13 @@ def browser_login_status(platform: str, session_id: str):
                     "url": probe.get("url"),
                 }
             except SkyvernUnavailable:
+                result["connection_health"] = {
+                    "protocol_version": 1,
+                    "status": "unavailable",
+                    "reason": "live_browser_probe_unavailable",
+                    "source": "live_browser_probe",
+                    "authoritative": False,
+                }
                 result["live_authentication"] = {
                     "status": "unknown", "authenticated": None, "url": None,
                 }
@@ -499,7 +511,13 @@ def browser_login_complete(
             organization_id=req.organization_id,
         )
         verification = extension.login.verify_profile(Path(profile["profile_dir"]))
-        return {**verification, **profile}
+        return {
+            **verification,
+            **profile,
+            "connection_health": extension.login.profile_health(
+                Path(profile["profile_dir"])
+            ),
+        }
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except SkyvernUnavailable as exc:

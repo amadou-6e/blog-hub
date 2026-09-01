@@ -76,6 +76,13 @@ def test_login_status_includes_live_authentication_without_finalizing(monkeypatc
         "authenticated": True,
         "url": "https://medium.com/",
     }
+    assert result["connection_health"] == {
+        "protocol_version": 1,
+        "status": "connected",
+        "reason": "authentication_verified",
+        "source": "live_browser_probe",
+        "authoritative": True,
+    }
 
 
 def test_login_status_preserves_unknown_probe_state(monkeypatch):
@@ -210,3 +217,4 @@ def test_adapter_exception_is_sanitized_at_runner_boundary(tmp_path, monkeypatch
     assert result["success"] is False
     assert "browser-secret" not in result["error"]
     assert "[redacted]" in result["error"]
+    assert result["connection_health"]["status"] == "unknown"

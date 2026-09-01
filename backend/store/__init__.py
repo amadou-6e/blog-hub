@@ -347,6 +347,29 @@ def disconnect_browser_connection(user_id: str, *a, **kw):
     return _backend.disconnect_browser_connection(user_id, *a, **kw)
 
 
+# ── Connection health ─────────────────────────────────────────────────────
+
+
+def get_connection_health(user_id: str, *a, **kw):
+    return _backend.get_connection_health(user_id, *a, **kw)
+
+
+def upsert_connection_health(user_id: str, *a, **kw):
+    return _backend.upsert_connection_health(user_id, *a, **kw)
+
+
+def claim_connection_health_verification(user_id: str, *a, **kw):
+    return _backend.claim_connection_health_verification(user_id, *a, **kw)
+
+
+def release_connection_health_verification(user_id: str, *a, **kw):
+    return _backend.release_connection_health_verification(user_id, *a, **kw)
+
+
+def delete_connection_health(user_id: str, *a, **kw):
+    return _backend.delete_connection_health(user_id, *a, **kw)
+
+
 # ── Agent sessions ───────────────────────────────────────────────────────────
 
 

@@ -390,6 +390,29 @@ class ArticleStore(Protocol):
     ) -> dict | None:
         ...
 
+    # ── Connection health ─────────────────────────────────────────────────
+
+    def get_connection_health(self, user_id: str, platform: str) -> dict | None:
+        ...
+
+    def upsert_connection_health(
+        self, user_id: str, platform: str, status: str, **kwargs: Any,
+    ) -> dict:
+        ...
+
+    def claim_connection_health_verification(
+        self, user_id: str, platform: str, **kwargs: Any,
+    ) -> bool:
+        ...
+
+    def release_connection_health_verification(
+        self, user_id: str, platform: str,
+    ) -> bool:
+        ...
+
+    def delete_connection_health(self, user_id: str, platform: str) -> bool:
+        ...
+
     def complete_job(self, user_id: str, job_id: str, result: dict | None = None, error: str | None = None) -> None:
         ...
 

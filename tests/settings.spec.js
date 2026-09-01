@@ -138,6 +138,10 @@ test.describe('Settings screen', () => {
         authorizationUrl: null,
         verifiedAt: '2026-08-20T08:00:00Z',
         error: null,
+        connectionHealth: {
+          status: 'connected', authoritative: true,
+          reason: 'remote_operation_succeeded', source: 'remote_operation',
+        },
       },
     }));
     await page.reload();
@@ -156,6 +160,10 @@ test.describe('Settings screen', () => {
       completed = true;
       return route.fulfill({ json: {
         platform: 'medium', status: 'connected', loginPhase: 'connected', authorizationUrl: null,
+        connectionHealth: {
+          status: 'connected', authoritative: true,
+          reason: 'authentication_verified', source: 'live_browser_probe',
+        },
       }});
     });
     await page.route('**/api/connections/medium/browser-connection', route => {
@@ -163,6 +171,10 @@ test.describe('Settings screen', () => {
         return route.fulfill({ json: {
           platform: 'medium', status: 'connected', loginPhase: 'connected',
           authorizationUrl: null, verifiedAt: '2026-08-20T08:00:00Z', error: null,
+          connectionHealth: {
+            status: 'connected', authoritative: true,
+            reason: 'authentication_verified', source: 'live_browser_probe',
+          },
         }});
       }
       if (route.request().method() === 'GET' && !started) {

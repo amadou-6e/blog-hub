@@ -223,6 +223,7 @@ def medium_browser_articles(*, organization_id: str, profile_id: str) -> dict:
 
     articles: list[dict] = []
     errors = list((listing.get("diagnostics") or {}).get("errors") or [])
+    operation_health = listing.get("connection_health")
     for summary in listing.get("articles") or []:
         remote_id = str(summary.get("remote_id") or "")
         if not remote_id:
@@ -244,6 +245,12 @@ def medium_browser_articles(*, organization_id: str, profile_id: str) -> dict:
             })
             continue
         if not detail.get("success") or not detail.get("article"):
+            detail_health = detail.get("connection_health")
+            if (
+                isinstance(detail_health, dict)
+                and detail_health.get("status") != "connected"
+            ):
+                operation_health = detail_health
             errors.append({
                 "source": "article_detail",
                 "remote_id": remote_id,
@@ -274,6 +281,10 @@ def medium_browser_articles(*, organization_id: str, profile_id: str) -> dict:
         "articles": articles,
         "next_cursor": listing.get("next_cursor"),
         "diagnostics": {"errors": errors},
+        **(
+            {"connection_health": operation_health}
+            if isinstance(operation_health, dict) else {}
+        ),
         **({"error": "medium_retrieval_failed"} if errors and not articles else {}),
     }
 

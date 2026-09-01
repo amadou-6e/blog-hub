@@ -35,6 +35,7 @@ from backend.store.article_revisions import ArticleRevisionStoreMixin
 from backend.store.connection_auth import ConnectionAuthStoreMixin
 from backend.store.browser_publish import BrowserPublishStoreMixin
 from backend.store.browser_connections import BrowserConnectionStoreMixin
+from backend.store.connection_health import ConnectionHealthStoreMixin
 from backend.store.remote_articles import RemoteArticleStoreMixin
 from backend.store.reconciliation import ReconciliationStoreMixin
 from backend.store.schema import (
@@ -228,6 +229,7 @@ class SQLiteStore(
     ReconciliationStoreMixin,
     RemoteArticleStoreMixin,
     BrowserConnectionStoreMixin,
+    ConnectionHealthStoreMixin,
     BrowserPublishStoreMixin,
     ConnectionAuthStoreMixin,
     AgentSessionStoreMixin,
@@ -1413,6 +1415,7 @@ class SQLiteStore(
                 DELETE FROM article_chat_log;
                 DELETE FROM agent_sessions;
                 DELETE FROM browser_publish_runs;
+                DELETE FROM connection_health;
                 DELETE FROM browser_connections;
                 DELETE FROM article_patch_revisions;
                 DELETE FROM article_patches;

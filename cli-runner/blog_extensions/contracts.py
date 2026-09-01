@@ -10,6 +10,17 @@ from urllib.parse import urlsplit
 
 
 PROTOCOL_VERSION = 1
+HEALTH_PROTOCOL_VERSION = 1
+
+
+class ConnectionHealthStatus(StrEnum):
+    CONNECTED = "connected"
+    VERIFICATION_STALE = "verification_stale"
+    REAUTHENTICATION_REQUIRED = "reauthentication_required"
+    TEMPORARILY_BLOCKED = "temporarily_blocked"
+    RATE_LIMITED = "rate_limited"
+    UNAVAILABLE = "unavailable"
+    UNKNOWN = "unknown"
 
 
 class Capability(StrEnum):
@@ -81,6 +92,17 @@ class OperationResult(TypedDict):
     next_cursor: NotRequired[str | None]
     error: NotRequired[str]
     diagnostics: NotRequired[dict[str, Any]]
+    connection_health: NotRequired[ConnectionHealthEvidence]
+
+
+class ConnectionHealthEvidence(TypedDict):
+    protocol_version: int
+    status: str
+    reason: str
+    source: str
+    authoritative: bool
+    retry_after_seconds: NotRequired[int]
+    diagnostics: NotRequired[dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -122,6 +144,21 @@ class BrowserLoginAdapter(ABC):
         """Interpret sanitized evidence from a running browser session."""
         return {"authenticated": False, "status": "login_required"}
 
+    def profile_health(self, profile_dir: Path) -> ConnectionHealthEvidence:
+        """Normalize stored credential hints without treating them as live proof."""
+        result = self.verify_profile(profile_dir)
+        return _authentication_health(
+            result, source="stored_profile", authoritative=False,
+        )
+
+    def live_health(self, probe: dict[str, Any]) -> ConnectionHealthEvidence:
+        """Normalize a live browser probe into the shared health protocol."""
+        return _authentication_health(
+            self.verify_live_session(probe),
+            source="live_browser_probe",
+            authoritative=True,
+        )
+
 
 class BlogOperationsAdapter(ABC):
     """Deterministic Playwright operations against an authenticated page."""
@@ -145,6 +182,60 @@ class BlogOperationsAdapter(ABC):
     ) -> OperationResult:
         """Execute one declared capability using only the supplied browser page."""
 
+    def operation_health(
+        self, operation: Capability, result: OperationResult,
+    ) -> ConnectionHealthEvidence:
+        """Classify sanitized operation output without platform-specific branching."""
+        if result.get("success"):
+            return _health_evidence(
+                ConnectionHealthStatus.CONNECTED,
+                reason="remote_operation_succeeded",
+                source="remote_operation",
+                authoritative=True,
+                diagnostics={"operation": operation.value},
+            )
+
+        searchable = " ".join(_diagnostic_strings({
+            "error": result.get("error"),
+            "diagnostics": result.get("diagnostics"),
+        })).lower()
+        diagnostics: dict[str, Any] = {"operation": operation.value}
+        http_status = _find_scalar(result.get("diagnostics"), "http_status")
+        retry_after = _find_scalar(
+            result.get("diagnostics"), "retry_after_seconds",
+        )
+        if isinstance(http_status, int):
+            diagnostics["http_status"] = http_status
+        if any(token in searchable for token in (
+            "login_required", "not authenticated", "authentication required",
+            "sign in", "signin",
+        )):
+            status = ConnectionHealthStatus.REAUTHENTICATION_REQUIRED
+            reason = "remote_authentication_required"
+        elif any(token in searchable for token in ("rate limit", "too many requests", "429")):
+            status = ConnectionHealthStatus.RATE_LIMITED
+            reason = "remote_rate_limited"
+        elif any(token in searchable for token in ("captcha", "challenge", "temporarily blocked")):
+            status = ConnectionHealthStatus.TEMPORARILY_BLOCKED
+            reason = "remote_challenge"
+            diagnostics["challenge"] = True
+        elif any(token in searchable for token in ("unavailable", "timeout", "timed out", "503")):
+            status = ConnectionHealthStatus.UNAVAILABLE
+            reason = "remote_unavailable"
+        else:
+            status = ConnectionHealthStatus.UNKNOWN
+            reason = "remote_operation_failed"
+        return _health_evidence(
+            status,
+            reason=reason,
+            source="remote_operation",
+            authoritative=True,
+            diagnostics=diagnostics,
+            retry_after_seconds=(
+                retry_after if isinstance(retry_after, int) else None
+            ),
+        )
+
 
 @dataclass(frozen=True)
 class BlogExtension:
@@ -159,5 +250,79 @@ class BlogExtension:
             "display_name": self.manifest.display_name,
             "version": self.manifest.version,
             "protocol_version": self.manifest.protocol_version,
+            "health_protocol_version": HEALTH_PROTOCOL_VERSION,
             "capabilities": sorted(capability.value for capability in self.manifest.capabilities),
         }
+
+
+def _health_evidence(
+    status: ConnectionHealthStatus,
+    *,
+    reason: str,
+    source: str,
+    authoritative: bool,
+    diagnostics: dict[str, Any] | None = None,
+    retry_after_seconds: int | None = None,
+) -> ConnectionHealthEvidence:
+    evidence: ConnectionHealthEvidence = {
+        "protocol_version": HEALTH_PROTOCOL_VERSION,
+        "status": status.value,
+        "reason": reason,
+        "source": source,
+        "authoritative": authoritative,
+    }
+    if diagnostics:
+        evidence["diagnostics"] = diagnostics
+    if retry_after_seconds is not None:
+        evidence["retry_after_seconds"] = retry_after_seconds
+    return evidence
+
+
+def _authentication_health(
+    result: Mapping[str, Any], *, source: str, authoritative: bool,
+) -> ConnectionHealthEvidence:
+    authenticated = result.get("authenticated")
+    if authenticated is True:
+        status = ConnectionHealthStatus.CONNECTED
+        reason = "authentication_verified"
+    elif authenticated is False:
+        status = ConnectionHealthStatus.REAUTHENTICATION_REQUIRED
+        reason = "authentication_required"
+    else:
+        status = ConnectionHealthStatus.UNKNOWN
+        reason = "authentication_unknown"
+    return _health_evidence(
+        status, reason=reason, source=source, authoritative=authoritative,
+    )
+
+
+def _diagnostic_strings(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, Mapping):
+        return [
+            item
+            for nested in value.values()
+            for item in _diagnostic_strings(nested)
+        ]
+    if isinstance(value, (list, tuple)):
+        return [item for nested in value for item in _diagnostic_strings(nested)]
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return [str(value)]
+    return []
+
+
+def _find_scalar(value: object, key: str) -> object | None:
+    if isinstance(value, Mapping):
+        if key in value:
+            return value[key]
+        for nested in value.values():
+            found = _find_scalar(nested, key)
+            if found is not None:
+                return found
+    elif isinstance(value, (list, tuple)):
+        for nested in value:
+            found = _find_scalar(nested, key)
+            if found is not None:
+                return found
+    return None

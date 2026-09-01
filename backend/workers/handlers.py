@@ -7,6 +7,7 @@ from dataclasses import asdict
 import backend.services.cli_runner as runner
 import backend.services.agent_chat as agent_chat
 import backend.services.browser_publish as browser_publish
+import backend.services.connection_health as connection_health
 from backend.services.agent_service import (
     GenerationError,
     generate_markdown,
@@ -247,12 +248,24 @@ def handle_sync(context: JobContext, payload: dict) -> dict:
     browser_connection = context.store.get_browser_connection(
         context.user_id, platform
     )
+    health = context.store.get_connection_health(context.user_id, platform)
+    if health and health["status"] == "reauthentication_required":
+        raise PermanentJobError(
+            f"{platform.title()} connection requires authentication"
+        )
+    if not connection_health.remote_operations_allowed(health):
+        raise RetryableJobError(
+            f"{platform.title()} connection is temporarily unavailable"
+        )
     try:
         if browser_connection and browser_connection["status"] == "connected":
             if platform == "hashnode":
                 retrieval = runner.hashnode_browser_articles(
                     organization_id=browser_connection["skyvern_organization_id"],
                     profile_id=browser_connection["skyvern_profile_id"],
+                )
+                connection_health.record_operation_result(
+                    context.store, context.user_id, platform, retrieval,
                 )
                 result = sync_hashnode_browser_records(
                     context.user_id, retrieval, store=context.store
@@ -261,6 +274,9 @@ def handle_sync(context: JobContext, payload: dict) -> dict:
                 retrieval = runner.medium_browser_articles(
                     organization_id=browser_connection["skyvern_organization_id"],
                     profile_id=browser_connection["skyvern_profile_id"],
+                )
+                connection_health.record_operation_result(
+                    context.store, context.user_id, platform, retrieval,
                 )
                 result = sync_medium_browser_records(
                     context.user_id, retrieval, store=context.store
@@ -275,6 +291,9 @@ def handle_sync(context: JobContext, payload: dict) -> dict:
         else:
             raise PermanentJobError("Medium browser connection is not available")
     except runner.RunnerUnavailable as exc:
+        connection_health.record_unavailable(
+            context.store, context.user_id, platform,
+        )
         raise RetryableJobError(str(exc)) from exc
     if result["status"] == "failed":
         raise RetryableJobError(f"{platform.title()} synchronization failed")

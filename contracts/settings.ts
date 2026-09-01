@@ -22,6 +22,27 @@ export type ConnectionStatus = 'connected' | 'disconnected';
 
 export type ConnectionType = 'platform' | 'ai';
 
+export type ConnectionHealthStatus =
+    | 'connected'
+    | 'verification_stale'
+    | 'reauthentication_required'
+    | 'temporarily_blocked'
+    | 'rate_limited'
+    | 'unavailable'
+    | 'unknown';
+
+export interface ConnectionHealth {
+    status: ConnectionHealthStatus;
+    reason: string;
+    source: string;
+    authoritative: boolean;
+    verifiedAt: string | null;
+    staleAt: string | null;
+    nextCheckAt: string | null;
+    retryAt: string | null;
+    diagnostics: Record<string, string | number | boolean | null>;
+}
+
 /**
  * Which browser login flow the backend selected for this provider.
  *
@@ -52,6 +73,8 @@ export interface ConnectionInfo {
     authMethod: 'token' | 'oauth_or_token';
     connectedAt: string | null; // ISO-8601
     errorMessage: string | null;
+    connectionHealth: ConnectionHealth | null;
+    verificationNeeded: boolean;
 }
 
 /** Response from GET /api/connections */
@@ -133,6 +156,7 @@ export interface SubmitCodeRequest {
  * GET  /api/connections/{id}/browser-connection  → browser profile status
  * POST /api/connections/{id}/browser-connection  → start Skyvern browser login
  * POST /api/connections/{id}/browser-connection/complete → save and verify detected login
+ * POST /api/connections/{id}/connection-health/verify → queue one leased remote check
  *
  * CLI runner (port 8001, not called directly by the UI):
  * POST /auth/{provider}/login                    → LoginResponse (includes device_code)

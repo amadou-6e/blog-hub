@@ -680,10 +680,17 @@ class DurableJobStoreMixin:
         with self._workspace_lock.acquire():
             with self._con:
                 rows = self._con.execute(
-                    """SELECT * FROM sync_schedules
-                       WHERE enabled=1 AND next_run_at <= ?
-                       ORDER BY next_run_at""",
-                    (now_s,),
+                    """SELECT schedules.* FROM sync_schedules AS schedules
+                       LEFT JOIN connection_health AS health
+                         ON health.user_id=schedules.user_id
+                        AND health.platform=schedules.platform
+                       WHERE schedules.enabled=1
+                         AND schedules.next_run_at <= ?
+                         AND (health.status IS NULL
+                              OR health.status != 'reauthentication_required')
+                         AND (health.retry_at IS NULL OR health.retry_at <= ?)
+                       ORDER BY schedules.next_run_at""",
+                    (now_s, now_s),
                 ).fetchall()
                 for row in rows:
                     due_at = datetime.fromisoformat(row["next_run_at"])

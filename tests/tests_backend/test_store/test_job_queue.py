@@ -253,6 +253,29 @@ def test_due_sync_schedule_enqueues_once_and_advances(store, monkeypatch):
     assert advanced["next_run_at"] > due.isoformat()
 
 
+def test_connection_health_pauses_and_resumes_due_sync(store, monkeypatch):
+    start = datetime(2026, 8, 24, 8, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(job_queue, "_now", lambda: start)
+    store.upsert_sync_schedule(store.SEED_USER_ID, "medium", 60)
+    store.upsert_connection_health(
+        store.SEED_USER_ID, "medium", "reauthentication_required",
+        reason="remote_authentication_required", source="remote_operation",
+        authoritative=True, verified_at=start,
+    )
+
+    due = start + timedelta(seconds=61)
+    monkeypatch.setattr(job_queue, "_now", lambda: due)
+    assert store.enqueue_due_sync_jobs() == 0
+
+    store.upsert_connection_health(
+        store.SEED_USER_ID, "medium", "connected",
+        reason="remote_operation_succeeded", source="remote_operation",
+        authoritative=True, verified_at=due,
+        stale_at=due + timedelta(minutes=5),
+    )
+    assert store.enqueue_due_sync_jobs() == 1
+
+
 def test_connected_blogs_repair_missing_schedules_and_are_immediately_due(
     store, monkeypatch,
 ):
