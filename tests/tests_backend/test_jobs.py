@@ -164,6 +164,7 @@ class TestSyncSchedules:
                 profile_id="bp_shared",
             )
             store.update_browser_connection("user_seed", platform, "connected")
+        store.ensure_connected_sync_schedules("user_seed", interval_seconds=60)
 
         first = client.post("/api/jobs/sync-refresh")
         second = client.post("/api/jobs/sync-refresh")
@@ -192,6 +193,7 @@ class TestSyncSchedules:
             profile_id="bp_shared",
         )
         store.update_browser_connection("user_seed", "hashnode", "connected")
+        store.ensure_connected_sync_schedules("user_seed", interval_seconds=60)
         existing = store.create_job(
             "user_seed",
             "sync",
@@ -205,6 +207,47 @@ class TestSyncSchedules:
         assert response.status_code == 202
         assert response.json()["jobs"][0]["jobId"] == existing["job_id"]
         assert len(store.list_jobs("user_seed", queue="sync")) == 1
+
+    def test_overview_refresh_does_not_reuse_a_parked_job(
+        self, client: TestClient,
+    ):
+        store.start_browser_connection(
+            "user_seed", "hashnode", session_id="pbs_hashnode",
+            organization_id="o_org", app_url="http://localhost/login",
+        )
+        store.update_browser_connection("user_seed", "hashnode", "connected")
+        store.ensure_connected_sync_schedules("user_seed", interval_seconds=60)
+        parked = store.create_job(
+            "user_seed", "sync", None, {"platform": "hashnode"}, queue="sync",
+        )
+        store.claim_job("test-worker", queues=("sync",))
+        store.defer_job(
+            parked["job_id"], "test-worker", "operator action required",
+        )
+
+        response = client.post("/api/jobs/sync-refresh")
+
+        assert response.status_code == 202
+        assert response.json()["jobs"][0]["jobId"] != parked["job_id"]
+        assert response.json()["jobs"][0]["status"] == "queued"
+
+    def test_overview_refresh_respects_a_disabled_schedule(
+        self, client: TestClient,
+    ):
+        store.start_browser_connection(
+            "user_seed", "medium", session_id="pbs_medium",
+            organization_id="o_org", app_url="http://localhost/login",
+        )
+        store.update_browser_connection("user_seed", "medium", "connected")
+        store.upsert_sync_schedule("user_seed", "medium", 86_400, enabled=False)
+
+        response = client.post("/api/jobs/sync-refresh")
+
+        assert response.status_code == 202
+        assert response.json() == {"jobs": [], "count": 0}
+        schedule = store.list_sync_schedules("user_seed")[0]
+        assert schedule["interval_seconds"] == 86_400
+        assert schedule["enabled"] is False
 
     def test_overview_refresh_ignores_a_schedule_without_a_connection(
         self, client: TestClient,

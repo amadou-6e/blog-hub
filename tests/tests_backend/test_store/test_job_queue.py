@@ -286,6 +286,26 @@ def test_connected_blogs_repair_missing_schedules_and_are_immediately_due(
     assert store.enqueue_due_sync_jobs() == 0
 
 
+def test_schedule_repair_preserves_user_interval_and_paused_state(store):
+    now_s = datetime(2026, 8, 24, 8, 0, tzinfo=timezone.utc).isoformat()
+    store._con.execute(
+        """INSERT INTO connections
+           (platform, token, status, username, connected_at, user_id)
+           VALUES ('hashnode', 'encrypted-token', 'connected', NULL, ?, ?)""",
+        (now_s, store.SEED_USER_ID),
+    )
+    store._con.commit()
+    original = store.upsert_sync_schedule(
+        store.SEED_USER_ID, "hashnode", 86_400, enabled=False,
+    )
+
+    repaired = store.ensure_connected_sync_schedules(interval_seconds=60)
+
+    assert repaired == [original]
+    assert repaired[0]["interval_seconds"] == 86_400
+    assert repaired[0]["enabled"] is False
+
+
 def test_schedule_repair_ignores_disconnected_blogs(store):
     now_s = datetime(2026, 8, 24, 8, 0, tzinfo=timezone.utc).isoformat()
     store._con.execute(
