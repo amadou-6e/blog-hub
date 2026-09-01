@@ -440,6 +440,49 @@ def test_medium_login_reuses_hashnode_identity_profile(client, monkeypatch):
     assert reused == [("medium", "bp_shared")]
     medium = store.get_browser_connection("user_seed", "medium")
     assert medium["skyvern_profile_id"] == "bp_shared"
+    assert response.json()["browserMemory"] == {
+        "reused": True,
+        "sourcePlatform": "hashnode",
+    }
+
+
+def test_connected_shared_profile_wins_over_disconnected_platform_profile(
+    client, monkeypatch,
+):
+    store.start_browser_connection(
+        "user_seed", "medium", session_id="pbs_medium_old",
+        organization_id="o_org", app_url="http://localhost/medium",
+        profile_id="bp_medium_old",
+    )
+    store.update_browser_connection("user_seed", "medium", "connected")
+    store.disconnect_browser_connection("user_seed", "medium")
+    store.start_browser_connection(
+        "user_seed", "hashnode", session_id="pbs_hashnode",
+        organization_id="o_org", app_url="http://localhost/hashnode",
+        profile_id="bp_shared",
+    )
+    store.update_browser_connection("user_seed", "hashnode", "connected")
+    reused = []
+    monkeypatch.setattr(
+        connections_router.runner,
+        "start_browser_login",
+        lambda platform, profile_id: reused.append((platform, profile_id)) or {
+            "session_id": "pbs_medium_new",
+            "organization_id": "o_org",
+            "app_url": "http://localhost:8083/browser-session/pbs_medium_new",
+        },
+    )
+
+    response = client.post("/api/connections/medium/browser-connection")
+
+    assert response.status_code == 201
+    assert reused == [("medium", "bp_shared")]
+    assert response.json()["browserMemory"] == {
+        "reused": True,
+        "sourcePlatform": "hashnode",
+    }
+    medium = store.get_browser_connection("user_seed", "medium")
+    assert medium["skyvern_profile_id"] == "bp_shared"
 
 
 def test_reusable_identity_profile_is_scoped_to_its_user():

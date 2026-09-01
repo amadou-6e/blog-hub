@@ -580,6 +580,7 @@ def _browser_connection_response(
     connection: dict | None,
     live_session: dict | None = None,
     health: dict | None = None,
+    browser_memory: dict | None = None,
 ) -> dict:
     if connection is None:
         return {
@@ -592,6 +593,7 @@ def _browser_connection_response(
             },
             "connectionHealth": None,
             "verificationNeeded": False,
+            "browserMemory": browser_memory,
         }
     live_authentication = (live_session or {}).get("live_authentication") or {}
     live_authenticated = live_authentication.get("authenticated")
@@ -625,6 +627,7 @@ def _browser_connection_response(
             connection["status"] == "connected"
             and connection_health.needs_user_refresh(health)
         ),
+        "browserMemory": browser_memory,
     }
 
 
@@ -802,7 +805,16 @@ def start_browser_connection(request: Request, conn_id: str):
         app_url=session["app_url"],
         profile_id=reusable_profile_id,
     )
-    return _browser_connection_response(conn_id, connection)
+    return _browser_connection_response(
+        conn_id,
+        connection,
+        browser_memory={
+            "reused": reusable_profile is not None,
+            "sourcePlatform": (
+                reusable_profile.get("platform") if reusable_profile else None
+            ),
+        },
+    )
 
 
 @router.post("/hashnode/browser-connection/complete")

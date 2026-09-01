@@ -43,7 +43,8 @@ class BrowserConnectionStoreMixin:
                FROM browser_connections
                WHERE user_id=? AND skyvern_profile_id IS NOT NULL
                  AND (status='connected' OR (platform=? AND status='disconnected'))
-               ORDER BY CASE WHEN platform=? THEN 0 ELSE 1 END,
+               ORDER BY CASE WHEN status='connected' THEN 0 ELSE 1 END,
+                        CASE WHEN platform=? THEN 0 ELSE 1 END,
                         updated_at DESC
                LIMIT 1""",
             (user_id, platform, platform),
