@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import base64
 import importlib.util
+import json
 from pathlib import Path
+import struct
+
+import pytest
 
 
 RUNNER = Path(__file__).resolve().parents[2] / "cli-runner"
@@ -41,6 +46,15 @@ class FakeWebSocket:
 
     def recv(self, timeout=None):
         return next(self.messages)
+
+
+def _png(width=1920, height=1200, payload=b""):
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + b"\x00\x00\x00\x0dIHDR"
+        + struct.pack(">II", width, height)
+        + payload
+    )
 
 
 def test_start_login_uses_non_expiring_live_profile_session(monkeypatch):
@@ -121,6 +135,80 @@ def test_live_browser_probe_returns_only_sanitized_evidence(monkeypatch):
     assert "token=" not in seen["url"]
     assert "local-api-key" not in repr(probe)
     assert "must-not-escape" not in repr(probe)
+
+
+def test_browser_screenshot_exports_a_bounded_png(monkeypatch):
+    screenshot = _png(payload=b"current-frame")
+    socket = FakeWebSocket([
+        json.dumps({"status": "running"}),
+        json.dumps({
+            "status": "running",
+            "format": "png",
+            "screenshot": base64.b64encode(screenshot).decode(),
+        }),
+    ])
+    seen = {}
+    monkeypatch.setattr(
+        skyvern_browser,
+        "get_browser_login",
+        lambda *_args: {"status": "running"},
+    )
+    monkeypatch.setattr(skyvern_browser, "_api_key", lambda: "local-api-key")
+
+    def connect(url, **kwargs):
+        seen.update(url=url, kwargs=kwargs)
+        return socket
+
+    monkeypatch.setattr(skyvern_browser, "websocket_connect", connect)
+
+    assert skyvern_browser.capture_browser_screenshot("pbs_session123") == screenshot
+    assert "/v1/stream/browser_sessions/pbs_session123" in seen["url"]
+    assert "apikey=local-api-key" in seen["url"]
+    assert seen["kwargs"]["max_size"] == skyvern_browser._SCREENSHOT_MAX_BYTES * 2
+
+
+def test_browser_screenshot_rejects_malformed_png(monkeypatch):
+    socket = FakeWebSocket([json.dumps({
+        "status": "running",
+        "format": "png",
+        "screenshot": base64.b64encode(b"not-a-png").decode(),
+    })])
+    monkeypatch.setattr(
+        skyvern_browser,
+        "get_browser_login",
+        lambda *_args: {"status": "running"},
+    )
+    monkeypatch.setattr(skyvern_browser, "_api_key", lambda: "key")
+    monkeypatch.setattr(
+        skyvern_browser, "websocket_connect", lambda *_args, **_kwargs: socket,
+    )
+
+    with pytest.raises(
+        skyvern_browser.SkyvernUnavailable, match="invalid screenshot"
+    ):
+        skyvern_browser.capture_browser_screenshot("pbs_session123")
+
+
+def test_browser_screenshot_rejects_oversized_dimensions(monkeypatch):
+    socket = FakeWebSocket([json.dumps({
+        "status": "running",
+        "format": "png",
+        "screenshot": base64.b64encode(_png(width=5000, height=1200)).decode(),
+    })])
+    monkeypatch.setattr(
+        skyvern_browser,
+        "get_browser_login",
+        lambda *_args: {"status": "running"},
+    )
+    monkeypatch.setattr(skyvern_browser, "_api_key", lambda: "key")
+    monkeypatch.setattr(
+        skyvern_browser, "websocket_connect", lambda *_args, **_kwargs: socket,
+    )
+
+    with pytest.raises(
+        skyvern_browser.SkyvernUnavailable, match="dimensions exceed"
+    ):
+        skyvern_browser.capture_browser_screenshot("pbs_session123")
 
 
 def test_start_login_reuses_identity_provider_profile(monkeypatch):

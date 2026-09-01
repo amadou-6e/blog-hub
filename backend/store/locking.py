@@ -13,20 +13,33 @@ class WorkspaceLock:
         self._path = Path(path).resolve()
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._thread_lock = threading.RLock()
+        self._local = threading.local()
 
     @contextmanager
     def acquire(self) -> Iterator[None]:
         with self._thread_lock:
+            depth = getattr(self._local, "depth", 0)
+            if depth:
+                self._local.depth = depth + 1
+                try:
+                    yield
+                finally:
+                    self._local.depth -= 1
+                return
             with self._path.open("a+b") as handle:
                 if handle.tell() == 0 and handle.seek(0, os.SEEK_END) == 0:
                     handle.write(b"0")
                     handle.flush()
                 handle.seek(0)
                 self._lock(handle)
+                self._local.depth = 1
                 try:
                     yield
                 finally:
-                    self._unlock(handle)
+                    try:
+                        self._unlock(handle)
+                    finally:
+                        self._local.depth = 0
 
     @staticmethod
     def _lock(handle) -> None:

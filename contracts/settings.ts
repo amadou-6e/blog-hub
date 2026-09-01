@@ -132,7 +132,7 @@ export interface SubmitCodeRequest {
  * GET  /api/connections/{id}/cli-login-status    → CliLoginStatus
  * GET  /api/connections/{id}/browser-connection  → browser profile status
  * POST /api/connections/{id}/browser-connection  → start Skyvern browser login
- * POST /api/connections/{id}/browser-connection/complete → verify closed login tab
+ * POST /api/connections/{id}/browser-connection/complete → save and verify detected login
  *
  * CLI runner (port 8001, not called directly by the UI):
  * POST /auth/{provider}/login                    → LoginResponse (includes device_code)

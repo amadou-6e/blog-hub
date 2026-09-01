@@ -97,6 +97,19 @@ def test_login_status_preserves_unknown_probe_state(monkeypatch):
     }
 
 
+def test_browser_login_screenshot_returns_non_cacheable_png(monkeypatch):
+    screenshot = b"\x89PNG\r\n\x1a\ncurrent-frame"
+    monkeypatch.setattr(
+        runner_main, "capture_browser_screenshot", lambda *_args: screenshot,
+    )
+
+    response = runner_main.browser_login_screenshot("medium", "pbs_test")
+
+    assert response.body == screenshot
+    assert response.media_type == "image/png"
+    assert response.headers["cache-control"] == "no-store"
+
+
 def test_public_operation_requires_explicit_approval():
     request = runner_main.BrowserOperationRequest(
         organization_id="o_test",

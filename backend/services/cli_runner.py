@@ -348,6 +348,25 @@ def get_browser_login(platform: str, session_id: str) -> dict:
     return _get(f"/browser/{platform}/login/{session_id}")
 
 
+def capture_browser_screenshot(platform: str, session_id: str) -> bytes:
+    try:
+        with _client() as client:
+            response = client.get(
+                f"/browser/{platform}/login/{session_id}/screenshot",
+                timeout=httpx.Timeout(connect=3, read=30, write=10, pool=5),
+            )
+            response.raise_for_status()
+            if response.headers.get("content-type", "").split(";", 1)[0] != "image/png":
+                raise RunnerUnavailable("Browser runner returned an invalid screenshot")
+            if len(response.content) > 12 * 1024 * 1024:
+                raise RunnerUnavailable("Browser runner screenshot exceeds the size limit")
+            return response.content
+    except RunnerUnavailable:
+        raise
+    except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
+        raise RunnerUnavailable(f"Browser login runner unavailable: {exc}") from exc
+
+
 def get_hashnode_browser_login(session_id: str) -> dict:
     return get_browser_login("hashnode", session_id)
 

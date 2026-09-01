@@ -223,6 +223,8 @@ const _platformSync = {
 let _browserLoginTabs = {};
 let _browserLoginTabTimers = {};
 let _browserLoginPolls = {};
+let _browserLoginCompletions = {};
+let _browserLoginCompletionControllers = {};
 const _authTimers = new Map();
 
 const AUTH_STATES = {
@@ -412,20 +414,20 @@ function browserPlatformCard(conn) {
   const loginPhase = browserConnection.loginPhase || browserStatus;
   const browserConnected = browserStatus === 'connected';
   const connected = apiConnected || browserConnected;
-  const waiting = ['waiting_for_login', 'verifying'].includes(browserStatus) && !apiConnected;
-  const signedInPendingSave = loginPhase === 'signed_in_pending_save' && !apiConnected;
+  const finalizing = ['signed_in_pending_save', 'verifying'].includes(loginPhase) && !apiConnected;
+  const waiting = browserStatus === 'waiting_for_login' && !apiConnected && !finalizing;
   const failed = browserStatus === 'failed' && !apiConnected;
-  const statusColor = connected || signedInPendingSave ? '#4ade80' : waiting ? '#fbbf24' : failed ? '#f87171' : '#5a6080';
-  const statusLabel = connected ? 'Connected' : signedInPendingSave ? 'Signed in · close tab' : waiting
-    ? (browserStatus === 'verifying' ? 'Verifying login' : 'Finish signing in')
+  const statusColor = connected ? '#4ade80' : finalizing || waiting ? '#fbbf24' : failed ? '#f87171' : '#5a6080';
+  const statusLabel = connected ? 'Connected' : finalizing ? 'Verifying login' : waiting
+    ? 'Finish signing in'
     : failed ? 'Login failed' : 'Not connected';
   const tokenMethod = id === 'hashnode' ? 'API token · Hashnode Plus' : 'Integration token';
   const method = apiConnected && browserConnected ? 'Token + browser login' : apiConnected
     ? tokenMethod : browserConnected
     ? 'Browser login · Persistent profile' : '';
   const helper = connected ? (browserConnected ? 'Browser session verified' : 'Token stored securely')
-    : signedInPendingSave ? `Close the ${conn.label} login tab to save and verify this connection.`
-    : waiting ? `Close the login tab after ${conn.label} confirms sign-in.`
+    : finalizing ? 'Saving and verifying the browser profile.'
+    : waiting ? `${conn.label} will connect automatically after sign-in.`
     : failed ? esc(browserConnection.error || `${conn.label} sign-in was not completed.`)
     : 'Choose API token or browser login.';
 
@@ -438,6 +440,9 @@ function browserPlatformCard(conn) {
       style="font-size:11px;padding:4px 10px;border-radius:4px;border:1px solid #252a38;background:transparent;color:#c9cfe0;cursor:${syncState.status === 'running' ? 'wait' : 'pointer'};font-family:inherit;">${syncState.status === 'running' ? 'Syncing…' : 'Sync articles'}</button>` : '';
     actions = `${syncAction}<button onclick="disconnectBrowserPlatformConnection('${id}', '${connectedMethod}')"
       style="font-size:11px;color:#f87171;background:transparent;border:none;cursor:pointer;font-family:inherit;">Disconnect</button>`;
+  } else if (finalizing) {
+    actions = `<button onclick="disconnectBrowserPlatform('${id}')"
+      style="font-size:11px;color:#f87171;background:transparent;border:none;cursor:pointer;font-family:inherit;">Cancel</button>`;
   } else if (waiting) {
     actions = `<button onclick="openBrowserLogin('${id}')"
       style="font-size:11px;padding:4px 10px;border-radius:4px;border:1px solid #252a38;background:transparent;color:#c9cfe0;cursor:pointer;font-family:inherit;">Open login</button>
@@ -454,7 +459,7 @@ function browserPlatformCard(conn) {
   const tokenBadge = id === 'hashnode'
     ? '<span style="font-size:9px;font-weight:600;color:#a5b4fc;border:1px solid #3b4670;border-radius:3px;padding:2px 5px;">PLUS</span>'
     : '';
-  const methodMenu = !connected && !waiting && _browserMethodMenus[id] ? `
+  const methodMenu = !connected && !waiting && !finalizing && _browserMethodMenus[id] ? `
     <div class="browser-methods" id="${id}-method-menu">
       <button class="browser-method" onclick="chooseBrowserPlatformApiToken('${id}')">
         <span style="width:30px;height:30px;border-radius:5px;background:#1d2945;color:#7fa4ff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;">API</span>
@@ -561,8 +566,8 @@ function browserLoginOrigin(id) {
   catch { return null; }
 }
 
-function notifyBrowserLoginTab(id, tab) {
-  const origin = browserLoginOrigin(id);
+function notifyBrowserLoginTab(id, tab, knownOrigin = null) {
+  const origin = knownOrigin || browserLoginOrigin(id);
   if (!tab || tab.closed || !origin) return;
   tab.postMessage({
     type: 'bloghub-browser-login-state',
@@ -580,6 +585,9 @@ async function refreshBrowserLoginState(id, tab) {
       _browserConnections[id] = await res.json();
       renderPlatforms(_connections.filter(c => c.type === 'blog'));
       notifyBrowserLoginTab(id, tab);
+      if (_browserConnections[id]?.loginPhase === 'signed_in_pending_save') {
+        void completeBrowserLogin(id, tab);
+      }
     }
   } catch { /* Keep the browser available while a transient probe fails. */ }
   finally { _browserLoginPolls[id] = false; }
@@ -642,30 +650,50 @@ function openBrowserLogin(id) {
   }
 }
 
-async function completeBrowserLogin(id) {
-  _browserConnections[id] = {
-    ..._browserConnections[id], status: 'verifying', loginPhase: 'verifying',
-  };
-  if (_browserLoginTabTimers[id]) clearInterval(_browserLoginTabTimers[id]);
-  _browserLoginTabTimers[id] = null;
-  _browserLoginTabs[id] = null;
-  renderPlatforms(_connections.filter(c => c.type === 'blog'));
-  try {
-    const res = await fetch(`/api/connections/${id}/browser-connection/complete`, { method: 'POST' });
-    if (res.status === 401) {
-      redirectToLogin();
-      return;
+function completeBrowserLogin(id, tab = _browserLoginTabs[id]) {
+  if (_browserLoginCompletions[id]) return _browserLoginCompletions[id];
+  const origin = browserLoginOrigin(id);
+  const controller = new AbortController();
+  _browserLoginCompletionControllers[id] = controller;
+  const completion = (async () => {
+    _browserConnections[id] = {
+      ..._browserConnections[id], status: 'verifying', loginPhase: 'verifying',
+    };
+    renderPlatforms(_connections.filter(c => c.type === 'blog'));
+    notifyBrowserLoginTab(id, tab, origin);
+    try {
+      const res = await fetch(`/api/connections/${id}/browser-connection/complete`, {
+        method: 'POST', signal: controller.signal,
+      });
+      if (res.status === 401) {
+        redirectToLogin();
+        return;
+      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+      _browserConnections[id] = data;
+    } catch (error) {
+      if (error.name === 'AbortError') return;
+      _browserConnections[id] = {
+        platform: id, status: 'failed', loginPhase: 'failed', error: error.message,
+      };
     }
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-    _browserConnections[id] = data;
-  } catch (error) {
-    _browserConnections[id] = { platform: id, status: 'failed', error: error.message };
-  }
-  renderPlatforms(_connections.filter(c => c.type === 'blog'));
+    renderPlatforms(_connections.filter(c => c.type === 'blog'));
+    updateCount(_connections);
+    notifyBrowserLoginTab(id, tab, origin);
+  })();
+  _browserLoginCompletions[id] = completion.finally(() => {
+    delete _browserLoginCompletions[id];
+    if (_browserLoginCompletionControllers[id] === controller) {
+      delete _browserLoginCompletionControllers[id];
+    }
+  });
+  return _browserLoginCompletions[id];
 }
 
 async function disconnectBrowserPlatform(id) {
+  _browserLoginCompletionControllers[id]?.abort();
+  delete _browserLoginCompletionControllers[id];
   if (_browserLoginTabTimers[id]) clearInterval(_browserLoginTabTimers[id]);
   _browserLoginTabTimers[id] = null;
   _browserLoginTabs[id]?.close();

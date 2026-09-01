@@ -165,27 +165,49 @@ const handoffScript = `<script>(()=>{
   notify();
   const heartbeat=window.setInterval(notify,1000);
 
-  function showConfirmation(){
-    if(document.getElementById("bloghub-login-complete"))return;
+  function showConfirmation(loginPhase){
     const label=platform==="medium"?"Medium":"Hashnode";
-    const overlay=document.createElement("main");
+    let overlay=document.getElementById("bloghub-login-complete");
+    if(overlay){
+      const badge=overlay.querySelector("[data-login-badge]");
+      const title=overlay.querySelector("[data-login-title]");
+      const copy=overlay.querySelector("[data-login-copy]");
+      const button=overlay.querySelector("button");
+      if(loginPhase==="connected"){
+        badge.textContent="Connected";
+        title.textContent=label+" connected";
+        copy.textContent="Your connection is saved and verified. You can close this tab and return to BlogHub.";
+        button.hidden=false;
+      }else if(loginPhase==="failed"){
+        badge.textContent="Not connected";
+        title.textContent=label+" verification failed";
+        copy.textContent="Return to BlogHub to review the error and retry.";
+        button.hidden=false;
+      }
+      return;
+    }
+    overlay=document.createElement("main");
     overlay.id="bloghub-login-complete";
     overlay.setAttribute("role","status");
     overlay.style.cssText="position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;background:#0d0f14;color:#e7eaf2;font-family:Inter,ui-sans-serif,system-ui,sans-serif";
     const content=document.createElement("section");
     content.style.cssText="width:min(460px,calc(100vw - 48px));text-align:center";
     const badge=document.createElement("div");
-    badge.textContent="Signed in";
+    badge.dataset.loginBadge="";
+    badge.textContent="Sign-in detected";
     badge.style.cssText="display:inline-block;margin-bottom:18px;padding:6px 10px;border:1px solid #2f7d4a;border-radius:5px;color:#71d892;font-size:12px;font-weight:700";
     const title=document.createElement("h1");
-    title.textContent=label+" login successful";
+    title.dataset.loginTitle="";
+    title.textContent="Saving "+label+" login";
     title.style.cssText="margin:0 0 12px;font-size:28px;line-height:1.2;font-weight:700";
     const copy=document.createElement("p");
-    copy.textContent="Close this tab to save and verify the browser profile, then return to BlogHub.";
+    copy.dataset.loginCopy="";
+    copy.textContent="BlogHub is saving and verifying the browser profile. Keep this tab open for a moment.";
     copy.style.cssText="margin:0 auto 24px;color:#9aa3b7;font-size:15px;line-height:1.6";
     const button=document.createElement("button");
     button.type="button";
     button.textContent="Close tab";
+    button.hidden=true;
     button.style.cssText="padding:10px 18px;border:0;border-radius:5px;background:#6366f1;color:#fff;font:inherit;font-weight:600;cursor:pointer";
     button.addEventListener("click",()=>window.close());
     content.append(badge,title,copy,button);
@@ -197,7 +219,9 @@ const handoffScript = `<script>(()=>{
     if(event.source!==window.opener||event.origin!==returnOrigin)return;
     const data=event.data||{};
     if(data.type!=="bloghub-browser-login-state"||data.platform!==platform)return;
-    if(data.loginPhase==="signed_in_pending_save")showConfirmation();
+    if(["signed_in_pending_save","verifying","connected","failed"].includes(data.loginPhase)){
+      showConfirmation(data.loginPhase);
+    }
   });
   window.addEventListener("beforeunload",()=>window.clearInterval(heartbeat));
 })();</script>`;

@@ -28,7 +28,7 @@ import re
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 
 import backend.services.cli_runner as runner
 import backend.services.connection_auth as agent_auth
@@ -585,6 +585,37 @@ def get_browser_connection(request: Request, conn_id: str):
     )
 
 
+@router.get("/{conn_id}/browser-connection/screenshot")
+def export_browser_connection_screenshot(request: Request, conn_id: str):
+    _require_browser_extension_id(conn_id)
+    connection = store.get_browser_connection(request.state.user_id, conn_id)
+    if (
+        not connection
+        or connection["status"] != "waiting_for_login"
+        or not connection.get("skyvern_session_id")
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"No active {conn_id.title()} browser login is available",
+        )
+    try:
+        screenshot = runner.capture_browser_screenshot(
+            conn_id, connection["skyvern_session_id"]
+        )
+    except runner.RunnerUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return Response(
+        content=screenshot,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": (
+                f'attachment; filename="bloghub-{conn_id}-browser.png"'
+            ),
+        },
+    )
+
+
 @router.post("/hashnode/browser-connection", status_code=201)
 def start_hashnode_browser_connection(request: Request):
     return start_browser_connection(request, "hashnode")
@@ -638,8 +669,26 @@ def complete_browser_connection(request: Request, conn_id: str):
             organization_id=connection.get("skyvern_organization_id"),
         )
     except runner.RunnerUnavailable as exc:
-        store.update_browser_connection(user_id, conn_id, "failed", error=str(exc))
+        current = store.get_browser_connection(user_id, conn_id)
+        if (
+            current
+            and current.get("skyvern_session_id") == connection["skyvern_session_id"]
+            and current["status"] == "verifying"
+        ):
+            store.update_browser_connection(user_id, conn_id, "failed", error=str(exc))
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    current = store.get_browser_connection(user_id, conn_id)
+    if (
+        not current
+        or current.get("skyvern_session_id") != connection["skyvern_session_id"]
+        or current["status"] != "verifying"
+    ):
+        if result.get("profile_id"):
+            try:
+                runner.delete_browser_profile(conn_id, result["profile_id"])
+            except runner.RunnerUnavailable:
+                pass
+        return _browser_connection_response(conn_id, None)
     if not result.get("authenticated"):
         failed = store.update_browser_connection(
             user_id, conn_id, "failed",
@@ -673,7 +722,11 @@ def disconnect_hashnode_browser_connection(request: Request):
 def disconnect_browser_connection(request: Request, conn_id: str):
     _require_browser_extension_id(conn_id)
     connection = store.get_browser_connection(request.state.user_id, conn_id)
-    if connection and connection.get("skyvern_session_id") and connection["status"] == "waiting_for_login":
+    if (
+        connection
+        and connection.get("skyvern_session_id")
+        and connection["status"] == "waiting_for_login"
+    ):
         try:
             runner.cancel_browser_login(conn_id, connection["skyvern_session_id"])
         except runner.RunnerUnavailable as exc:

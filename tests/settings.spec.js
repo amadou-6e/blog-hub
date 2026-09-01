@@ -180,17 +180,25 @@ test.describe('Settings screen', () => {
     );
   });
 
-  test('Medium live login waits for user close and survives Settings reload', async ({ page, context }) => {
+  test('Medium live login finalizes automatically while the tab stays open', async ({ page, context }) => {
     let completeRequests = 0;
     let started = false;
+    let completed = false;
     const authorizationUrl = 'http://localhost:8000/health';
     await page.route('**/api/connections/medium/browser-connection/complete', route => {
       completeRequests += 1;
+      completed = true;
       return route.fulfill({ json: {
-        platform: 'medium', status: 'connected', authorizationUrl: null,
+        platform: 'medium', status: 'connected', loginPhase: 'connected', authorizationUrl: null,
       }});
     });
     await page.route('**/api/connections/medium/browser-connection', route => {
+      if (route.request().method() === 'GET' && completed) {
+        return route.fulfill({ json: {
+          platform: 'medium', status: 'connected', loginPhase: 'connected',
+          authorizationUrl: null, verifiedAt: '2026-08-20T08:00:00Z', error: null,
+        }});
+      }
       if (route.request().method() === 'GET' && !started) {
         return route.fulfill({ json: {
           platform: 'medium', status: 'disconnected', loginPhase: 'disconnected',
@@ -217,26 +225,42 @@ test.describe('Settings screen', () => {
     const loginTab = await loginTabPromise;
     await loginTab.waitForURL('**/health?*');
 
-    await expect(card.getByText('Signed in · close tab', { exact: true })).toBeVisible();
+    await expect(card.getByText('Connected', { exact: true })).toBeVisible();
+    expect(completeRequests).toBe(1);
     expect(loginTab.isClosed()).toBe(false);
-    expect(completeRequests).toBe(0);
 
     await page.reload();
     await expect(page.locator('#plat-card-medium').getByText(
-      'Signed in · close tab', { exact: true },
-    )).toBeVisible();
-    await loginTab.evaluate(origin => window.opener.postMessage({
-      type: 'bloghub-browser-login-ready', platform: 'medium',
-    }, origin), 'http://localhost:8000');
-    await loginTab.close();
-
-    await expect(page.locator('#plat-card-medium').getByText(
       'Connected', { exact: true },
     )).toBeVisible();
-    expect(completeRequests).toBe(1);
+    await loginTab.close();
   });
 
-  test('Skyvern shows the provider-neutral handoff until the user closes it', async ({ page }) => {
+  test('a stuck verifying login can be canceled', async ({ page }) => {
+    let canceled = false;
+    await page.route('**/api/connections/medium/browser-connection', route => {
+      if (route.request().method() === 'DELETE') {
+        canceled = true;
+        return route.fulfill({ json: {
+          platform: 'medium', status: 'disconnected', loginPhase: 'disconnected',
+        }});
+      }
+      return route.fulfill({ json: {
+        platform: 'medium', status: 'verifying', loginPhase: 'verifying',
+        authorizationUrl: null, verifiedAt: null, error: null,
+      }});
+    });
+    await page.reload();
+
+    const card = page.locator('#plat-card-medium');
+    await expect(card.getByText('Verifying login', { exact: true })).toBeVisible();
+    await card.getByRole('button', { name: 'Cancel' }).click();
+
+    expect(canceled).toBe(true);
+    await expect(card.getByText('Not connected', { exact: true })).toBeVisible();
+  });
+
+  test('Skyvern confirms automatic handoff and leaves closure to the user', async ({ page }) => {
     test.skip(!process.env.BLOGHUB_SKYVERN_UI_URL, 'Patched Skyvern UI is opt-in.');
     await page.goto('http://localhost:8000/health');
     await page.evaluate(() => {
@@ -247,6 +271,11 @@ test.describe('Settings screen', () => {
           platform: event.data.platform,
           loginPhase: 'signed_in_pending_save',
         }, event.origin);
+        setTimeout(() => event.source.postMessage({
+          type: 'bloghub-browser-login-state',
+          platform: event.data.platform,
+          loginPhase: 'connected',
+        }, event.origin), 50);
       });
     });
     const skyvernUrl = new URL(
@@ -259,10 +288,10 @@ test.describe('Settings screen', () => {
     await page.evaluate(url => window.open(url, '_blank'), skyvernUrl.href);
     const popup = await popupPromise;
     await expect(popup.getByRole('heading', {
-      name: 'Medium login successful',
+      name: 'Medium connected',
     })).toBeVisible();
     await expect(popup.getByText(
-      'Close this tab to save and verify the browser profile, then return to BlogHub.',
+      'Your connection is saved and verified. You can close this tab and return to BlogHub.',
       { exact: true },
     )).toBeVisible();
     expect(popup.isClosed()).toBe(false);
