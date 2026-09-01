@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import backend.services.cli_runner as runner
+import backend.services.connection_health as connection_health
 import backend.store as store
 from backend.security import redact_secrets
 
@@ -59,6 +60,9 @@ def execute_run(*, user_id: str, run_id: str) -> None:
             remote_id=remote_id,
             approved=True,
         )
+        connection_health.record_operation_result(
+            store, user_id, platform, result,
+        )
         if not result.get("success"):
             error = _safe_error(
                 result.get("error"), f"{platform.title()} upload failed"
@@ -91,6 +95,8 @@ def execute_run(*, user_id: str, run_id: str) -> None:
         )
         store.complete_browser_publish_run(user_id, run_id, result=result)
     except Exception as exc:
+        if isinstance(exc, runner.RunnerUnavailable):
+            connection_health.record_unavailable(store, user_id, platform)
         error = _safe_error(exc, f"{platform.title()} upload failed")
         store.apply_push_result(
             user_id, run["article_id"], platform, success=False,

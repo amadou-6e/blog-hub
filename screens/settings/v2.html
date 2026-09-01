@@ -267,9 +267,38 @@ async function loadConnections() {
     } catch { /* The token path remains usable while browser automation is offline. */ }
   }));
   renderPlatforms(_connections.filter(c => c.type === 'blog'));
+  [...BROWSER_LOGIN_PLATFORMS].forEach(id => {
+    if (_browserConnections[id]?.status === 'connected' && _browserConnections[id]?.verificationNeeded) {
+      void requestBrowserHealthVerification(id);
+    }
+  });
   renderAI(_connections.filter(c => c.type === 'ai'));
   updateCount(_connections);
   await resumeActiveAuthFlows();
+}
+
+async function requestBrowserHealthVerification(id) {
+  try {
+    const res = await fetch(`/api/connections/${id}/connection-health/verify`, {
+      method: 'POST',
+    });
+    if (!res.ok) return;
+    const result = await res.json();
+    if (result.connectionHealth) {
+      _browserConnections[id] = {
+        ..._browserConnections[id], connectionHealth: result.connectionHealth,
+      };
+      renderPlatforms(_connections.filter(c => c.type === 'blog'));
+    }
+    setTimeout(async () => {
+      try {
+        const latest = await fetch(`/api/connections/${id}/browser-connection`);
+        if (!latest.ok) return;
+        _browserConnections[id] = await latest.json();
+        renderPlatforms(_connections.filter(c => c.type === 'blog'));
+      } catch { /* The recurring sync will refresh the card later. */ }
+    }, 15000);
+  } catch { /* Keep the cached state visible while the runner is offline. */ }
 }
 
 function buildStaticConns() {
@@ -408,20 +437,40 @@ function browserPlatformCard(conn) {
   const browserConnection = _browserConnections[id] || { platform: id, status: 'disconnected' };
   const browserStatus = browserConnection.status || 'disconnected';
   const loginPhase = browserConnection.loginPhase || browserStatus;
+  const health = browserConnection.connectionHealth || {};
+  const healthStatus = health.status || (browserStatus === 'connected' ? 'verification_stale' : 'unknown');
   const browserConnected = browserStatus === 'connected';
   const connected = apiConnected || browserConnected;
+  const browserHealthControlsStatus = browserConnected && !apiConnected;
   const finalizing = ['signed_in_pending_save', 'verifying'].includes(loginPhase) && !apiConnected;
   const waiting = browserStatus === 'waiting_for_login' && !apiConnected && !finalizing;
   const failed = browserStatus === 'failed' && !apiConnected;
-  const statusColor = connected ? '#4ade80' : finalizing || waiting ? '#fbbf24' : failed ? '#f87171' : '#5a6080';
-  const statusLabel = connected ? 'Connected' : finalizing ? 'Verifying login' : waiting
+  const unhealthy = browserHealthControlsStatus && ['reauthentication_required', 'unavailable'].includes(healthStatus);
+  const caution = browserHealthControlsStatus && ['verification_stale', 'temporarily_blocked', 'rate_limited', 'unknown'].includes(healthStatus);
+  const statusColor = unhealthy ? '#f87171' : caution ? '#fbbf24' : connected ? '#4ade80' : finalizing || waiting ? '#fbbf24' : failed ? '#f87171' : '#5a6080';
+  const healthLabel = healthStatus === 'reauthentication_required' ? 'Sign-in expired'
+    : healthStatus === 'temporarily_blocked' ? 'Temporarily blocked'
+    : healthStatus === 'rate_limited' ? 'Rate limited'
+    : healthStatus === 'unavailable' ? 'Service unavailable'
+    : healthStatus === 'verification_stale' || healthStatus === 'unknown' ? 'Verification needed'
+    : 'Connected';
+  const statusLabel = connected ? (browserHealthControlsStatus ? healthLabel : 'Connected') : finalizing ? 'Verifying login' : waiting
     ? 'Finish signing in'
     : failed ? 'Login failed' : 'Not connected';
   const tokenMethod = id === 'hashnode' ? 'API token · Hashnode Plus' : 'Integration token';
   const method = apiConnected && browserConnected ? 'Token + browser login' : apiConnected
     ? tokenMethod : browserConnected
     ? 'Browser login · Persistent profile' : '';
-  const helper = connected ? (browserConnected ? 'Browser session verified' : 'Token stored securely')
+  const healthHelper = healthStatus === 'reauthentication_required' ? 'Disconnect and sign in again to resume synchronization.'
+    : healthStatus === 'temporarily_blocked' ? 'BlogHub will retry after the remote challenge clears.'
+    : healthStatus === 'rate_limited' ? 'BlogHub will retry after the platform limit resets.'
+    : healthStatus === 'unavailable' ? 'BlogHub will retry when the platform is available.'
+    : healthStatus === 'verification_stale' || healthStatus === 'unknown' ? 'Saved profile found; awaiting a live remote check.'
+    : 'Browser session verified by a remote operation.';
+  const combinedHelper = healthStatus === 'connected'
+    ? 'API token and browser session are available.'
+    : `API token remains available. Browser: ${healthHelper}`;
+  const helper = connected ? (apiConnected && browserConnected ? combinedHelper : browserConnected ? healthHelper : 'Token stored securely')
     : finalizing ? 'Saving and verifying the browser profile.'
     : waiting ? `${conn.label} will connect automatically after sign-in.`
     : failed ? esc(browserConnection.error || `${conn.label} sign-in was not completed.`)

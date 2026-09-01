@@ -35,6 +35,13 @@ def test_browser_connection_distinguishes_live_login_from_saved_profile(
         "get_browser_login",
         lambda platform, session_id: {
             "status": "running",
+            "connection_health": {
+                "protocol_version": 1,
+                "status": "connected",
+                "reason": "authentication_verified",
+                "source": "live_browser_probe",
+                "authoritative": True,
+            },
             "live_authentication": {
                 "status": "authenticated",
                 "authenticated": True,
@@ -58,6 +65,9 @@ def test_browser_connection_distinguishes_live_login_from_saved_profile(
     assert payload["durableConnection"] == {
         "status": "waiting_for_login", "profileSaved": False,
     }
+    assert payload["connectionHealth"]["status"] == "connected"
+    assert payload["connectionHealth"]["verifiedAt"]
+    assert payload["verificationNeeded"] is False
 
 
 def test_browser_connection_reports_unknown_when_live_probe_is_unavailable(
@@ -82,6 +92,28 @@ def test_browser_connection_reports_unknown_when_live_probe_is_unavailable(
     assert payload["loginPhase"] == "waiting_for_login"
     assert payload["browserSession"]["authenticationStatus"] == "unknown"
     assert payload["browserSession"]["authenticated"] is None
+
+
+def test_stale_connection_health_queues_one_shared_verification(client):
+    store.start_browser_connection(
+        "user_seed", "medium", session_id="pbs_medium",
+        organization_id="o_org", app_url="http://localhost/login",
+        profile_id="bp_medium",
+    )
+    store.update_browser_connection("user_seed", "medium", "connected")
+
+    first = client.post("/api/connections/medium/connection-health/verify")
+    second = client.post("/api/connections/medium/connection-health/verify")
+
+    assert first.status_code == 202
+    assert first.json()["status"] == "verifying"
+    assert first.json()["jobId"]
+    assert second.status_code == 202
+    assert second.json()["status"] == "verifying"
+    assert second.json()["jobId"] is None
+    jobs = store.list_jobs("user_seed", queue="sync")
+    assert len(jobs) == 1
+    assert jobs[0]["payload"]["trigger"] == "health_verification"
 
 
 def test_active_browser_connection_exports_screenshot(client, monkeypatch):

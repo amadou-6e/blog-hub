@@ -216,3 +216,24 @@ class TestSyncSchedules:
         assert response.status_code == 202
         assert response.json() == {"jobs": [], "count": 0}
         assert store.list_jobs("user_seed", queue="sync") == []
+
+    def test_overview_refresh_skips_connection_requiring_authentication(
+        self, client: TestClient,
+    ):
+        store.start_browser_connection(
+            "user_seed", "medium", session_id="pbs_medium",
+            organization_id="o_org", app_url="http://localhost/login",
+            profile_id="bp_shared",
+        )
+        store.update_browser_connection("user_seed", "medium", "connected")
+        store.upsert_connection_health(
+            "user_seed", "medium", "reauthentication_required",
+            reason="remote_authentication_required", source="remote_operation",
+            authoritative=True,
+        )
+
+        response = client.post("/api/jobs/sync-refresh")
+
+        assert response.status_code == 202
+        assert response.json() == {"jobs": [], "count": 0}
+        assert store.list_jobs("user_seed", queue="sync") == []

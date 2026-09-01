@@ -32,6 +32,7 @@ from fastapi.responses import HTMLResponse, Response
 
 import backend.services.cli_runner as runner
 import backend.services.connection_auth as agent_auth
+import backend.services.connection_health as connection_health
 import backend.store as store
 from backend.services.hashnode_sync import (
     sync_hashnode_articles,
@@ -62,6 +63,22 @@ _CLI_IDS = {"anthropic", "openai"}
 _PROVIDER_MAP = {"anthropic": "anthropic", "openai": "openai"}
 _BROWSER_EXTENSION_ID = re.compile(r"^[a-z][a-z0-9_.-]{1,79}$")
 _BROWSER_SYNC_INTERVAL_SECONDS = 60
+
+
+def _public_connection_health(health: dict | None) -> dict | None:
+    if health is None:
+        return None
+    return {
+        "status": health["status"],
+        "reason": health["reason"],
+        "source": health["source"],
+        "authoritative": health["authoritative"],
+        "verifiedAt": health.get("verified_at"),
+        "staleAt": health.get("stale_at"),
+        "nextCheckAt": health.get("next_check_at"),
+        "retryAt": health.get("retry_at"),
+        "diagnostics": health.get("diagnostics") or {},
+    }
 
 
 def _require_browser_extension_id(platform: str) -> None:
@@ -275,8 +292,26 @@ _MOCK_DRAFTS: dict[str, list[dict]] = {
 @router.get("", response_model=ConnectionListResponse)
 def list_connections(request: Request):
     user_id: str = request.state.user_id
+    connections = store.list_connections(user_id)
+    for connection in connections:
+        if connection["id"] not in _BLOG_IDS:
+            continue
+        browser = store.get_browser_connection(user_id, connection["id"])
+        if browser and browser["status"] == "connected":
+            connection["status"] = "connected"
+            connection["connected_at"] = (
+                connection.get("connected_at") or browser.get("verified_at")
+            )
+        health = store.get_connection_health(user_id, connection["id"])
+        connection["connection_health"] = _public_connection_health(health)
+        connection["verification_needed"] = bool(
+            browser
+            and browser["status"] == "connected"
+            and connection_health.needs_user_refresh(health)
+        )
     return ConnectionListResponse(
-        connections=[ConnectionInfo(**c) for c in store.list_connections(user_id)])
+        connections=[ConnectionInfo(**connection) for connection in connections]
+    )
 
 
 @router.get("/browser-extensions")
@@ -551,6 +586,7 @@ def _browser_connection_response(
     platform: str,
     connection: dict | None,
     live_session: dict | None = None,
+    health: dict | None = None,
 ) -> dict:
     if connection is None:
         return {
@@ -561,6 +597,8 @@ def _browser_connection_response(
             "durableConnection": {
                 "status": "disconnected", "profileSaved": False,
             },
+            "connectionHealth": None,
+            "verificationNeeded": False,
         }
     live_authentication = (live_session or {}).get("live_authentication") or {}
     live_authenticated = live_authentication.get("authenticated")
@@ -589,6 +627,11 @@ def _browser_connection_response(
             "status": connection["status"],
             "profileSaved": bool(connection.get("skyvern_profile_id")),
         },
+        "connectionHealth": _public_connection_health(health),
+        "verificationNeeded": (
+            connection["status"] == "connected"
+            and connection_health.needs_user_refresh(health)
+        ),
     }
 
 
@@ -618,9 +661,64 @@ def get_browser_connection(request: Request, conn_id: str):
                     "status": "unknown", "authenticated": None, "url": None,
                 },
             }
+    evidence = (live_session or {}).get("connection_health")
+    if isinstance(evidence, dict):
+        health = connection_health.record_evidence(
+            store, request.state.user_id, conn_id, evidence,
+        )
+    else:
+        health = store.get_connection_health(request.state.user_id, conn_id)
     return _browser_connection_response(
-        conn_id, connection, live_session,
+        conn_id, connection, live_session, health,
     )
+
+
+@router.post("/{conn_id}/connection-health/verify", status_code=202)
+def verify_connection_health(request: Request, conn_id: str):
+    """Queue one shared remote check when cached connection proof is stale."""
+    _require_browser_extension_id(conn_id)
+    user_id = request.state.user_id
+    connection = store.get_browser_connection(user_id, conn_id)
+    if not connection or connection["status"] != "connected":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Connected {conn_id.title()} browser profile required",
+        )
+    health = store.get_connection_health(user_id, conn_id)
+    if not connection_health.needs_user_refresh(health):
+        return {
+            "status": "fresh",
+            "connectionHealth": _public_connection_health(health),
+            "jobId": None,
+        }
+    if not store.claim_connection_health_verification(user_id, conn_id):
+        return {
+            "status": "verifying",
+            "connectionHealth": _public_connection_health(health),
+            "jobId": None,
+        }
+    claimed = store.get_connection_health(user_id, conn_id)
+    try:
+        job = store.create_job(
+            user_id,
+            "sync",
+            None,
+            {"platform": conn_id, "scheduled": False, "trigger": "health_verification"},
+            queue="sync",
+            idempotency_key=(
+                f"connection-health:{conn_id}:{claimed['updated_at']}"
+            ),
+            max_attempts=4,
+            timeout_seconds=900,
+        )
+    except Exception:
+        store.release_connection_health_verification(user_id, conn_id)
+        raise
+    return {
+        "status": "verifying",
+        "connectionHealth": _public_connection_health(claimed),
+        "jobId": job["job_id"],
+    }
 
 
 @router.get("/{conn_id}/browser-connection/screenshot")
@@ -744,6 +842,15 @@ def complete_browser_connection(request: Request, conn_id: str):
         _delete_generated_profile(conn_id, connection, result)
         return _browser_connection_response(conn_id, None)
     if not result.get("authenticated"):
+        connection_health.record_evidence(
+            store, user_id, conn_id,
+            result.get("connection_health") or {
+                "status": "reauthentication_required",
+                "reason": "browser_login_not_completed",
+                "source": "browser_login_completion",
+                "authoritative": True,
+            },
+        )
         failed = store.update_browser_connection(
             user_id, conn_id, "failed",
             profile_id=result.get("profile_id"),
@@ -760,8 +867,19 @@ def complete_browser_connection(request: Request, conn_id: str):
     connected = store.update_browser_connection(
         user_id, conn_id, "connected", profile_id=result["profile_id"]
     )
+    health = store.get_connection_health(user_id, conn_id)
+    if health is None:
+        health = connection_health.record_evidence(
+            store, user_id, conn_id,
+            result.get("connection_health") or {
+                "status": "connected",
+                "reason": "browser_login_completed",
+                "source": "browser_login_completion",
+                "authoritative": False,
+            },
+        )
     _ensure_browser_sync(user_id, conn_id, connection["skyvern_session_id"])
-    return _browser_connection_response(conn_id, connected)
+    return _browser_connection_response(conn_id, connected, health=health)
 
 
 @router.delete("/hashnode/browser-connection")
@@ -772,7 +890,8 @@ def disconnect_hashnode_browser_connection(request: Request):
 @router.delete("/{conn_id}/browser-connection")
 def disconnect_browser_connection(request: Request, conn_id: str):
     _require_browser_extension_id(conn_id)
-    connection = store.get_browser_connection(request.state.user_id, conn_id)
+    user_id = request.state.user_id
+    connection = store.get_browser_connection(user_id, conn_id)
     if (
         connection
         and connection.get("skyvern_session_id")
@@ -791,8 +910,8 @@ def disconnect_browser_connection(request: Request, conn_id: str):
             )
         except runner.RunnerUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-    user_id = request.state.user_id
     store.disconnect_browser_connection(user_id, conn_id)
+    store.delete_connection_health(user_id, conn_id)
     store.delete_sync_schedule(user_id, conn_id)
     return {"platform": conn_id, "status": "disconnected"}
 
@@ -1026,7 +1145,11 @@ def sync_hashnode(request: Request):
                 profile_id=browser_connection["skyvern_profile_id"],
             )
         except runner.RunnerUnavailable as exc:
+            connection_health.record_unavailable(store, user_id, "hashnode")
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        connection_health.record_operation_result(
+            store, user_id, "hashnode", retrieval,
+        )
         return sync_hashnode_browser_records(user_id, retrieval)
 
     token = store.get_connection_token(user_id, "hashnode") or os.environ.get("HASHNODE_PAT")
@@ -1068,7 +1191,9 @@ def sync_medium(request: Request):
             profile_id=browser_connection["skyvern_profile_id"],
         )
     except runner.RunnerUnavailable as exc:
+        connection_health.record_unavailable(store, user_id, "medium")
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    connection_health.record_operation_result(store, user_id, "medium", retrieval)
     return sync_medium_browser_records(user_id, retrieval)
 
 

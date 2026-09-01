@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from backend.schemas.overview import JobResponse
 import backend.store as store
+from backend.services.connection_health import remote_operations_allowed
 from backend.store.job_queue import sync_job_idempotency_key
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
@@ -105,6 +106,10 @@ def refresh_connected_platforms(request: Request):
     jobs = []
     for schedule in schedules:
         platform = schedule["platform"]
+        if not remote_operations_allowed(
+            store.get_connection_health(user_id, platform)
+        ):
+            continue
         job = active_by_platform.get(platform)
         if job is None:
             job = store.create_job(

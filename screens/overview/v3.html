@@ -843,12 +843,27 @@ async function loadOverview() {
     totalArticleCount = articlesResult.total;
     currentPage = pagesToLoad;
 
-    const connected = connectionsPayload.connections.filter(
-      item => ['medium', 'hashnode', 'devto'].includes(item.id) && item.status === 'connected'
+    const blogs = connectionsPayload.connections.filter(
+      item => ['medium', 'hashnode', 'devto'].includes(item.id)
     );
+    const needsAttention = blogs.filter(item =>
+      item.status === 'connected' && ['reauthentication_required', 'temporarily_blocked', 'rate_limited', 'unavailable']
+        .includes(item.connectionHealth?.status)
+    );
+    const checking = blogs.filter(item =>
+      item.status === 'connected' && ['verification_stale', 'unknown']
+        .includes(item.connectionHealth?.status)
+    );
+    const connected = blogs.filter(item =>
+      item.status === 'connected' && !needsAttention.includes(item) && !checking.includes(item)
+    );
+    const summaryParts = [`${connected.length} connected`];
+    if (checking.length) summaryParts.push(`${checking.length} checking`);
+    if (needsAttention.length) summaryParts.push(`${needsAttention.length} needs attention`);
+    const connectionSummary = summaryParts.join(' · ');
     document.getElementById('connected-count').innerHTML = `
-      <span style="width:6px;height:6px;border-radius:50%;background:#4ade80;display:inline-block;"></span>
-      ${connected.length} platforms connected
+      <span style="width:6px;height:6px;border-radius:50%;background:${needsAttention.length || checking.length ? '#fbbf24' : '#4ade80'};display:inline-block;"></span>
+      ${connectionSummary}
     `;
 
     if (hasActiveFilters()) await loadRemainingArticlesForFilters();

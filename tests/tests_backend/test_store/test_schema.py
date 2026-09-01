@@ -43,6 +43,7 @@ def test_fresh_database_has_current_schema_and_seed_user(tmp_path):
             "agent_session_outputs",
             "browser_publish_runs",
             "browser_connections",
+            "connection_health",
             "remote_article_identities",
             "remote_reconciliation_observations",
         } <= tables

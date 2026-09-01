@@ -8,7 +8,7 @@ swagger spec. Internal code uses snake_case attribute names.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -30,6 +30,8 @@ class ConnectionInfo(_CamelModel):
     username: Optional[str] = None
     connected_at: Optional[datetime] = None
     error_message: Optional[str] = None
+    connection_health: Optional[dict[str, Any]] = None
+    verification_needed: bool = False
 
 
 class ConnectionListResponse(BaseModel):

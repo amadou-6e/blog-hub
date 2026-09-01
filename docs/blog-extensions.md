@@ -67,6 +67,49 @@ Operations that can change public content (`update_article`, `publish`,
 An adapter should also verify the resulting remote state before returning
 `success: true`.
 
+## Connection health
+
+Connection health uses a separately versioned protocol. Health protocol `1`
+normalizes every browser platform to these states:
+
+- `connected`
+- `verification_stale`
+- `reauthentication_required`
+- `temporarily_blocked`
+- `rate_limited`
+- `unavailable`
+- `unknown`
+
+`BrowserLoginAdapter.profile_health()` interprets a saved profile as a
+credential hint. Even when an unexpired session cookie exists, BlogHub stores
+that result as `verification_stale` until a live browser probe or remote
+operation succeeds. `BrowserLoginAdapter.live_health()` classifies a running
+login page. Extensions can override either method when their platform needs
+additional page evidence.
+
+`BlogOperationsAdapter.operation_health()` classifies operation results. A
+successful remote operation is authoritative `connected` evidence. Recognized
+authentication, rate-limit, challenge, and availability failures transition to
+their corresponding shared states. Ambiguous failures remain `unknown` and do
+not force reauthentication.
+
+Adapters return only stable reason/source identifiers and bounded diagnostic
+fields. They must never return cookies, tokens, browser storage, raw callback
+URLs, or unredacted page errors. BlogHub validates protocol versions, allowlists
+diagnostic keys, and bounds retry delays before persistence.
+
+Authoritative proof is considered fresh for user-facing surfaces for five
+minutes. Connected blogs are synchronized every minute, which normally renews
+proof sooner; the idle target remains fifteen minutes for deployments with a
+slower sync cadence. Loading Settings queues one leased, deduplicated sync check
+when proof is stale. Reauthentication pauses scheduled remote work until a new
+successful login or operation restores the connection. Temporary blocks,
+limits, and outages retain their schedule and resume after `retry_at`.
+
+The backend exposes normalized state through
+`GET /api/connections/{platform}/browser-connection` and requests a stale check
+through `POST /api/connections/{platform}/connection-health/verify`.
+
 ## Install and enable
 
 Extensions are executable Python code. Only an administrator may install them.
@@ -125,6 +168,5 @@ pinned by the deployment configuration or image. A future protocol change must
 ship a migration guide and may keep an older loader only when its security and
 result semantics remain unambiguous.
 
-Hashnode is the first operations adapter. Medium is the second login adapter and
-currently declares no browser operations; #43 and #67 can add those operations
-without adding platform-specific runner routes.
+Hashnode and Medium both implement login and browser-operation adapters without
+adding platform-specific runner routes.
