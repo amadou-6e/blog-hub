@@ -221,7 +221,7 @@ class TestSyncSchedules:
             "user_seed", "sync", None, {"platform": "hashnode"}, queue="sync",
         )
         store._backend.claim_job("test-worker", queues=("sync",))
-        store.defer_job(
+        store._backend.defer_job(
             parked["job_id"], "test-worker", "operator action required",
         )
 
