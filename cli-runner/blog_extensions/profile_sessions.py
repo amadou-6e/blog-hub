@@ -51,10 +51,10 @@ def _clear_cookie_snapshot(
 def clear_profile_session(
     profile_dir: Path, session_domains: tuple[str, ...],
 ) -> int:
-    if not profile_dir.is_dir():
-        raise ValueError("Browser profile is unavailable")
     if not session_domains:
         raise ValueError("Browser extension does not declare a session domain")
+    if not profile_dir.is_dir():
+        return 0
 
     from patchright.sync_api import sync_playwright
 

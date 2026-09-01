@@ -369,6 +369,11 @@ class ArticleStore(Protocol):
     ) -> dict | None:
         ...
 
+    def clear_browser_profile_reference(
+        self, user_id: str, platform: str,
+    ) -> None:
+        ...
+
     def start_browser_connection(self, user_id: str, platform: str, **kwargs: Any) -> dict:
         ...
 

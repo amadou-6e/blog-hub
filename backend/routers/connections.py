@@ -669,7 +669,17 @@ def start_browser_connection(request: Request, conn_id: str):
     try:
         session = runner.start_browser_login(conn_id, reusable_profile_id)
     except runner.RunnerUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        if reusable_profile is None:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        store.clear_browser_profile_reference(
+            user_id, reusable_profile["platform"],
+        )
+        reusable_profile = None
+        reusable_profile_id = None
+        try:
+            session = runner.start_browser_login(conn_id, None)
+        except runner.RunnerUnavailable as retry_exc:
+            raise HTTPException(status_code=503, detail=str(retry_exc)) from retry_exc
     if (
         reusable_profile
         and session["organization_id"] != reusable_profile["organization_id"]
@@ -678,9 +688,14 @@ def start_browser_connection(request: Request, conn_id: str):
             runner.cancel_browser_login(conn_id, session["session_id"])
         except runner.RunnerUnavailable:
             pass
-        raise HTTPException(
-            status_code=502, detail="Browser profile ownership could not be verified"
+        store.clear_browser_profile_reference(
+            user_id, reusable_profile["platform"],
         )
+        reusable_profile_id = None
+        try:
+            session = runner.start_browser_login(conn_id, None)
+        except runner.RunnerUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
     connection = store.start_browser_connection(
         user_id,
         conn_id,

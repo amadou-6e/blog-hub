@@ -276,7 +276,7 @@ def test_canceled_login_discards_a_late_completion_result(client, monkeypatch):
     assert store.get_browser_connection("user_seed", "medium") is None
 
 
-def test_hashnode_browser_retry_reuses_provider_session_profile(client, monkeypatch):
+def test_hashnode_browser_retry_ignores_failed_profile(client, monkeypatch):
     store.start_browser_connection(
         "user_seed", "hashnode", session_id="pbs_previous",
         organization_id="o_org", app_url="http://localhost/previous",
@@ -297,9 +297,9 @@ def test_hashnode_browser_retry_reuses_provider_session_profile(client, monkeypa
     started = client.post("/api/connections/hashnode/browser-connection")
 
     assert started.status_code == 201
-    assert reused == [("hashnode", "bp_identity")]
+    assert reused == [("hashnode", None)]
     persisted = store.get_browser_connection("user_seed", "hashnode")
-    assert persisted["skyvern_profile_id"] == "bp_identity"
+    assert persisted["skyvern_profile_id"] is None
 
 
 def test_hashnode_browser_disconnect_preserves_shared_profile(client, monkeypatch):
@@ -342,7 +342,7 @@ def test_browser_disconnect_keeps_schedule_for_connected_api(client, monkeypatch
     )
     store.upsert_sync_schedule("user_seed", "hashnode", 900)
     monkeypatch.setattr(
-        connections_router.runner, "delete_browser_profile", lambda *_args: None,
+        connections_router.runner, "logout_browser_profile", lambda *_args: None,
     )
 
     response = client.delete("/api/connections/hashnode/browser-connection")
@@ -421,9 +421,70 @@ def test_reusable_identity_profile_is_scoped_to_its_user():
 
     assert store.get_reusable_browser_profile("user_seed", "medium") is None
     assert store.get_reusable_browser_profile(other["id"], "medium") == {
+        "platform": "hashnode",
         "organization_id": "o_other",
         "profile_id": "bp_other",
     }
+
+
+def test_stale_reusable_profile_falls_back_to_a_fresh_profile(client, monkeypatch):
+    store.start_browser_connection(
+        "user_seed", "hashnode", session_id="pbs_old",
+        organization_id="o_old", app_url="http://localhost/old",
+        profile_id="bp_stale",
+    )
+    store.update_browser_connection("user_seed", "hashnode", "connected")
+    attempts = []
+
+    def start(_platform, profile_id):
+        attempts.append(profile_id)
+        if profile_id:
+            raise runner.RunnerUnavailable("profile unavailable")
+        return {
+            "session_id": "pbs_fresh",
+            "organization_id": "o_new",
+            "app_url": "http://localhost/fresh",
+        }
+
+    monkeypatch.setattr(connections_router.runner, "start_browser_login", start)
+
+    response = client.post("/api/connections/medium/browser-connection")
+
+    assert response.status_code == 201
+    assert attempts == ["bp_stale", None]
+    hashnode = store.get_browser_connection("user_seed", "hashnode")
+    assert hashnode["skyvern_profile_id"] is None
+
+
+def test_reusable_profile_ownership_mismatch_restarts_fresh(client, monkeypatch):
+    store.start_browser_connection(
+        "user_seed", "hashnode", session_id="pbs_old",
+        organization_id="o_old", app_url="http://localhost/old",
+        profile_id="bp_stale",
+    )
+    store.update_browser_connection("user_seed", "hashnode", "connected")
+    attempts = []
+
+    def start(_platform, profile_id):
+        attempts.append(profile_id)
+        return {
+            "session_id": f"pbs_{len(attempts)}",
+            "organization_id": "o_new",
+            "app_url": "http://localhost/login",
+        }
+
+    canceled = []
+    monkeypatch.setattr(connections_router.runner, "start_browser_login", start)
+    monkeypatch.setattr(
+        connections_router.runner, "cancel_browser_login",
+        lambda platform, session_id: canceled.append((platform, session_id)),
+    )
+
+    response = client.post("/api/connections/medium/browser-connection")
+
+    assert response.status_code == 201
+    assert attempts == ["bp_stale", None]
+    assert canceled == [("medium", "pbs_1")]
 
 
 def test_late_completion_does_not_delete_a_reused_profile(client, monkeypatch):
