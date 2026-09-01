@@ -11,6 +11,8 @@ from fastapi import HTTPException
 RUNNER = Path(__file__).resolve().parents[2] / "cli-runner"
 if str(RUNNER) not in sys.path:
     sys.path.insert(0, str(RUNNER))
+from blog_extensions.profile_sessions import clear_profile_session
+
 spec = importlib.util.spec_from_file_location(
     "blog_extension_runner_under_test", RUNNER / "main.py"
 )
@@ -108,6 +110,35 @@ def test_browser_login_screenshot_returns_non_cacheable_png(monkeypatch):
     assert response.body == screenshot
     assert response.media_type == "image/png"
     assert response.headers["cache-control"] == "no-store"
+
+
+def test_profile_logout_uses_extension_session_domains(tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(runner_main, "profile_directory", lambda *_args: tmp_path)
+    monkeypatch.setattr(
+        runner_main,
+        "clear_profile_session",
+        lambda profile_dir, domains: seen.update(
+            profile_dir=profile_dir, domains=domains
+        ) or 2,
+    )
+
+    result = runner_main.browser_profile_logout(
+        "medium",
+        "bp_profile",
+        runner_main.BrowserProfileSessionRequest(organization_id="o_org"),
+    )
+
+    assert result == {"status": "disconnected", "cookies_removed": 2}
+    assert seen == {"profile_dir": tmp_path, "domains": ("medium.com",)}
+
+
+def test_profile_logout_treats_missing_local_profile_as_already_logged_out(
+    tmp_path,
+):
+    assert clear_profile_session(
+        tmp_path / "missing-profile", ("medium.com",),
+    ) == 0
 
 
 def test_public_operation_requires_explicit_approval():

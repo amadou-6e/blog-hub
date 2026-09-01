@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 from pathlib import Path
 import sys
 import time
@@ -20,6 +21,11 @@ from blog_extensions import (
 )
 from blog_extensions.registry import ExtensionConfigurationError
 from blog_extensions.testing import assert_extension_contract, article_from_fixture
+from blog_extensions.profile_sessions import (
+    _clear_cookie_snapshot,
+    clear_context_session,
+    domain_matches,
+)
 
 
 FIXTURE = Path(__file__).with_name("fixtures") / "blog_extension_article.json"
@@ -73,6 +79,47 @@ def test_hashnode_live_session_recognizes_secure_authjs_cookie():
     }]})
 
     assert result["authenticated"] is True
+
+
+def test_targeted_logout_preserves_secondary_identity_cookies():
+    class Context:
+        def __init__(self):
+            self.cleared = []
+
+        def cookies(self):
+            return [
+                {"name": "sid", "domain": ".medium.com", "path": "/"},
+                {"name": "accounts", "domain": ".google.com", "path": "/"},
+                {"name": "session", "domain": ".github.com", "path": "/"},
+            ]
+
+        def clear_cookies(self, **kwargs):
+            self.cleared.append(kwargs)
+
+    context = Context()
+
+    assert clear_context_session(context, ("medium.com",)) == 1
+    assert context.cleared == [{
+        "name": "sid", "domain": ".medium.com", "path": "/",
+    }]
+    assert domain_matches("sub.medium.com", ("medium.com",))
+    assert not domain_matches("notmedium.com", ("medium.com",))
+
+
+def test_targeted_logout_filters_only_platform_cookies_from_snapshot(tmp_path):
+    snapshot = tmp_path / ".skyvern_session_cookies.json"
+    snapshot.write_text(json.dumps([
+        {"name": "sid", "domain": ".medium.com"},
+        {"name": "accounts", "domain": ".google.com"},
+        {"name": "session", "domain": ".github.com"},
+    ]), encoding="utf-8")
+
+    _clear_cookie_snapshot(tmp_path, ("medium.com",))
+
+    assert json.loads(snapshot.read_text(encoding="utf-8")) == [
+        {"name": "accounts", "domain": ".google.com"},
+        {"name": "session", "domain": ".github.com"},
+    ]
 
 
 def test_fixture_loader_builds_normalized_article_input():

@@ -36,8 +36,8 @@ def _post(path: str, **json_kwargs) -> dict:
             resp = c.post(path, json=json_kwargs or None)
             resp.raise_for_status()
             return resp.json()
-    except httpx.ConnectError:
-        raise RunnerUnavailable("CLI runner not reachable at " + CLI_RUNNER_URL)
+    except httpx.TransportError as exc:
+        raise RunnerUnavailable(f"CLI runner transport failed: {exc}") from exc
     except httpx.HTTPStatusError as exc:
         raise RunnerUnavailable(f"Runner error {exc.response.status_code}: {exc.response.text}")
 
@@ -48,8 +48,8 @@ def _get(path: str) -> dict:
             resp = c.get(path)
             resp.raise_for_status()
             return resp.json()
-    except httpx.ConnectError:
-        raise RunnerUnavailable("CLI runner not reachable at " + CLI_RUNNER_URL)
+    except httpx.TransportError as exc:
+        raise RunnerUnavailable(f"CLI runner transport failed: {exc}") from exc
     except httpx.HTTPStatusError as exc:
         raise RunnerUnavailable(f"Runner error {exc.response.status_code}: {exc.response.text}")
 
@@ -456,6 +456,15 @@ def delete_browser_profile(platform: str, profile_id: str) -> None:
             response.raise_for_status()
     except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
         raise RunnerUnavailable(f"Browser login runner unavailable: {exc}") from exc
+
+
+def logout_browser_profile(
+    platform: str, organization_id: str, profile_id: str,
+) -> None:
+    _post(
+        f"/browser/{platform}/profiles/{profile_id}/logout",
+        organization_id=organization_id,
+    )
 
 
 def delete_hashnode_browser_profile(profile_id: str) -> None:
