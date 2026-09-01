@@ -327,6 +327,9 @@ class ArticleStore(Protocol):
     ) -> list[dict]:
         ...
 
+    def has_connected_sync_connection(self, user_id: str, platform: str) -> bool:
+        ...
+
     def enqueue_due_sync_jobs(self) -> int:
         ...
 

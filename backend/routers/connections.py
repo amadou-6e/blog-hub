@@ -82,18 +82,11 @@ def _delete_generated_profile(
 
 
 def _ensure_browser_sync(user_id: str, platform: str, session_id: str) -> None:
-    schedules = store.list_sync_schedules(user_id)
-    schedule = next(
-        (item for item in schedules if item["platform"] == platform), None
+    if platform not in {"hashnode", "medium"}:
+        return
+    store.ensure_connected_sync_schedules(
+        user_id, interval_seconds=_BROWSER_SYNC_INTERVAL_SECONDS,
     )
-    if (
-        schedule is None
-        or not schedule["enabled"]
-        or schedule["interval_seconds"] != _BROWSER_SYNC_INTERVAL_SECONDS
-    ):
-        store.upsert_sync_schedule(
-            user_id, platform, _BROWSER_SYNC_INTERVAL_SECONDS, enabled=True
-        )
     store.create_job(
         user_id,
         "sync",
@@ -793,7 +786,8 @@ def disconnect_browser_connection(request: Request, conn_id: str):
             raise HTTPException(status_code=503, detail=str(exc)) from exc
     user_id = request.state.user_id
     store.disconnect_browser_connection(user_id, conn_id)
-    store.delete_sync_schedule(user_id, conn_id)
+    if not store.has_connected_sync_connection(user_id, conn_id):
+        store.delete_sync_schedule(user_id, conn_id)
     return {"platform": conn_id, "status": "disconnected"}
 
 

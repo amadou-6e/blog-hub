@@ -599,7 +599,7 @@ class DurableJobStoreMixin:
     def ensure_connected_sync_schedules(
         self, user_id: str | None = None, *, interval_seconds: int = 60,
     ) -> list[dict]:
-        """Repair the internal schedule for every connected sync-capable blog."""
+        """Create missing schedules without changing user schedule preferences."""
         interval = max(60, int(interval_seconds))
         user_clause = " AND user_id=?" if user_id is not None else ""
         parameters = (user_id,) if user_id is not None else ()
@@ -624,10 +624,7 @@ class DurableJobStoreMixin:
                            (id, user_id, platform, interval_seconds, enabled,
                             next_run_at, created_at, updated_at)
                            VALUES (?,?,?,?,1,?,?,?)
-                           ON CONFLICT(user_id, platform) DO UPDATE SET
-                             interval_seconds=excluded.interval_seconds,
-                             enabled=1,
-                             updated_at=excluded.updated_at""",
+                           ON CONFLICT(user_id, platform) DO NOTHING""",
                         (
                             f"sync_{row['user_id']}_{row['platform']}",
                             row["user_id"], row["platform"], interval,
@@ -644,6 +641,21 @@ class DurableJobStoreMixin:
             _schedule_row(row) for row in schedule_rows
             if (row["user_id"], row["platform"]) in connected_keys
         ]
+
+    def has_connected_sync_connection(self, user_id: str, platform: str) -> bool:
+        if platform not in {"hashnode", "medium"}:
+            return False
+        with self._workspace_lock.acquire():
+            row = self._con.execute(
+                """SELECT 1 FROM browser_connections
+                   WHERE user_id=? AND platform=? AND status='connected'
+                   UNION ALL
+                   SELECT 1 FROM connections
+                   WHERE user_id=? AND platform=? AND status='connected'
+                   LIMIT 1""",
+                (user_id, platform, user_id, platform),
+            ).fetchone()
+        return row is not None
 
     def list_sync_schedules(self, user_id: str) -> list[dict]:
         rows = self._con.execute(
