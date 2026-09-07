@@ -58,7 +58,9 @@ from blog_extensions import (
     get_registry,
 )
 from blog_extensions.runtime import execute_operation
-from blog_extensions.profile_sessions import clear_profile_session
+from blog_extensions.profile_sessions import (
+    ProfileBusy, clear_profile_session, local_profile_lease,
+)
 from skyvern_browser import (
     SkyvernUnavailable,
     capture_browser_screenshot,
@@ -371,6 +373,8 @@ def browser_operation(platform: str, operation: str, req: BrowserOperationReques
             operation=capability,
             request=_extension_operation_request(req),
         )
+    except ProfileBusy:
+        return {"status": "busy", "success": False, "error": "Browser profile is busy"}
     except OperationNotSupported as exc:
         raise HTTPException(409, str(exc)) from exc
     except Exception as exc:
@@ -409,6 +413,8 @@ def browser_login(platform: str, req: Optional[HashnodeBrowserLoginRequest] = No
             req.profile_id if req else None,
             login_url=extension.login.login_url,
         )
+    except ProfileBusy:
+        return {"status": "busy", "success": False, "error": "Browser profile is busy"}
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except SkyvernUnavailable as exc:
@@ -484,6 +490,8 @@ def browser_login_cancel(platform: str, session_id: str):
     try:
         close_browser_login(session_id)
         return {"status": "canceled"}
+    except ProfileBusy:
+        return {"status": "busy", "success": False, "error": "Browser profile is busy"}
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except SkyvernUnavailable as exc:
@@ -510,14 +518,16 @@ def browser_login_complete(
             profile_id=req.profile_id,
             organization_id=req.organization_id,
         )
-        verification = extension.login.verify_profile(Path(profile["profile_dir"]))
+        with local_profile_lease(Path(profile["profile_dir"])):
+            verification = extension.login.verify_profile(Path(profile["profile_dir"]))
+            health = extension.login.profile_health(Path(profile["profile_dir"]))
         return {
             **verification,
             **profile,
-            "connection_health": extension.login.profile_health(
-                Path(profile["profile_dir"])
-            ),
+            "connection_health": health,
         }
+    except ProfileBusy:
+        return {"status": "busy", "success": False, "error": "Browser profile is busy"}
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except SkyvernUnavailable as exc:
@@ -537,6 +547,8 @@ def browser_profile_delete(platform: str, profile_id: str):
     try:
         delete_browser_profile(profile_id)
         return {"status": "disconnected"}
+    except ProfileBusy:
+        return {"status": "busy", "success": False, "error": "Browser profile is busy"}
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except SkyvernUnavailable as exc:
@@ -554,6 +566,8 @@ def browser_profile_logout(
             profile_dir, extension.login.session_domains()
         )
         return {"status": "disconnected", "cookies_removed": removed}
+    except ProfileBusy:
+        return {"status": "busy", "success": False, "error": "Browser profile is busy"}
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     except Exception as exc:

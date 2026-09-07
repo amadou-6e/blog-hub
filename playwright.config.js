@@ -1,13 +1,11 @@
 // @ts-check
 const { defineConfig, devices } = require('@playwright/test');
-const path = require('path');
-const fs = require('fs');
+const { pythonExecutable } = require('./scripts/run-isolated-validation.cjs');
 
-const windowsPython = path.join(__dirname, '.venv', 'Scripts', 'python.exe');
-const PYTHON = process.env.PYTHON ||
-  (process.platform === 'win32' && fs.existsSync(windowsPython) ? windowsPython : 'python');
+const PYTHON = pythonExecutable();
 const PYTHON_COMMAND = process.env.BLOGHUB_PLAYWRIGHT_PYTHON_COMMAND || `"${PYTHON}"`;
 const BASE_URL = process.env.BLOGHUB_TEST_URL || 'http://localhost:8000';
+const isolated = process.env.BLOGHUB_VALIDATION === 'true';
 
 module.exports = defineConfig({
   testDir: './tests',
@@ -15,7 +13,7 @@ module.exports = defineConfig({
   outputDir: './tests/results/artifacts',
   timeout: 15_000,
   retries: 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: process.env.CI || isolated ? 1 : undefined,
   reporter: process.env.CI
     ? [['list'], ['html', { outputFolder: 'tests/results/html', open: 'never' }], ['json', { outputFile: 'tests/results/report.json' }]]
     : [['list'], ['json', { outputFile: 'tests/results/report.json' }]],
@@ -24,7 +22,7 @@ module.exports = defineConfig({
     command: `${PYTHON_COMMAND} -m uvicorn backend.main:app --port 8000 --no-access-log`,
     cwd: __dirname,
     url: 'http://localhost:8000/health',
-    reuseExistingServer: true,
+    reuseExistingServer: !isolated && !process.env.CI,
     env: {
       ...process.env,
       BLOGHUB_DB_PATH: process.env.BLOGHUB_DB_PATH || ':memory:',
@@ -36,7 +34,8 @@ module.exports = defineConfig({
 
   use: {
     baseURL: BASE_URL,
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
   },
 
   projects: [

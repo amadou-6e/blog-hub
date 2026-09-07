@@ -115,6 +115,7 @@ export interface components {
             auth_method: "token" | "oauth_or_token";
             /** @enum {string} */
             status: "disconnected" | "connected" | "error";
+            apiConnected?: boolean;
             /** @example @acisse */
             username?: string | null;
             /** Format: date-time */

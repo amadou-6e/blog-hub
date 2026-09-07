@@ -272,7 +272,8 @@ def test_verifying_browser_login_can_be_canceled_immediately(client, monkeypatch
     assert response.json()["status"] == "disconnected"
     persisted = store.get_browser_connection("user_seed", "medium")
     assert persisted["status"] == "disconnected"
-    assert persisted["skyvern_session_id"] is None
+    assert persisted["skyvern_session_id"] == "pbs_verifying"
+    assert persisted["error"] == connections_router._CANCELED_VERIFICATION
     assert canceled == []
 
 
@@ -308,7 +309,7 @@ def test_canceled_login_discards_a_late_completion_result(client, monkeypatch):
     assert store.get_browser_connection("user_seed", "medium") is None
 
 
-def test_hashnode_browser_retry_ignores_failed_profile(client, monkeypatch):
+def test_hashnode_browser_retry_preserves_failed_profile(client, monkeypatch):
     store.start_browser_connection(
         "user_seed", "hashnode", session_id="pbs_previous",
         organization_id="o_org", app_url="http://localhost/previous",
@@ -316,6 +317,11 @@ def test_hashnode_browser_retry_ignores_failed_profile(client, monkeypatch):
     )
     store.update_browser_connection("user_seed", "hashnode", "failed")
     reused = []
+    canceled = []
+    monkeypatch.setattr(
+        connections_router.runner, "cancel_browser_login",
+        lambda platform, session_id: canceled.append((platform, session_id)),
+    )
     monkeypatch.setattr(
         connections_router.runner,
         "start_browser_login",
@@ -329,9 +335,10 @@ def test_hashnode_browser_retry_ignores_failed_profile(client, monkeypatch):
     started = client.post("/api/connections/hashnode/browser-connection")
 
     assert started.status_code == 201
-    assert reused == [("hashnode", None)]
+    assert canceled == [("hashnode", "pbs_previous")]
+    assert reused == [("hashnode", "bp_identity")]
     persisted = store.get_browser_connection("user_seed", "hashnode")
-    assert persisted["skyvern_profile_id"] is None
+    assert persisted["skyvern_profile_id"] == "bp_identity"
 
 
 def test_hashnode_browser_disconnect_preserves_shared_profile(client, monkeypatch):
@@ -459,7 +466,7 @@ def test_reusable_identity_profile_is_scoped_to_its_user():
     }
 
 
-def test_stale_reusable_profile_falls_back_to_a_fresh_profile(client, monkeypatch):
+def test_generic_profile_error_preserves_profile_without_fallback(client, monkeypatch):
     store.start_browser_connection(
         "user_seed", "hashnode", session_id="pbs_old",
         organization_id="o_old", app_url="http://localhost/old",
@@ -482,10 +489,10 @@ def test_stale_reusable_profile_falls_back_to_a_fresh_profile(client, monkeypatc
 
     response = client.post("/api/connections/medium/browser-connection")
 
-    assert response.status_code == 201
-    assert attempts == ["bp_stale", None]
+    assert response.status_code == 503
+    assert attempts == ["bp_stale"]
     hashnode = store.get_browser_connection("user_seed", "hashnode")
-    assert hashnode["skyvern_profile_id"] is None
+    assert hashnode["skyvern_profile_id"] == "bp_stale"
 
 
 def test_reusable_profile_ownership_mismatch_restarts_fresh(client, monkeypatch):

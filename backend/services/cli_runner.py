@@ -7,6 +7,8 @@ backend that communicates with it.
 
 When the runner is unreachable, all functions raise RunnerUnavailable.
 Callers convert that to an appropriate HTTP response (503).
+RunnerBusy is its contention subtype; callers must handle it first (409)
+without treating it as lost authentication or a stale browser profile.
 """
 from __future__ import annotations
 
@@ -24,6 +26,28 @@ class RunnerUnavailable(Exception):
     """Raised when the CLI runner is not reachable or returns an unexpected error."""
 
 
+class RunnerBusy(RunnerUnavailable):
+    """The runner is reachable, but the shared browser profile is leased."""
+
+    def __init__(self):
+        super().__init__("Browser profile is busy")
+
+
+def _response_json(response: httpx.Response) -> dict:
+    # Busy can arrive as a normal 200/201 payload or an explicit HTTP conflict.
+    try:
+        result = response.json() if response.content else {}
+    except ValueError as exc:
+        response.raise_for_status()
+        raise RunnerUnavailable("Runner returned invalid JSON") from exc
+    if isinstance(result, dict) and result.get("status") == "busy":
+        raise RunnerBusy()
+    response.raise_for_status()
+    if not isinstance(result, dict):
+        raise RunnerUnavailable("Runner returned an invalid response")
+    return result
+
+
 # ── Internal helper ────────────────────────────────────────────────────────────
 
 def _client() -> httpx.Client:
@@ -34,8 +58,7 @@ def _post(path: str, **json_kwargs) -> dict:
     try:
         with _client() as c:
             resp = c.post(path, json=json_kwargs or None)
-            resp.raise_for_status()
-            return resp.json()
+            return _response_json(resp)
     except httpx.TransportError as exc:
         raise RunnerUnavailable(f"CLI runner transport failed: {exc}") from exc
     except httpx.HTTPStatusError as exc:
@@ -46,8 +69,7 @@ def _get(path: str) -> dict:
     try:
         with _client() as c:
             resp = c.get(path)
-            resp.raise_for_status()
-            return resp.json()
+            return _response_json(resp)
     except httpx.TransportError as exc:
         raise RunnerUnavailable(f"CLI runner transport failed: {exc}") from exc
     except httpx.HTTPStatusError as exc:
@@ -192,9 +214,8 @@ def browser_operation(
                 f"/browser/{platform}/operations/{operation}", json=payload,
                 timeout=httpx.Timeout(connect=3, read=300, write=30, pool=5),
             )
-            response.raise_for_status()
-            return response.json()
-    except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
+            return _response_json(response)
+    except (httpx.TransportError, httpx.HTTPStatusError) as exc:
         raise RunnerUnavailable(f"Browser runner unavailable: {exc}") from exc
 
 
@@ -237,6 +258,8 @@ def medium_browser_articles(*, organization_id: str, profile_id: str) -> dict:
                 profile_id=profile_id,
                 remote_id=remote_id,
             )
+        except RunnerBusy:
+            raise
         except RunnerUnavailable:
             errors.append({
                 "source": "article_detail",
@@ -366,15 +389,16 @@ def capture_browser_screenshot(platform: str, session_id: str) -> bytes:
                 f"/browser/{platform}/login/{session_id}/screenshot",
                 timeout=httpx.Timeout(connect=3, read=30, write=10, pool=5),
             )
-            response.raise_for_status()
             if response.headers.get("content-type", "").split(";", 1)[0] != "image/png":
+                _response_json(response)
                 raise RunnerUnavailable("Browser runner returned an invalid screenshot")
+            response.raise_for_status()
             if len(response.content) > 12 * 1024 * 1024:
                 raise RunnerUnavailable("Browser runner screenshot exceeds the size limit")
             return response.content
     except RunnerUnavailable:
         raise
-    except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
+    except (httpx.TransportError, httpx.HTTPStatusError) as exc:
         raise RunnerUnavailable(f"Browser login runner unavailable: {exc}") from exc
 
 
@@ -390,8 +414,8 @@ def cancel_browser_login(platform: str, session_id: str) -> None:
     try:
         with _client() as client:
             response = client.delete(f"/browser/{platform}/login/{session_id}")
-            response.raise_for_status()
-    except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
+            _response_json(response)
+    except (httpx.TransportError, httpx.HTTPStatusError) as exc:
         raise RunnerUnavailable(f"Browser login runner unavailable: {exc}") from exc
 
 
@@ -422,9 +446,8 @@ def complete_browser_login(
                 },
                 timeout=httpx.Timeout(connect=3, read=180, write=10, pool=5),
             )
-            response.raise_for_status()
-            return response.json()
-    except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
+            return _response_json(response)
+    except (httpx.TransportError, httpx.HTTPStatusError) as exc:
         raise RunnerUnavailable(f"Browser login runner unavailable: {exc}") from exc
 
 
@@ -464,8 +487,8 @@ def delete_browser_profile(platform: str, profile_id: str) -> None:
     try:
         with _client() as client:
             response = client.delete(f"/browser/{platform}/profiles/{profile_id}")
-            response.raise_for_status()
-    except (httpx.ConnectError, httpx.HTTPStatusError, httpx.ReadTimeout) as exc:
+            _response_json(response)
+    except (httpx.TransportError, httpx.HTTPStatusError) as exc:
         raise RunnerUnavailable(f"Browser login runner unavailable: {exc}") from exc
 
 

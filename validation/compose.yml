@@ -1,0 +1,157 @@
+x-runtime: &runtime
+  image: bloghub-validation-runtime:123
+  build:
+    context: ..
+    dockerfile: validation/Dockerfile
+  init: true
+  networks: [validation]
+  volumes:
+    - certs:/certs:ro
+
+services:
+  certificates:
+    <<: *runtime
+    command: python validation/certificates.py
+    volumes: [certs:/certs]
+  fixture:
+    <<: *runtime
+    command: uvicorn validation.fixture:app --host 0.0.0.0 --port 443 --ssl-keyfile /certs/tls.key --ssl-certfile /certs/tls.crt
+    networks:
+      validation:
+        aliases: [fixture.test, identity.test]
+    depends_on:
+      certificates: {condition: service_completed_successfully}
+  postgres:
+    image: postgres@sha256:727876d274666da0b92a445390ba093c84b8e9f8343e1c53cd4e9a7ab2d85310
+    networks: [validation]
+    environment:
+      POSTGRES_USER: skyvern
+      POSTGRES_PASSWORD: validation-only
+      POSTGRES_DB: skyvern
+    volumes: [postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U skyvern]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  skyvern:
+    image: bloghub-validation-skyvern:123
+    build:
+      context: ..
+      dockerfile: validation/Dockerfile.skyvern
+    init: true
+    shm_size: 512mb
+    networks: [validation]
+    environment: &skyvern-env
+      DATABASE_STRING: postgresql+psycopg://skyvern:validation-only@postgres:5432/skyvern
+      SKYVERN_SCHEMA_WORKAROUND_DATABASE_URL: postgresql://skyvern:validation-only@postgres:5432/skyvern
+      BROWSER_STREAMING_MODE: cdp
+      BROWSER_TYPE: chromium-headful
+      CHROME_EXECUTABLE_PATH: /root/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome
+      BROWSER_SESSION_BASE_PATH: /data/browser_sessions
+      ALLOWED_HOSTS: '["fixture.test","identity.test"]'
+      ALLOWED_ORIGINS: '["http://skyvern-ui:8080","http://backend:8000"]'
+      ENABLE_OPENAI: 'false'
+      ENABLE_ANTHROPIC: 'false'
+      ENABLE_GEMINI: 'false'
+      SKYVERN_TELEMETRY: 'false'
+      ENABLE_LOG_ARTIFACTS: 'false'
+    volumes:
+      - certs:/certs:ro
+      - profiles:/data/browser_sessions
+      - config:/app/.skyvern
+    depends_on:
+      certificates: {condition: service_completed_successfully}
+      postgres: {condition: service_healthy}
+      fixture: {condition: service_started}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/heartbeat',timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+  provision:
+    image: bloghub-validation-skyvern:123
+    networks: [validation]
+    environment: *skyvern-env
+    entrypoint: [python, /validation/provision.py]
+    volumes: [config:/app/.skyvern]
+    depends_on:
+      skyvern: {condition: service_healthy}
+  runner:
+    <<: *runtime
+    command: uvicorn main:app --app-dir /app/cli-runner --host 0.0.0.0 --port 8001
+    shm_size: 512mb
+    environment:
+      BLOGHUB_ENABLED_EXTENSIONS: validation.medium
+      BLOGHUB_EXTENSION_PATHS: /app/validation/extension
+      SKYVERN_URL: http://skyvern:8000
+      SKYVERN_PUBLIC_APP_URL: http://skyvern-ui:8080
+      SKYVERN_CREDENTIALS_FILE: /run/skyvern/credentials.toml
+      SKYVERN_BROWSER_SESSION_ROOT: /data/skyvern-browser-sessions
+    volumes:
+      - certs:/certs:ro
+      - config:/run/skyvern:ro
+      - profiles:/data/skyvern-browser-sessions
+    depends_on:
+      provision: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  backend:
+    <<: *runtime
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000
+    environment:
+      CLI_RUNNER_URL: http://runner:8001
+      BLOGHUB_DISABLE_AUTH: 'true'
+      BLOGHUB_DB_PATH: /data/bloghub.db
+      BLOGHUB_BLOBS_DIR: /data/blobs
+      BLOGHUB_CREDENTIAL_KEY_FILE: /data/keys.json
+    volumes: [data:/data]
+    depends_on:
+      runner: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  skyvern-ui:
+    image: bloghub-validation-ui:123
+    build:
+      context: ../experiments/skyvern
+      dockerfile: Dockerfile.ui
+    networks: [validation]
+    environment:
+      VITE_BROWSER_STREAMING_MODE: cdp
+      VITE_API_BASE_URL: http://skyvern:8000/api/v1
+      VITE_WSS_BASE_URL: ws://skyvern:8000/api/v1
+      VITE_ARTIFACT_API_BASE_URL: http://skyvern-ui:9090
+    volumes: [config:/app/.skyvern:ro]
+    depends_on:
+      provision: {condition: service_completed_successfully}
+  tests:
+    <<: *runtime
+    command: python -m pytest -o addopts= -q validation/test_login.py --junitxml=/results/login.xml
+    shm_size: 512mb
+    environment:
+      SKYVERN_URL: http://skyvern:8000
+      SKYVERN_CREDENTIALS_FILE: /run/skyvern/credentials.toml
+    volumes:
+      - certs:/certs:ro
+      - config:/run/skyvern:ro
+      - results:/results
+    depends_on:
+      backend: {condition: service_healthy}
+      skyvern-ui: {condition: service_started}
+
+networks:
+  validation:
+    internal: true
+volumes:
+  certs:
+  profiles:
+  config:
+  data:
+  postgres:
+  results:

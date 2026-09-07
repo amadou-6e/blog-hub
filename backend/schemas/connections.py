@@ -27,6 +27,7 @@ class ConnectionInfo(_CamelModel):
     type: str  # "blog" | "ai"
     auth_method: str  # "token" | "oauth_or_token"
     status: str  # "disconnected" | "connected" | "error"
+    api_connected: bool = False
     username: Optional[str] = None
     connected_at: Optional[datetime] = None
     error_message: Optional[str] = None

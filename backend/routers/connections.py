@@ -63,6 +63,14 @@ _CLI_IDS = {"anthropic", "openai"}
 _PROVIDER_MAP = {"anthropic": "anthropic", "openai": "openai"}
 _BROWSER_EXTENSION_ID = re.compile(r"^[a-z][a-z0-9_.-]{1,79}$")
 _BROWSER_SYNC_INTERVAL_SECONDS = 60
+_CANCELED_VERIFICATION = "browser_verification_cleanup_pending"
+
+
+def _raise_if_runner_busy(exc: Exception) -> None:
+    if isinstance(exc, runner.RunnerBusy):
+        raise HTTPException(status_code=409, detail={
+            "status": "busy", "success": False, "error": "Browser profile is busy",
+        }) from exc
 
 
 def _public_connection_health(health: dict | None) -> dict | None:
@@ -94,8 +102,31 @@ def _delete_generated_profile(
         return
     try:
         runner.delete_browser_profile(platform, profile_id)
-    except runner.RunnerUnavailable:
-        pass
+    except runner.RunnerUnavailable as exc:
+        _raise_if_runner_busy(exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def _finish_canceled_verification(
+    user_id: str, platform: str, connection: dict, result: dict,
+) -> None:
+    """The completion response arrives after the runner releases its profile lease."""
+    if connection.get("skyvern_profile_id"):
+        try:
+            runner.logout_browser_profile(
+                platform, connection["skyvern_organization_id"],
+                connection["skyvern_profile_id"],
+            )
+        except runner.RunnerUnavailable as exc:
+            _raise_if_runner_busy(exc)
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+    _delete_generated_profile(platform, connection, result)
+    current = store.get_browser_connection(user_id, platform)
+    if (
+        current and current.get("error") == _CANCELED_VERIFICATION
+        and current.get("skyvern_session_id") == connection["skyvern_session_id"]
+    ):
+        store.disconnect_browser_connection(user_id, platform)
 
 
 def _ensure_browser_sync(user_id: str, platform: str, session_id: str) -> None:
@@ -289,6 +320,7 @@ def list_connections(request: Request):
     for connection in connections:
         if connection["id"] not in _BLOG_IDS:
             continue
+        connection["api_connected"] = connection["status"] == "connected"
         browser = store.get_browser_connection(user_id, connection["id"])
         if browser and browser["status"] == "connected":
             connection["status"] = "connected"
@@ -312,6 +344,7 @@ def list_browser_extensions():
     try:
         return {"extensions": runner.browser_extensions()}
     except runner.RunnerUnavailable as exc:
+        _raise_if_runner_busy(exc)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
@@ -412,14 +445,15 @@ def disconnect(request: Request, conn_id: str):
     user_id: str = request.state.user_id
     if conn_id not in _VALID_IDS:
         raise HTTPException(status_code=404, detail=f"Unknown connection: {conn_id}")
-    store.delete_connection_auth_flows(user_id, conn_id)
-    store.delete_connection(user_id, conn_id)
     if conn_id in _CLI_IDS:
         # Best-effort: tell the runner to logout; ignore errors
         try:
             runner.logout(conn_id)
-        except runner.RunnerUnavailable:
+        except runner.RunnerUnavailable as exc:
+            _raise_if_runner_busy(exc)
             pass
+    store.delete_connection_auth_flows(user_id, conn_id)
+    store.delete_connection(user_id, conn_id)
     return {"status": "disconnected"}
 
 
@@ -443,6 +477,7 @@ def test_connection(request: Request, conn_id: str):
         try:
             result = runner.login_status(conn_id)
         except runner.RunnerUnavailable as exc:
+            _raise_if_runner_busy(exc)
             return {"ok": False, "detail": f"Runner unavailable: {exc}"}
         return {
             "ok": result["status"] == "connected",
@@ -548,7 +583,8 @@ def _medium_oauth_start() -> OAuthStartResponse:
 def _cli_oauth_start(conn_id: str) -> OAuthStartResponse:
     try:
         result = runner.login(conn_id)
-    except runner.RunnerUnavailable:
+    except runner.RunnerUnavailable as exc:
+        _raise_if_runner_busy(exc)
         return OAuthStartResponse(available=False)
 
     if not result.get("available"):
@@ -609,13 +645,16 @@ def _browser_connection_response(
             else None
         ),
         "verifiedAt": connection.get("verified_at"),
-        "error": connection.get("error"),
+        "error": (
+            None if connection.get("error") == _CANCELED_VERIFICATION
+            else connection.get("error")
+        ),
         "browserSession": ({
             "status": (live_session or {}).get("status", "unknown"),
             "authenticationStatus": live_authentication.get("status", "unknown"),
             "authenticated": live_authenticated,
             "currentUrl": live_authentication.get("url"),
-        } if connection.get("skyvern_session_id") else None),
+        } if connection.get("skyvern_session_id") and connection["status"] != "disconnected" else None),
         "durableConnection": {
             "status": connection["status"],
             "profileSaved": bool(connection.get("skyvern_profile_id")),
@@ -647,7 +686,8 @@ def get_browser_connection(request: Request, conn_id: str):
             live_session = runner.get_browser_login(
                 conn_id, connection["skyvern_session_id"]
             )
-        except runner.RunnerUnavailable:
+        except runner.RunnerUnavailable as exc:
+            _raise_if_runner_busy(exc)
             live_session = {
                 "status": "unknown",
                 "live_authentication": {
@@ -732,6 +772,7 @@ def export_browser_connection_screenshot(request: Request, conn_id: str):
             conn_id, connection["skyvern_session_id"]
         )
     except runner.RunnerUnavailable as exc:
+        _raise_if_runner_busy(exc)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return Response(
         content=screenshot,
@@ -755,45 +796,66 @@ def start_browser_connection(request: Request, conn_id: str):
     _require_browser_extension_id(conn_id)
     user_id = request.state.user_id
     previous = store.get_browser_connection(user_id, conn_id)
-    if previous and previous.get("skyvern_session_id") and previous["status"] == "waiting_for_login":
+    if previous and previous.get("error") == _CANCELED_VERIFICATION:
+        try:
+            old_session = runner.get_browser_login(conn_id, previous["skyvern_session_id"])
+        except runner.RunnerUnavailable as exc:
+            _raise_if_runner_busy(exc)
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        if old_session.get("status") not in {"closed", "completed"}:
+            _raise_if_runner_busy(runner.RunnerBusy())
+        # A closed Skyvern session may still have an in-flight local verifier.
+        # Logout must acquire the runner's exclusive lease before clearing state.
+        _finish_canceled_verification(user_id, conn_id, previous, {})
+        previous = store.get_browser_connection(user_id, conn_id)
+    if previous and previous["status"] == "verifying":
+        _raise_if_runner_busy(runner.RunnerBusy())
+    if (
+        previous and previous.get("skyvern_session_id")
+        and previous["status"] in {"waiting_for_login", "failed"}
+    ):
         try:
             runner.cancel_browser_login(conn_id, previous["skyvern_session_id"])
-        except runner.RunnerUnavailable:
-            pass
-    reusable_profile = store.get_reusable_browser_profile(user_id, conn_id)
+        except runner.RunnerUnavailable as exc:
+            _raise_if_runner_busy(exc)
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+    # A failed or interrupted login can still own a valid persisted profile.
+    reusable_profile = (
+        {
+            "platform": conn_id,
+            "profile_id": previous["skyvern_profile_id"],
+            "organization_id": previous["skyvern_organization_id"],
+        }
+        if previous and previous.get("skyvern_profile_id")
+        else store.get_reusable_browser_profile(user_id, conn_id)
+    )
     reusable_profile_id = (
         reusable_profile.get("profile_id") if reusable_profile else None
     )
     try:
         session = runner.start_browser_login(conn_id, reusable_profile_id)
     except runner.RunnerUnavailable as exc:
-        if reusable_profile is None:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        store.clear_browser_profile_reference(
-            user_id, reusable_profile["platform"],
-        )
-        reusable_profile = None
-        reusable_profile_id = None
-        try:
-            session = runner.start_browser_login(conn_id, None)
-        except runner.RunnerUnavailable as retry_exc:
-            raise HTTPException(status_code=503, detail=str(retry_exc)) from retry_exc
+        _raise_if_runner_busy(exc)
+        # Transport and generic runner errors are not proof of a stale profile.
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     if (
         reusable_profile
         and session["organization_id"] != reusable_profile["organization_id"]
     ):
         try:
             runner.cancel_browser_login(conn_id, session["session_id"])
-        except runner.RunnerUnavailable:
-            pass
-        store.clear_browser_profile_reference(
-            user_id, reusable_profile["platform"],
-        )
+        except runner.RunnerUnavailable as exc:
+            _raise_if_runner_busy(exc)
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         reusable_profile_id = None
         try:
             session = runner.start_browser_login(conn_id, None)
         except runner.RunnerUnavailable as exc:
+            _raise_if_runner_busy(exc)
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        store.clear_browser_profile_reference(
+            user_id, reusable_profile["platform"],
+        )
     connection = store.start_browser_connection(
         user_id,
         conn_id,
@@ -835,11 +897,25 @@ def complete_browser_connection(request: Request, conn_id: str):
     except runner.RunnerUnavailable as exc:
         current = store.get_browser_connection(user_id, conn_id)
         if (
+            current and current.get("error") == _CANCELED_VERIFICATION
+            and current.get("skyvern_session_id") == connection["skyvern_session_id"]
+        ):
+            _finish_canceled_verification(user_id, conn_id, connection, {})
+            return _browser_connection_response(
+                conn_id, store.get_browser_connection(user_id, conn_id),
+            )
+        if (
             current
             and current.get("skyvern_session_id") == connection["skyvern_session_id"]
             and current["status"] == "verifying"
         ):
-            store.update_browser_connection(user_id, conn_id, "failed", error=str(exc))
+            if isinstance(exc, runner.RunnerBusy):
+                store.update_browser_connection(
+                    user_id, conn_id, "waiting_for_login", error=connection.get("error"),
+                )
+            else:
+                store.update_browser_connection(user_id, conn_id, "failed", error=str(exc))
+        _raise_if_runner_busy(exc)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     current = store.get_browser_connection(user_id, conn_id)
     if (
@@ -847,7 +923,16 @@ def complete_browser_connection(request: Request, conn_id: str):
         or current.get("skyvern_session_id") != connection["skyvern_session_id"]
         or current["status"] != "verifying"
     ):
-        _delete_generated_profile(conn_id, connection, result)
+        if (
+            current and current.get("error") == _CANCELED_VERIFICATION
+            and current.get("skyvern_session_id") == connection["skyvern_session_id"]
+        ):
+            _finish_canceled_verification(user_id, conn_id, connection, result)
+            return _browser_connection_response(
+                conn_id, store.get_browser_connection(user_id, conn_id),
+            )
+        else:
+            _delete_generated_profile(conn_id, connection, result)
         return _browser_connection_response(conn_id, None)
     if not result.get("authenticated"):
         connection_health.record_evidence(
@@ -900,6 +985,19 @@ def disconnect_browser_connection(request: Request, conn_id: str):
     _require_browser_extension_id(conn_id)
     user_id = request.state.user_id
     connection = store.get_browser_connection(user_id, conn_id)
+    if connection and (
+        connection["status"] == "verifying"
+        or connection.get("error") == _CANCELED_VERIFICATION
+    ):
+        # Invalidate before returning. Keep the attempt id until its late result
+        # has been cleaned up; reconnect must not race that targeted logout.
+        store.update_browser_connection(
+            user_id, conn_id, "disconnected", error=_CANCELED_VERIFICATION,
+        )
+        if not store.has_connected_sync_connection(user_id, conn_id):
+            store.delete_connection_health(user_id, conn_id)
+            store.delete_sync_schedule(user_id, conn_id)
+        return {"platform": conn_id, "status": "disconnected"}
     if (
         connection
         and connection.get("skyvern_session_id")
@@ -908,6 +1006,7 @@ def disconnect_browser_connection(request: Request, conn_id: str):
         try:
             runner.cancel_browser_login(conn_id, connection["skyvern_session_id"])
         except runner.RunnerUnavailable as exc:
+            _raise_if_runner_busy(exc)
             raise HTTPException(status_code=503, detail=str(exc)) from exc
     if connection and connection.get("skyvern_profile_id"):
         try:
@@ -917,6 +1016,7 @@ def disconnect_browser_connection(request: Request, conn_id: str):
                 connection["skyvern_profile_id"],
             )
         except runner.RunnerUnavailable as exc:
+            _raise_if_runner_busy(exc)
             raise HTTPException(status_code=503, detail=str(exc)) from exc
     store.disconnect_browser_connection(user_id, conn_id)
     if not store.has_connected_sync_connection(user_id, conn_id):
@@ -975,6 +1075,7 @@ def cli_login_status(request: Request, conn_id: str):
     try:
         result = runner.login_status(conn_id)
     except runner.RunnerUnavailable as exc:
+        _raise_if_runner_busy(exc)
         return {"status": "error", "errorMessage": f"Runner unavailable: {exc}"}
 
     status = result.get("status", "error")
@@ -1154,6 +1255,7 @@ def sync_hashnode(request: Request):
                 profile_id=browser_connection["skyvern_profile_id"],
             )
         except runner.RunnerUnavailable as exc:
+            _raise_if_runner_busy(exc)
             connection_health.record_unavailable(store, user_id, "hashnode")
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         connection_health.record_operation_result(
@@ -1200,6 +1302,7 @@ def sync_medium(request: Request):
             profile_id=browser_connection["skyvern_profile_id"],
         )
     except runner.RunnerUnavailable as exc:
+        _raise_if_runner_busy(exc)
         connection_health.record_unavailable(store, user_id, "medium")
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     connection_health.record_operation_result(store, user_id, "medium", retrieval)
@@ -1262,6 +1365,7 @@ def list_drafts(
         raise HTTPException(status_code=502,
                             detail=f"Platform API error: {exc.response.status_code}")
     except Exception as exc:
+        _raise_if_runner_busy(exc)
         raise HTTPException(status_code=502, detail=f"Platform API error: {exc}")
 
     total = len(all_drafts)
@@ -1351,6 +1455,7 @@ def get_draft(request: Request, conn_id: str, draft_id: str):
         raise HTTPException(status_code=502,
                             detail=f"Platform API error: {exc.response.status_code}")
     except Exception as exc:
+        _raise_if_runner_busy(exc)
         raise HTTPException(status_code=502, detail=f"Platform API error: {exc}")
 
 

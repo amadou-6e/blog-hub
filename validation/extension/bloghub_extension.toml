@@ -1,0 +1,11 @@
+[extension]
+protocol_version = 1
+id = "validation.medium"
+platform = "medium"
+display_name = "Local validation blog"
+version = "1.0.0"
+capabilities = ["list_articles"]
+
+[entrypoints]
+login = "validation_medium:LoginAdapter"
+operations = "validation_medium:OperationsAdapter"

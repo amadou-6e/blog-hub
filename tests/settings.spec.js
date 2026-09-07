@@ -150,6 +150,36 @@ test.describe('Settings screen', () => {
     await expect(card.getByRole('button')).toHaveText(['Disconnect']);
   });
 
+  for (const apiConnected of [false, true]) {
+    test(`[contract] browser card preserves token distinction after reload: ${apiConnected}`, async ({ page }) => {
+      await page.route('**/api/connections', route => route.fulfill({ json: {
+        connections: [{
+          id: 'medium', label: 'Medium', type: 'blog', authMethod: 'oauth_or_token',
+          status: 'connected', apiConnected,
+        }],
+      } }));
+      await page.route('**/api/connections/medium/browser-connection', route => route.fulfill({ json: {
+        platform: 'medium', status: 'connected',
+        connectionHealth: {
+          status: 'reauthentication_required', authoritative: true,
+          reason: 'session_expired', source: 'remote_operation',
+        },
+      } }));
+      for (let reload = 0; reload < 2; reload++) {
+        await page.reload();
+        const card = page.locator('#plat-card-medium');
+        if (apiConnected) {
+          await expect(card.getByText('Token + browser login', { exact: true })).toBeVisible();
+          await expect(card.getByText('Connected', { exact: true })).toBeVisible();
+        } else {
+          await expect(card.getByText('Browser login · Persistent profile', { exact: true })).toBeVisible();
+          await expect(card.getByText('Sign-in expired', { exact: true })).toBeVisible();
+          await expect(card.getByText('Token + browser login', { exact: true })).toHaveCount(0);
+        }
+      }
+    });
+  }
+
   test('Medium live login finalizes automatically while the tab stays open', async ({ page, context }) => {
     let completeRequests = 0;
     let started = false;

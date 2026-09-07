@@ -114,7 +114,7 @@ services:
       SKYVERN_SCHEMA_WORKAROUND_DATABASE_URL: postgresql://skyvern:skyvern@skyvern-postgres:5432/skyvern
       BROWSER_STREAMING_MODE: cdp
       BROWSER_TYPE: chromium-headful
-      CHROME_EXECUTABLE_PATH: /root/.cache/ms-playwright/chromium-1134/chrome-linux/chrome
+      CHROME_EXECUTABLE_PATH: /root/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome
       DOWNLOAD_PATH: /data/downloads
       BROWSER_SESSION_BASE_PATH: /data/browser_sessions
       CREDENTIAL_VAULT_TYPE: skyvern

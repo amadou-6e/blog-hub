@@ -5,6 +5,9 @@ RUN pip install --no-cache-dir --no-deps --require-hashes \
       -r /tmp/patchright-requirements.txt \
     && rm /tmp/patchright-requirements.txt
 
+# Profile readers and writers must use the same Chromium cookie database format.
+RUN patchright install --with-deps chromium
+
 COPY patch_skyvern_for_patchright.py /tmp/patch_skyvern_for_patchright.py
 RUN python /tmp/patch_skyvern_for_patchright.py \
     && rm /tmp/patch_skyvern_for_patchright.py \
