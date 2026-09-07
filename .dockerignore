@@ -2,6 +2,9 @@
 .github
 .pytest_cache
 .venv
+.env
+.env.*
+specs
 __pycache__
 *.pyc
 data

@@ -1,0 +1,12 @@
+FROM public.ecr.aws/skyvern/skyvern@sha256:18defe240c49c79c749c57f7e9008b1a169aa34193b267002c7e5ee437e28887
+RUN apt-get update && apt-get install -y --no-install-recommends libnss3-tools && rm -rf /var/lib/apt/lists/*
+COPY experiments/skyvern/patchright-requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --no-deps --require-hashes -r /tmp/requirements.txt
+RUN patchright install --with-deps chromium
+COPY experiments/skyvern/patch_skyvern_for_patchright.py /tmp/patch.py
+RUN python /tmp/patch.py && python -m compileall -q /app/skyvern
+COPY experiments/skyvern/entrypoint.sh /experiment/entrypoint.sh
+COPY experiments/skyvern/skyvern_1_0_50_schema_workaround.py /experiment/skyvern_1_0_50_schema_workaround.py
+COPY validation /validation
+ENTRYPOINT ["sh", "/validation/trust.sh"]
+CMD ["sh", "/experiment/entrypoint.sh"]

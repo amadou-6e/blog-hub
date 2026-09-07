@@ -4,25 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BlogHub — Settings</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            surface: '#0f1117', panel: '#181c27', border: '#252a38',
-            'border-hi': '#3a3f52', muted: '#5a6080', text: '#c9cfe0',
-            bright: '#e8eaf2', accent: '#6366f1',
-          },
-          fontFamily: {
-            sans: ['Inter', 'system-ui', 'sans-serif'],
-            mono: ['JetBrains Mono', 'monospace'],
-          }
-        }
-      }
-    }
-  </script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/screens/settings/assets/settings.css" />
   <style>
     body { background: #0f1117; color: #c9cfe0; }
 
@@ -433,7 +415,7 @@ function browserPlatformCard(conn) {
   const id = conn.id;
   const meta = CONN_META[id] || {};
   const ic = ICON_STYLE[id] || { color: '#5a6080', letter: '?' };
-  const apiConnected = conn.status === 'connected';
+  const apiConnected = conn.apiConnected === true;
   const browserConnection = _browserConnections[id] || { platform: id, status: 'disconnected' };
   const browserStatus = browserConnection.status || 'disconnected';
   const loginPhase = browserConnection.loginPhase || browserStatus;

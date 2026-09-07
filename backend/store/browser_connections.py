@@ -29,25 +29,28 @@ def _browser_connection_row(row) -> dict:
 
 class BrowserConnectionStoreMixin:
     def get_browser_connection(self, user_id: str, platform: str) -> dict | None:
-        row = self._con.execute(
-            "SELECT * FROM browser_connections WHERE user_id=? AND platform=?",
-            (user_id, platform),
-        ).fetchone()
+        # Shared-connection reads must keep execute and fetch under the writer lock.
+        with self._workspace_lock.acquire():
+            row = self._con.execute(
+                "SELECT * FROM browser_connections WHERE user_id=? AND platform=?",
+                (user_id, platform),
+            ).fetchone()
         return _browser_connection_row(row) if row else None
 
     def get_reusable_browser_profile(
         self, user_id: str, platform: str,
     ) -> dict | None:
-        row = self._con.execute(
-            """SELECT platform, skyvern_organization_id, skyvern_profile_id
-               FROM browser_connections
-               WHERE user_id=? AND skyvern_profile_id IS NOT NULL
-                 AND (status='connected' OR (platform=? AND status='disconnected'))
-               ORDER BY CASE WHEN platform=? THEN 0 ELSE 1 END,
-                        updated_at DESC
-               LIMIT 1""",
-            (user_id, platform, platform),
-        ).fetchone()
+        with self._workspace_lock.acquire():
+            row = self._con.execute(
+                """SELECT platform, skyvern_organization_id, skyvern_profile_id
+                   FROM browser_connections
+                   WHERE user_id=? AND skyvern_profile_id IS NOT NULL
+                     AND (status='connected' OR (platform=? AND status='disconnected'))
+                   ORDER BY CASE WHEN platform=? THEN 0 ELSE 1 END,
+                            updated_at DESC
+                   LIMIT 1""",
+                (user_id, platform, platform),
+            ).fetchone()
         if row is None:
             return None
         return {

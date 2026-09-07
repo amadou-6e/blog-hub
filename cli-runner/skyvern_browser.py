@@ -10,9 +10,13 @@ import re
 import secrets
 import struct
 import tomllib
+from contextlib import nullcontext
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
+from blog_extensions.profile_sessions import (
+    persist_profile_lease, profile_lease,
+)
 from websockets.exceptions import WebSocketException
 from websockets.sync.client import connect as websocket_connect
 
@@ -126,11 +130,17 @@ def start_browser_login(
     }
     if profile_id:
         payload["browser_profile_id"] = profile_id
-    session = _request("POST", "/v1/browser_sessions", payload)
-    session_id = session.get("browser_session_id", "")
-    organization_id = session.get("organization_id", "")
-    if not _SESSION_ID.fullmatch(session_id) or not _ORG_ID.fullmatch(organization_id):
-        raise SkyvernUnavailable("Skyvern returned invalid browser identifiers")
+    lease = profile_lease(SKYVERN_BROWSER_SESSION_ROOT, profile_id) if profile_id else nullcontext()
+    with lease as marker:
+        if marker is not None:
+            persist_profile_lease(marker, None)
+        session = _request("POST", "/v1/browser_sessions", payload)
+        session_id = session.get("browser_session_id", "")
+        organization_id = session.get("organization_id", "")
+        if not _SESSION_ID.fullmatch(session_id) or not _ORG_ID.fullmatch(organization_id):
+            raise SkyvernUnavailable("Skyvern returned invalid browser identifiers")
+        if marker is not None:
+            persist_profile_lease(marker, session_id)
     return {
         "session_id": session_id,
         "organization_id": organization_id,
@@ -294,6 +304,15 @@ def close_browser_login(session_id: str) -> None:
     if not _SESSION_ID.fullmatch(session_id):
         raise ValueError("Invalid Skyvern session id")
     _request("POST", f"/v1/browser_sessions/{session_id}/close")
+    # Only a successful close releases ownership. Failed closes retain the marker.
+    for marker in (SKYVERN_BROWSER_SESSION_ROOT / ".profile-leases").glob("*.json"):
+        try:
+            owner = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(owner, dict) and owner.get("session_id") == session_id:
+            with profile_lease(SKYVERN_BROWSER_SESSION_ROOT, marker.stem, session_id=session_id):
+                marker.unlink(missing_ok=True)
 
 
 def close_hashnode_login(session_id: str) -> None:
@@ -375,7 +394,8 @@ def finish_medium_login(
 def delete_browser_profile(profile_id: str) -> None:
     if not _PROFILE_ID.fullmatch(profile_id):
         raise ValueError("Invalid Skyvern profile id")
-    _request("DELETE", f"/v1/browser_profiles/{profile_id}")
+    with profile_lease(SKYVERN_BROWSER_SESSION_ROOT, profile_id):
+        _request("DELETE", f"/v1/browser_profiles/{profile_id}")
 
 
 def delete_hashnode_profile(profile_id: str) -> None:

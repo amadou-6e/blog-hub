@@ -21,3 +21,9 @@ Playwright/browser coverage is tracked separately in issue #56. Those tests
 run in the `Playwright gate` job with `BLOGHUB_DISABLE_AUTH=true` and fixture
 state from the in-memory store. Live provider browser login is tagged `@live`
 and remains opt-in through `BLOGHUB_LIVE_BROWSER_LOGIN=1`.
+
+The separate [local login validation gate](local-validation.md) runs on relevant
+PR paths and manual dispatch. It exercises real Skyvern against isolated HTTPS
+blog/identity fixtures, including persisted-profile and service-restart checks,
+without external credentials. Artifacts contain sanitized reports/metadata and
+allowlisted fixture screenshots, never credential-bearing Playwright traces.

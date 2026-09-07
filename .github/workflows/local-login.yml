@@ -1,0 +1,63 @@
+name: Local login validation
+
+on:
+  pull_request:
+    paths:
+      - "validation/**"
+      - "scripts/run-login-validation.py"
+      - ".github/workflows/local-login.yml"
+      - "cli-runner/*browser*.py"
+      - "cli-runner/main.py"
+      - "cli-runner/blog_extensions/**"
+      - "cli-runner/requirements.txt"
+      - "screens/settings/**"
+      - "settings/**"
+      - "backend/routers/connections.py"
+      - "backend/schemas/connections.py"
+      - "contracts/settings.ts"
+      - "tests/settings.spec.js"
+      - "backend/services/*connection*"
+      - "backend/services/*browser*"
+      - "backend/services/medium_sync.py"
+      - "backend/services/cli_runner.py"
+      - "backend/store/**"
+      - "tests/tests_backend/test_*.py"
+      - "experiments/skyvern/**"
+      - "**/*compose*.yml"
+      - "**/*compose*.yaml"
+      - ".dockerignore"
+      - "requirements.txt"
+      - "backend/requirements.txt"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: local-login-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  local-login:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Build and run isolated login validation
+        run: python scripts/run-login-validation.py
+
+      - name: Upload sanitized login results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: local-login-${{ github.run_id }}-${{ github.run_attempt }}
+          path: tests/results/local-login
+          if-no-files-found: warn
+          retention-days: 7

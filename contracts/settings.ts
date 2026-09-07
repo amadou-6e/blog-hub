@@ -69,6 +69,7 @@ export interface ConnectionInfo {
     label: string;
     type: ConnectionType;
     status: ConnectionStatus;
+    apiConnected?: boolean;
     username: string | null;   // email or handle when connected
     authMethod: 'token' | 'oauth_or_token';
     connectedAt: string | null; // ISO-8601
